@@ -1,0 +1,125 @@
+use std::{collections::HashMap, sync::Arc, time::Duration};
+
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
+use tokio::time::{Instant, Interval, MissedTickBehavior};
+
+use crate::{
+    app::{App, AppEvent},
+    cli::CliRunner,
+    provider::{ProviderAction, ProviderDiscovery, ProviderId, ProviderWorkspace},
+};
+
+/// The cadence for refreshing the Active Workspace.
+pub const REFRESH_INTERVAL: Duration = Duration::from_secs(2);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ShellControl {
+    Continue,
+    Quit,
+}
+
+pub fn handle_key(app: &mut App, key: KeyEvent) -> (ShellControl, Vec<ProviderAction>) {
+    if key.kind != KeyEventKind::Press {
+        return (ShellControl::Continue, Vec::new());
+    }
+    match key.code {
+        KeyCode::Char('q') | KeyCode::Esc => (ShellControl::Quit, Vec::new()),
+        KeyCode::Char('j') | KeyCode::Down => (
+            ShellControl::Continue,
+            app.update(AppEvent::SelectNextResource),
+        ),
+        KeyCode::Char('k') | KeyCode::Up => (
+            ShellControl::Continue,
+            app.update(AppEvent::SelectPreviousResource),
+        ),
+        KeyCode::Char('r') => (ShellControl::Continue, app.update(AppEvent::ManualRefresh)),
+        KeyCode::Char(']') => (
+            ShellControl::Continue,
+            app.update(AppEvent::SelectNextProvider),
+        ),
+        KeyCode::Char('[') => (
+            ShellControl::Continue,
+            app.update(AppEvent::SelectPreviousProvider),
+        ),
+        _ => (ShellControl::Continue, Vec::new()),
+    }
+}
+
+/// A refresh clock that skips missed ticks instead of queuing a backlog.
+pub struct RefreshTimer {
+    interval: Interval,
+}
+
+impl Default for RefreshTimer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RefreshTimer {
+    pub fn new() -> Self {
+        // Skip the immediate first tick: provider discovery already triggers an
+        // initial refresh (see `App::handle_provider_discovered`), so ticking
+        // right away here would just duplicate it.
+        let mut interval =
+            tokio::time::interval_at(Instant::now() + REFRESH_INTERVAL, REFRESH_INTERVAL);
+        interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        Self { interval }
+    }
+
+    pub async fn tick(&mut self) {
+        self.interval.tick().await;
+    }
+}
+
+/// Executes provider actions without giving background work access to `App`.
+pub struct ProviderRuntime {
+    workspaces: HashMap<ProviderId, Arc<dyn ProviderWorkspace>>,
+    cli: Arc<dyn CliRunner>,
+}
+
+impl ProviderRuntime {
+    pub fn new(
+        workspaces: impl IntoIterator<Item = Arc<dyn ProviderWorkspace>>,
+        cli: Arc<dyn CliRunner>,
+    ) -> Self {
+        Self {
+            workspaces: workspaces
+                .into_iter()
+                .map(|workspace| (workspace.id(), workspace))
+                .collect(),
+            cli,
+        }
+    }
+
+    /// Discovers installed providers through their provider-specific CLI logic.
+    pub async fn discover(&self) -> Vec<ProviderDiscovery> {
+        let mut discovered = Vec::new();
+        for workspace in self.workspaces.values() {
+            if let Some(provider) = workspace.discover(self.cli.as_ref()).await {
+                discovered.push(provider);
+            }
+        }
+        discovered
+    }
+
+    /// Starts an action in the background and sends its result back as an event.
+    pub fn dispatch(
+        &self,
+        action: ProviderAction,
+        events: tokio::sync::mpsc::UnboundedSender<AppEvent>,
+    ) {
+        match action {
+            ProviderAction::RefreshWorkspace(request) => {
+                let Some(workspace) = self.workspaces.get(&request.provider_id).cloned() else {
+                    return;
+                };
+                let cli = Arc::clone(&self.cli);
+                tokio::spawn(async move {
+                    let result = workspace.refresh(cli.as_ref()).await;
+                    let _ = events.send(AppEvent::RefreshCompleted { request, result });
+                });
+            }
+        }
+    }
+}
