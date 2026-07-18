@@ -35,11 +35,11 @@ fn fixture_discovery() -> ProviderDiscovery {
 #[test]
 fn first_available_provider_becomes_the_active_workspace() {
     let mut app = App::new();
-    assert_eq!(app.state().active_workspace, None);
+    assert_eq!(app.state().active_provider, None);
 
     app.update(AppEvent::ProviderDiscovered(docker_discovery()));
 
-    assert_eq!(app.state().active_workspace, Some(0));
+    assert_eq!(app.state().active_provider, Some(0));
 }
 
 struct DelayedCli {

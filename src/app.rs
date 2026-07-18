@@ -44,10 +44,11 @@ pub struct ProviderState {
 #[derive(Default)]
 pub struct AppState {
     pub providers: Vec<ProviderState>,
-    /// The single Provider Workspace currently visible and being refreshed.
+    /// Index into `providers` of the currently active provider — the one
+    /// whose Provider Workspace is visible and being refreshed.
     ///
     /// `None` represents startup before any installed provider is discovered.
-    pub active_workspace: Option<usize>,
+    pub active_provider: Option<usize>,
 }
 
 pub struct App {
@@ -88,7 +89,7 @@ impl App {
         match event {
             AppEvent::ProviderDiscovered(discovery) => self.handle_provider_discovered(discovery),
             AppEvent::ManualRefresh | AppEvent::RefreshTimerElapsed => {
-                self.refresh_active_workspace()
+                self.refresh_active_provider()
             }
             AppEvent::SelectNextResource => {
                 self.move_resource_selection(1);
@@ -113,8 +114,8 @@ impl App {
             target_environment,
             error,
         } = discovery;
-        let activates_workspace = self.state.active_workspace.is_none();
-        let should_refresh_active_workspace = activates_workspace && error.is_none();
+        let activates_provider = self.state.active_provider.is_none();
+        let should_refresh_active_provider = activates_provider && error.is_none();
         let initial_workspace_state = match error {
             Some(error) => WorkspaceState::Error(error),
             None => WorkspaceState::Loading,
@@ -126,11 +127,11 @@ impl App {
             workspace: initial_workspace_state,
             selected_resource: None,
         });
-        if activates_workspace {
-            self.state.active_workspace = Some(self.state.providers.len() - 1);
+        if activates_provider {
+            self.state.active_provider = Some(self.state.providers.len() - 1);
         }
 
-        if should_refresh_active_workspace {
+        if should_refresh_active_provider {
             vec![ProviderAction::RefreshWorkspace(self.start_refresh(id))]
         } else {
             Vec::new()
@@ -182,14 +183,14 @@ impl App {
         ProviderRequest { id, provider_id }
     }
 
-    fn refresh_active_workspace(&mut self) -> Vec<ProviderAction> {
-        let Some(active_workspace) = self.state.active_workspace else {
+    fn refresh_active_provider(&mut self) -> Vec<ProviderAction> {
+        let Some(active_provider) = self.state.active_provider else {
             return Vec::new();
         };
         let Some(provider_id) = self
             .state
             .providers
-            .get(active_workspace)
+            .get(active_provider)
             .map(|provider| provider.id.clone())
         else {
             return Vec::new();
@@ -203,10 +204,10 @@ impl App {
     }
 
     fn move_resource_selection(&mut self, delta: isize) {
-        let Some(active_workspace) = self.state.active_workspace else {
+        let Some(active_provider) = self.state.active_provider else {
             return;
         };
-        let Some(provider) = self.state.providers.get_mut(active_workspace) else {
+        let Some(provider) = self.state.providers.get_mut(active_provider) else {
             return;
         };
         let WorkspaceState::Ready(snapshot) = &provider.workspace else {
@@ -232,14 +233,14 @@ impl App {
         if provider_count < 2 {
             return Vec::new();
         }
-        let Some(active_workspace) = self.state.active_workspace else {
+        let Some(active_provider) = self.state.active_provider else {
             return Vec::new();
         };
-        let previous_provider = self.state.providers[active_workspace].id.clone();
+        let previous_provider = self.state.providers[active_provider].id.clone();
         self.pending
             .retain(|_, provider_id| provider_id != &previous_provider);
-        self.state.active_workspace =
-            Some((active_workspace as isize + delta).rem_euclid(provider_count as isize) as usize);
-        self.refresh_active_workspace()
+        self.state.active_provider =
+            Some((active_provider as isize + delta).rem_euclid(provider_count as isize) as usize);
+        self.refresh_active_provider()
     }
 }

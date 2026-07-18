@@ -18,8 +18,8 @@ pub fn render(state: &AppState, frame: &mut Frame<'_>) {
     render_provider_bar(state, frame, rows[0]);
 
     let Some(provider) = state
-        .active_workspace
-        .and_then(|active_workspace| state.providers.get(active_workspace))
+        .active_provider
+        .and_then(|active_provider| state.providers.get(active_provider))
     else {
         frame.render_widget(
             Paragraph::new("No providers discovered")
@@ -51,7 +51,7 @@ fn render_provider_bar(state: &AppState, frame: &mut Frame<'_>, area: Rect) {
         if index > 0 {
             provider_spans.push(Span::raw("   "));
         }
-        if Some(index) == state.active_workspace {
+        if Some(index) == state.active_provider {
             provider_spans.push(Span::styled(
                 format!("[ {} ]", provider.name),
                 Style::default().add_modifier(Modifier::BOLD),
