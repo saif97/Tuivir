@@ -8,14 +8,10 @@ pub struct CommandSpec {
 }
 
 impl CommandSpec {
-    pub fn new<I, S>(program: impl Into<String>, args: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
+    pub fn new(program: &str, args: &[&str]) -> Self {
         Self {
-            program: program.into(),
-            args: args.into_iter().map(Into::into).collect(),
+            program: program.to_owned(),
+            args: args.iter().map(|arg| (*arg).to_owned()).collect(),
         }
     }
 }

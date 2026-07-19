@@ -68,7 +68,7 @@ impl CliRunner for DelayedCli {
                 command,
                 CommandSpec::new(
                     "docker",
-                    [
+                    &[
                         "container",
                         "ls",
                         "--all",

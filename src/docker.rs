@@ -52,7 +52,7 @@ impl ProviderWorkspace for DockerWorkspace {
     ) -> Pin<Box<dyn Future<Output = Option<ProviderDiscovery>> + Send + 'a>> {
         Box::pin(async move {
             let result = cli
-                .run(CommandSpec::new("docker", ["context", "show"]))
+                .run(CommandSpec::new("docker", &["context", "show"]))
                 .await;
 
             match result {
@@ -80,7 +80,7 @@ impl ProviderWorkspace for DockerWorkspace {
             let output = cli
                 .run(CommandSpec::new(
                     "docker",
-                    [
+                    &[
                         "container",
                         "ls",
                         "--all",

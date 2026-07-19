@@ -60,13 +60,13 @@ fn failure(stderr: &str) -> Result<CliOutput, CliError> {
 async fn discovered_docker_workspace_renders_target_environment_and_containers() {
     let cli = FixtureCli::new([
         (
-            CommandSpec::new("docker", ["context", "show"]),
+            CommandSpec::new("docker", &["context", "show"]),
             success("desktop-linux\n"),
         ),
         (
             CommandSpec::new(
                 "docker",
-                [
+                &[
                     "container",
                     "ls",
                     "--all",
@@ -116,13 +116,13 @@ async fn discovered_docker_workspace_renders_target_environment_and_containers()
 async fn reachable_docker_without_containers_renders_a_distinct_empty_state() {
     let cli = FixtureCli::new([
         (
-            CommandSpec::new("docker", ["context", "show"]),
+            CommandSpec::new("docker", &["context", "show"]),
             success("colima\n"),
         ),
         (
             CommandSpec::new(
                 "docker",
-                [
+                &[
                     "container",
                     "ls",
                     "--all",
@@ -159,7 +159,7 @@ async fn reachable_docker_without_containers_renders_a_distinct_empty_state() {
 #[tokio::test]
 async fn installed_but_unreachable_docker_stays_visible_with_actionable_error() {
     let cli = FixtureCli::new([(
-        CommandSpec::new("docker", ["context", "show"]),
+        CommandSpec::new("docker", &["context", "show"]),
         failure("Cannot connect to the Docker daemon"),
     )]);
     let docker = DockerWorkspace::new();
@@ -182,13 +182,13 @@ async fn installed_but_unreachable_docker_stays_visible_with_actionable_error() 
 async fn failed_container_refresh_identifies_docker_operation_and_target() {
     let cli = FixtureCli::new([
         (
-            CommandSpec::new("docker", ["context", "show"]),
+            CommandSpec::new("docker", &["context", "show"]),
             success("desktop-linux\n"),
         ),
         (
             CommandSpec::new(
                 "docker",
-                [
+                &[
                     "container",
                     "ls",
                     "--all",
@@ -228,7 +228,7 @@ async fn malformed_docker_output_becomes_an_actionable_workspace_error() {
     let cli = FixtureCli::new([(
         CommandSpec::new(
             "docker",
-            [
+            &[
                 "container",
                 "ls",
                 "--all",
