@@ -29,7 +29,7 @@ async fn main() -> io::Result<()> {
 }
 
 async fn run(terminal: &mut DefaultTerminal) -> io::Result<()> {
-    let workspaces = [Arc::new(DockerWorkspace::new()) as Arc<dyn ProviderWorkspace>];
+    let workspaces = vec![Arc::new(DockerWorkspace) as Arc<dyn ProviderWorkspace>];
     let cli = Arc::new(TokioCliRunner) as Arc<dyn CliRunner>;
     let runtime = ProviderRuntime::new(workspaces, cli);
     let (completion_tx, mut completion_rx) = mpsc::unbounded_channel();

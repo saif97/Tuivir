@@ -15,18 +15,6 @@ const PROVIDER_NAME: &str = "Docker";
 
 pub struct DockerWorkspace;
 
-impl Default for DockerWorkspace {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl DockerWorkspace {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
 #[derive(Deserialize)]
 struct ContainerRow {
     #[serde(rename = "ID")]

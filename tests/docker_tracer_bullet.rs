@@ -4,7 +4,7 @@ use vertui::{
     app::{App, AppEvent},
     cli::{CliError, CliOutput, CliRunner, CommandSpec},
     docker::DockerWorkspace,
-    provider::{ProviderAction, ProviderWorkspace},
+    provider::{ProviderAction, ProviderWorkspace, WorkspaceError, WorkspaceSnapshot},
     ui::render_to_text,
 };
 
@@ -56,6 +56,22 @@ fn failure(stderr: &str) -> Result<CliOutput, CliError> {
     })
 }
 
+fn refresh_completed(
+    action: ProviderAction,
+    result: Result<WorkspaceSnapshot, WorkspaceError>,
+) -> AppEvent {
+    match action {
+        ProviderAction::RefreshWorkspace {
+            request_id,
+            provider_id,
+        } => AppEvent::RefreshCompleted {
+            request_id,
+            provider_id,
+            result,
+        },
+    }
+}
+
 #[tokio::test]
 async fn discovered_docker_workspace_renders_target_environment_and_containers() {
     let cli = FixtureCli::new([
@@ -78,7 +94,7 @@ async fn discovered_docker_workspace_renders_target_environment_and_containers()
             success(include_str!("fixtures/docker/containers.jsonl")),
         ),
     ]);
-    let docker = DockerWorkspace::new();
+    let docker = DockerWorkspace;
 
     let discovered = docker
         .discover(&cli)
@@ -88,17 +104,11 @@ async fn discovered_docker_workspace_renders_target_environment_and_containers()
     let actions = app.update(AppEvent::ProviderDiscovered(discovered));
     let request = actions
         .into_iter()
-        .map(|action| match action {
-            ProviderAction::RefreshWorkspace(request) => request,
-        })
         .next()
         .expect("discovery requests the first workspace refresh");
 
     let snapshot = docker.refresh(&cli).await;
-    app.update(AppEvent::RefreshCompleted {
-        request,
-        result: snapshot,
-    });
+    app.update(refresh_completed(request, snapshot));
 
     let screen = render_to_text(app.state(), 100, 24);
     assert!(screen.contains("Providers"));
@@ -134,21 +144,15 @@ async fn reachable_docker_without_containers_renders_a_distinct_empty_state() {
             success(""),
         ),
     ]);
-    let docker = DockerWorkspace::new();
+    let docker = DockerWorkspace;
     let discovered = docker.discover(&cli).await.expect("Docker is installed");
     let mut app = App::new();
     let request = app
         .update(AppEvent::ProviderDiscovered(discovered))
         .into_iter()
-        .map(|action| match action {
-            ProviderAction::RefreshWorkspace(request) => request,
-        })
         .next()
         .expect("initial refresh");
-    app.update(AppEvent::RefreshCompleted {
-        request,
-        result: docker.refresh(&cli).await,
-    });
+    app.update(refresh_completed(request, docker.refresh(&cli).await));
 
     let screen = render_to_text(app.state(), 100, 24);
     assert!(screen.contains("Target: colima"));
@@ -162,7 +166,7 @@ async fn installed_but_unreachable_docker_stays_visible_with_actionable_error() 
         CommandSpec::new("docker", &["context", "show"]),
         failure("Cannot connect to the Docker daemon"),
     )]);
-    let docker = DockerWorkspace::new();
+    let docker = DockerWorkspace;
     let discovered = docker.discover(&cli).await.expect("Docker is installed");
     let mut app = App::new();
 
@@ -200,21 +204,15 @@ async fn failed_container_refresh_identifies_docker_operation_and_target() {
             failure(include_str!("fixtures/docker/daemon-unreachable.stderr")),
         ),
     ]);
-    let docker = DockerWorkspace::new();
+    let docker = DockerWorkspace;
     let discovered = docker.discover(&cli).await.expect("Docker is installed");
     let mut app = App::new();
     let request = app
         .update(AppEvent::ProviderDiscovered(discovered))
         .into_iter()
-        .map(|action| match action {
-            ProviderAction::RefreshWorkspace(request) => request,
-        })
         .next()
         .expect("initial refresh");
-    app.update(AppEvent::RefreshCompleted {
-        request,
-        result: docker.refresh(&cli).await,
-    });
+    app.update(refresh_completed(request, docker.refresh(&cli).await));
 
     let screen = render_to_text(app.state(), 140, 24);
     assert!(screen.contains("Target: desktop-linux"));
@@ -239,7 +237,7 @@ async fn malformed_docker_output_becomes_an_actionable_workspace_error() {
         ),
         success(include_str!("fixtures/docker/malformed-containers.jsonl")),
     )]);
-    let docker = DockerWorkspace::new();
+    let docker = DockerWorkspace;
 
     let error = docker
         .refresh(&cli)

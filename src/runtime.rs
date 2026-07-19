@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use tokio::time::{Instant, Interval, MissedTickBehavior};
@@ -74,15 +74,13 @@ impl RefreshTimer {
 
 /// Executes provider actions without giving background work access to `App`.
 pub struct ProviderRuntime {
-    workspaces: HashMap<ProviderId, Arc<dyn ProviderWorkspace>>,
+    /// Compiled-in workspaces in their stable provider-selector order.
+    workspaces: Vec<(ProviderId, Arc<dyn ProviderWorkspace>)>,
     cli: Arc<dyn CliRunner>,
 }
 
 impl ProviderRuntime {
-    pub fn new(
-        workspaces: impl IntoIterator<Item = Arc<dyn ProviderWorkspace>>,
-        cli: Arc<dyn CliRunner>,
-    ) -> Self {
+    pub fn new(workspaces: Vec<Arc<dyn ProviderWorkspace>>, cli: Arc<dyn CliRunner>) -> Self {
         Self {
             workspaces: workspaces
                 .into_iter()
@@ -92,10 +90,11 @@ impl ProviderRuntime {
         }
     }
 
-    /// Discovers installed providers through their provider-specific CLI logic.
+    /// Discovers installed providers in registration order through their
+    /// provider-specific CLI logic.
     pub async fn discover(&self) -> Vec<ProviderDiscovery> {
         let mut discovered = Vec::new();
-        for workspace in self.workspaces.values() {
+        for (_, workspace) in &self.workspaces {
             if let Some(provider) = workspace.discover(self.cli.as_ref()).await {
                 discovered.push(provider);
             }
@@ -110,14 +109,26 @@ impl ProviderRuntime {
         events: tokio::sync::mpsc::UnboundedSender<AppEvent>,
     ) {
         match action {
-            ProviderAction::RefreshWorkspace(request) => {
-                let Some(workspace) = self.workspaces.get(&request.provider_id).cloned() else {
+            ProviderAction::RefreshWorkspace {
+                request_id,
+                provider_id,
+            } => {
+                let Some(workspace) = self
+                    .workspaces
+                    .iter()
+                    .find(|(id, _)| id == &provider_id)
+                    .map(|(_, workspace)| Arc::clone(workspace))
+                else {
                     return;
                 };
                 let cli = Arc::clone(&self.cli);
                 tokio::spawn(async move {
                     let result = workspace.refresh(cli.as_ref()).await;
-                    let _ = events.send(AppEvent::RefreshCompleted { request, result });
+                    let _ = events.send(AppEvent::RefreshCompleted {
+                        request_id,
+                        provider_id,
+                        result,
+                    });
                 });
             }
         }

@@ -7,8 +7,8 @@ use vertui::{
     cli::{CliError, CliOutput, CliRunner, CommandSpec},
     docker::DockerWorkspace,
     provider::{
-        ProviderAction, ProviderDiscovery, ProviderId, ProviderRequest, Resource, ResourceId,
-        ResourcePanel, WorkspaceSnapshot,
+        ProviderAction, ProviderDiscovery, ProviderId, Resource, ResourceId, ResourcePanel,
+        WorkspaceError, WorkspaceSnapshot,
     },
     runtime::{ProviderRuntime, RefreshTimer, ShellControl, handle_key},
     ui::render_to_text,
@@ -99,10 +99,10 @@ async fn active_workspace_refresh_is_due_every_two_seconds() {
 
     let mut app = App::new();
     let initial = refresh_action(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(AppEvent::RefreshCompleted {
-        request: initial,
-        result: Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    });
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
     let mut timer = RefreshTimer::new();
     let tick = timer.tick();
     tokio::pin!(tick);
@@ -123,18 +123,18 @@ async fn active_workspace_refresh_is_due_every_two_seconds() {
 async fn slow_provider_refresh_does_not_block_navigation() {
     let mut app = App::new();
     let initial = refresh_action(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(AppEvent::RefreshCompleted {
-        request: initial,
-        result: Ok(snapshot(&[
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[
             ("container-a", "api", "nginx:1.27"),
             ("container-b", "worker", "alpine:3.21"),
         ])),
-    });
+    ));
     let refresh = refresh_action(app.update(AppEvent::ManualRefresh));
     let started = Arc::new(Notify::new());
     let release = Arc::new(Notify::new());
     let runtime = ProviderRuntime::new(
-        [Arc::new(DockerWorkspace::new()) as Arc<dyn vertui::provider::ProviderWorkspace>],
+        vec![Arc::new(DockerWorkspace) as Arc<dyn vertui::provider::ProviderWorkspace>],
         Arc::new(DelayedCli {
             started: Arc::clone(&started),
             release: Arc::clone(&release),
@@ -142,7 +142,7 @@ async fn slow_provider_refresh_does_not_block_navigation() {
     );
     let (events, mut completions) = mpsc::unbounded_channel();
 
-    runtime.dispatch(ProviderAction::RefreshWorkspace(refresh), events);
+    runtime.dispatch(refresh, events);
     started.notified().await;
     app.update(AppEvent::SelectNextResource);
     let responsive_screen = render_to_text(app.state(), 100, 24);
@@ -158,7 +158,7 @@ async fn slow_provider_refresh_does_not_block_navigation() {
 #[tokio::test]
 async fn provider_is_omitted_when_docker_cli_is_absent() {
     let runtime = ProviderRuntime::new(
-        [Arc::new(DockerWorkspace::new()) as Arc<dyn vertui::provider::ProviderWorkspace>],
+        vec![Arc::new(DockerWorkspace) as Arc<dyn vertui::provider::ProviderWorkspace>],
         Arc::new(MissingCli),
     );
     let mut app = App::new();
@@ -176,13 +176,13 @@ async fn provider_is_omitted_when_docker_cli_is_absent() {
 fn keyboard_commands_drive_navigation_manual_refresh_and_quit() {
     let mut app = App::new();
     let initial = refresh_action(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(AppEvent::RefreshCompleted {
-        request: initial,
-        result: Ok(snapshot(&[
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[
             ("container-a", "api", "nginx:1.27"),
             ("container-b", "worker", "alpine:3.21"),
         ])),
-    });
+    ));
 
     let (control, actions) = handle_key(
         &mut app,
@@ -209,10 +209,10 @@ fn keyboard_commands_drive_navigation_manual_refresh_and_quit() {
 fn providers_render_in_one_row_above_the_full_width_workspace() {
     let mut app = App::new();
     let initial = refresh_action(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(AppEvent::RefreshCompleted {
-        request: initial,
-        result: Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    });
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
 
     let screen = render_to_text(app.state(), 100, 24);
     let mut lines = screen.lines();
@@ -234,10 +234,10 @@ fn providers_render_in_one_row_above_the_full_width_workspace() {
 fn bracket_keys_switch_the_active_workspace() {
     let mut app = App::new();
     let initial = refresh_action(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(AppEvent::RefreshCompleted {
-        request: initial,
-        result: Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    });
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
     assert!(
         app.update(AppEvent::ProviderDiscovered(fixture_discovery()))
             .is_empty(),
@@ -276,37 +276,47 @@ fn snapshot(containers: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
     }
 }
 
-fn refresh_action(actions: Vec<ProviderAction>) -> ProviderRequest {
-    actions
-        .into_iter()
-        .map(|action| match action {
-            ProviderAction::RefreshWorkspace(request) => request,
-        })
-        .next()
-        .expect("refresh action")
+fn refresh_action(actions: Vec<ProviderAction>) -> ProviderAction {
+    actions.into_iter().next().expect("refresh action")
+}
+
+fn refresh_completed(
+    action: ProviderAction,
+    result: Result<WorkspaceSnapshot, WorkspaceError>,
+) -> AppEvent {
+    match action {
+        ProviderAction::RefreshWorkspace {
+            request_id,
+            provider_id,
+        } => AppEvent::RefreshCompleted {
+            request_id,
+            provider_id,
+            result,
+        },
+    }
 }
 
 #[test]
 fn refresh_preserves_container_selection_by_stable_identity() {
     let mut app = App::new();
     let initial = refresh_action(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(AppEvent::RefreshCompleted {
-        request: initial,
-        result: Ok(snapshot(&[
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[
             ("container-a", "api", "nginx:1.27"),
             ("container-b", "worker", "alpine:3.21"),
         ])),
-    });
+    ));
     app.update(AppEvent::SelectNextResource);
     let refresh = refresh_action(app.update(AppEvent::ManualRefresh));
 
-    app.update(AppEvent::RefreshCompleted {
-        request: refresh,
-        result: Ok(snapshot(&[
+    app.update(refresh_completed(
+        refresh,
+        Ok(snapshot(&[
             ("container-b", "worker", "alpine:3.21"),
             ("container-c", "scheduler", "debian:bookworm"),
         ])),
-    });
+    ));
 
     let screen = render_to_text(app.state(), 100, 24);
     assert!(
@@ -320,13 +330,13 @@ fn refresh_preserves_container_selection_by_stable_identity() {
 fn resource_navigation_changes_the_selected_details() {
     let mut app = App::new();
     let initial = refresh_action(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(AppEvent::RefreshCompleted {
-        request: initial,
-        result: Ok(snapshot(&[
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[
             ("container-a", "api", "nginx:1.27"),
             ("container-b", "worker", "alpine:3.21"),
         ])),
-    });
+    ));
 
     app.update(AppEvent::SelectNextResource);
     let worker = render_to_text(app.state(), 100, 24);
@@ -345,17 +355,17 @@ fn automatic_and_manual_refreshes_do_not_overlap() {
     assert!(app.update(AppEvent::RefreshTimerElapsed).is_empty());
     assert!(app.update(AppEvent::ManualRefresh).is_empty());
 
-    app.update(AppEvent::RefreshCompleted {
-        request: initial,
-        result: Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    });
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
     let automatic = refresh_action(app.update(AppEvent::RefreshTimerElapsed));
     assert!(app.update(AppEvent::RefreshTimerElapsed).is_empty());
     assert!(app.update(AppEvent::ManualRefresh).is_empty());
 
-    app.update(AppEvent::RefreshCompleted {
-        request: automatic,
-        result: Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    });
+    app.update(refresh_completed(
+        automatic,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
     assert_eq!(app.update(AppEvent::ManualRefresh).len(), 1);
 }

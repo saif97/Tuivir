@@ -26,18 +26,14 @@ impl fmt::Display for ProviderId {
 pub struct ProviderRequestId(pub(crate) u64);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-/// A request from the application to one Provider Workspace.
-pub struct ProviderRequest {
-    pub id: ProviderRequestId,
-    pub provider_id: ProviderId,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 /// A specific operation the application asks a Provider Workspace to perform.
 ///
 /// The runtime executes actions outside the single-owner application state.
 pub enum ProviderAction {
-    RefreshWorkspace(ProviderRequest),
+    RefreshWorkspace {
+        request_id: ProviderRequestId,
+        provider_id: ProviderId,
+    },
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]

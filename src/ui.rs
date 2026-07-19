@@ -77,7 +77,7 @@ fn render_workspace_panel(provider: &ProviderState, frame: &mut Frame<'_>, area:
         workspace_rows[0],
     );
 
-    match &provider.workspace {
+    match &provider.workspace_state {
         WorkspaceState::Loading => frame.render_widget(
             Paragraph::new("Refreshing…")
                 .block(Block::default().title(" Resources ").borders(Borders::ALL)),
@@ -137,7 +137,7 @@ fn render_workspace_panel(provider: &ProviderState, frame: &mut Frame<'_>, area:
 }
 
 fn render_details_panel(provider: &ProviderState, frame: &mut Frame<'_>, area: Rect) {
-    let details = match &provider.workspace {
+    let details = match &provider.workspace_state {
         WorkspaceState::Ready(snapshot) => snapshot
             .resources()
             .find(|resource| provider.selected_resource.as_ref() == Some(&resource.id))

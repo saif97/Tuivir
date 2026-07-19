@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use crate::provider::{
-    ProviderAction, ProviderDiscovery, ProviderId, ProviderRequest, ProviderRequestId, ResourceId,
-    WorkspaceError, WorkspaceSnapshot,
+    ProviderAction, ProviderDiscovery, ProviderId, ProviderRequestId, ResourceId, WorkspaceError,
+    WorkspaceSnapshot,
 };
 
 pub enum AppEvent {
@@ -18,7 +18,8 @@ pub enum AppEvent {
     /// The application verifies the request is still pending before accepting
     /// this event.
     RefreshCompleted {
-        request: ProviderRequest,
+        request_id: ProviderRequestId,
+        provider_id: ProviderId,
         result: Result<WorkspaceSnapshot, WorkspaceError>,
     },
 }
@@ -37,7 +38,7 @@ pub struct ProviderState {
     pub id: ProviderId,
     pub name: String,
     pub target_environment: String,
-    pub workspace: WorkspaceState,
+    pub workspace_state: WorkspaceState,
     pub selected_resource: Option<ResourceId>,
 }
 
@@ -101,30 +102,27 @@ impl App {
             }
             AppEvent::SelectNextProvider => self.move_provider_selection(1),
             AppEvent::SelectPreviousProvider => self.move_provider_selection(-1),
-            AppEvent::RefreshCompleted { request, result } => {
-                self.apply_refresh_completed(request, result)
-            }
+            AppEvent::RefreshCompleted {
+                request_id,
+                provider_id,
+                result,
+            } => self.apply_refresh_completed(request_id, provider_id, result),
         }
     }
 
     fn handle_provider_discovered(&mut self, discovery: ProviderDiscovery) -> Vec<ProviderAction> {
-        let ProviderDiscovery {
-            id,
-            name,
-            target_environment,
-            error,
-        } = discovery;
         let activates_provider = self.state.active_provider.is_none();
-        let should_refresh_active_provider = activates_provider && error.is_none();
-        let initial_workspace_state = match error {
+        let should_refresh_active_provider = activates_provider && discovery.error.is_none();
+        let initial_workspace_state = match discovery.error {
             Some(error) => WorkspaceState::Error(error),
             None => WorkspaceState::Loading,
         };
+        let provider_id = discovery.id.clone();
         self.state.providers.push(ProviderState {
-            id: id.clone(),
-            name,
-            target_environment,
-            workspace: initial_workspace_state,
+            id: discovery.id,
+            name: discovery.name,
+            target_environment: discovery.target_environment,
+            workspace_state: initial_workspace_state,
             selected_resource: None,
         });
         if activates_provider {
@@ -132,7 +130,7 @@ impl App {
         }
 
         if should_refresh_active_provider {
-            vec![ProviderAction::RefreshWorkspace(self.start_refresh(id))]
+            vec![self.start_refresh(provider_id)]
         } else {
             Vec::new()
         }
@@ -140,17 +138,18 @@ impl App {
 
     fn apply_refresh_completed(
         &mut self,
-        request: ProviderRequest,
+        request_id: ProviderRequestId,
+        provider_id: ProviderId,
         result: Result<WorkspaceSnapshot, WorkspaceError>,
     ) -> Vec<ProviderAction> {
-        if self.pending.remove(&request.id) != Some(request.provider_id.clone()) {
+        if self.pending.remove(&request_id) != Some(provider_id.clone()) {
             return Vec::new();
         }
         let Some(provider) = self
             .state
             .providers
             .iter_mut()
-            .find(|provider| provider.id == request.provider_id)
+            .find(|provider| provider.id == provider_id)
         else {
             return Vec::new();
         };
@@ -169,18 +168,21 @@ impl App {
                         .and_then(|panel| panel.resources.first())
                         .map(|resource| resource.id.clone());
                 }
-                provider.workspace = WorkspaceState::Ready(snapshot);
+                provider.workspace_state = WorkspaceState::Ready(snapshot);
             }
-            Err(error) => provider.workspace = WorkspaceState::Error(error),
+            Err(error) => provider.workspace_state = WorkspaceState::Error(error),
         }
         Vec::new()
     }
 
-    fn start_refresh(&mut self, provider_id: ProviderId) -> ProviderRequest {
-        let id = ProviderRequestId(self.next_request_id);
+    fn start_refresh(&mut self, provider_id: ProviderId) -> ProviderAction {
+        let request_id = ProviderRequestId(self.next_request_id);
         self.next_request_id += 1;
-        self.pending.insert(id, provider_id.clone());
-        ProviderRequest { id, provider_id }
+        self.pending.insert(request_id, provider_id.clone());
+        ProviderAction::RefreshWorkspace {
+            request_id,
+            provider_id,
+        }
     }
 
     fn refresh_active_provider(&mut self) -> Vec<ProviderAction> {
@@ -198,9 +200,7 @@ impl App {
         if self.pending.values().any(|pending| pending == &provider_id) {
             return Vec::new();
         }
-        vec![ProviderAction::RefreshWorkspace(
-            self.start_refresh(provider_id),
-        )]
+        vec![self.start_refresh(provider_id)]
     }
 
     fn move_resource_selection(&mut self, delta: isize) {
@@ -210,7 +210,7 @@ impl App {
         let Some(provider) = self.state.providers.get_mut(active_provider) else {
             return;
         };
-        let WorkspaceState::Ready(snapshot) = &provider.workspace else {
+        let WorkspaceState::Ready(snapshot) = &provider.workspace_state else {
             return;
         };
         let resources = snapshot.resources().collect::<Vec<_>>();
