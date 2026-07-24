@@ -14,8 +14,7 @@ use tokio::sync::mpsc;
 use vertui::{
     app::{App, AppEvent},
     cli::{CliRunner, TokioCliRunner},
-    docker::DockerWorkspace,
-    provider::{ProviderAction, ProviderWorkspace},
+    provider::ProviderAction,
     runtime::{ProviderRuntime, RefreshTimer, ShellControl, handle_key},
     ui,
 };
@@ -29,9 +28,8 @@ async fn main() -> io::Result<()> {
 }
 
 async fn run(terminal: &mut DefaultTerminal) -> io::Result<()> {
-    let workspaces = vec![Arc::new(DockerWorkspace) as Arc<dyn ProviderWorkspace>];
     let cli = Arc::new(TokioCliRunner) as Arc<dyn CliRunner>;
-    let runtime = ProviderRuntime::new(workspaces, cli);
+    let runtime = ProviderRuntime::with_builtin_providers(cli);
     let (completion_tx, mut completion_rx) = mpsc::unbounded_channel();
     let mut app = App::new();
 

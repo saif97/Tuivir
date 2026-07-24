@@ -32,6 +32,15 @@ fn fixture_discovery() -> ProviderDiscovery {
     }
 }
 
+fn incus_discovery() -> ProviderDiscovery {
+    ProviderDiscovery {
+        id: ProviderId::new("incus"),
+        name: "Incus".to_owned(),
+        target_environment: "local / default".to_owned(),
+        error: None,
+    }
+}
+
 #[test]
 fn first_available_provider_becomes_the_active_workspace() {
     let mut app = App::new();
@@ -220,7 +229,7 @@ fn providers_render_in_one_row_above_the_full_width_workspace() {
         lines
             .next()
             .expect("provider row")
-            .starts_with("Providers  [ Docker ]")
+            .starts_with("[1] Providers  [ Docker ]")
     );
     assert!(
         lines
@@ -228,6 +237,33 @@ fn providers_render_in_one_row_above_the_full_width_workspace() {
             .expect("workspace row")
             .starts_with("┌ Docker ")
     );
+}
+
+#[test]
+fn numbered_panels_render_their_navigation_shortcuts() {
+    let mut app = App::new();
+    let initial = refresh_action(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(screen.starts_with("[1] Providers"));
+    assert!(screen.contains("[2] Containers"));
+}
+
+#[test]
+fn resource_panel_keeps_its_navigation_shortcut_while_loading_or_unavailable() {
+    let mut loading_app = App::new();
+    loading_app.update(AppEvent::ProviderDiscovered(docker_discovery()));
+    assert!(render_to_text(loading_app.state(), 100, 24).contains("[2] Resources"));
+
+    let mut unavailable = docker_discovery();
+    unavailable.error = Some(WorkspaceError::new("Docker is unavailable"));
+    let mut error_app = App::new();
+    error_app.update(AppEvent::ProviderDiscovered(unavailable));
+    assert!(render_to_text(error_app.state(), 100, 24).contains("[2] Error"));
 }
 
 #[test]
@@ -249,14 +285,80 @@ fn bracket_keys_switch_the_active_workspace() {
         KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE),
     );
     assert_eq!(actions.len(), 1, "new Active Workspace is refreshed");
-    assert!(render_to_text(app.state(), 100, 24).starts_with("Providers  Docker   [ Fixture ]"));
+    assert!(
+        render_to_text(app.state(), 100, 24).starts_with("[1] Providers  Docker   [ Fixture ]")
+    );
 
     let (_, actions) = handle_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('['), KeyModifiers::NONE),
     );
     assert_eq!(actions.len(), 1);
-    assert!(render_to_text(app.state(), 100, 24).starts_with("Providers  [ Docker ]   Fixture"));
+    assert!(
+        render_to_text(app.state(), 100, 24).starts_with("[1] Providers  [ Docker ]   Fixture")
+    );
+}
+
+#[test]
+fn numbered_provider_panel_activates_incus_and_requests_its_refresh() {
+    let mut app = App::new();
+    let initial = refresh_action(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+    assert!(
+        app.update(AppEvent::ProviderDiscovered(incus_discovery()))
+            .is_empty(),
+        "inactive workspaces remain idle"
+    );
+
+    let (_, focus_actions) = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('1'), KeyModifiers::NONE),
+    );
+    assert!(focus_actions.is_empty());
+    let (_, activation_actions) = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
+    );
+
+    let action = activation_actions
+        .into_iter()
+        .next()
+        .expect("activating Incus requests an immediate refresh");
+    assert!(matches!(
+        action,
+        ProviderAction::RefreshWorkspace {
+            provider_id,
+            ..
+        } if provider_id == ProviderId::new("incus")
+    ));
+    assert!(render_to_text(app.state(), 100, 24).starts_with("[1] Providers  Docker   [ Incus ]"));
+}
+
+#[test]
+fn late_docker_result_cannot_replace_the_active_incus_workspace() {
+    let mut app = App::new();
+    let stale_docker = refresh_action(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(AppEvent::ProviderDiscovered(incus_discovery()));
+    app.update(AppEvent::FocusProviders);
+    let incus_request = refresh_action(app.update(AppEvent::SelectNextProvider));
+    app.update(refresh_completed(
+        incus_request,
+        Ok(incus_snapshot(&[("instance-a", "gateway", "Running")])),
+    ));
+    let current_screen = render_to_text(app.state(), 100, 24);
+
+    app.update(refresh_completed(
+        stale_docker,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+
+    assert_eq!(render_to_text(app.state(), 100, 24), current_screen);
+    assert!(current_screen.contains("[ Incus ]"));
+    assert!(current_screen.contains("gateway"));
+    assert!(!current_screen.contains("nginx:1.27"));
 }
 
 fn snapshot(containers: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
@@ -270,6 +372,23 @@ fn snapshot(containers: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
                     name: (*name).to_owned(),
                     status: Some("running".to_owned()),
                     fields: vec![("Image".to_owned(), (*image).to_owned())],
+                })
+                .collect(),
+        }],
+    }
+}
+
+fn incus_snapshot(instances: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
+    WorkspaceSnapshot {
+        panels: vec![ResourcePanel {
+            title: "Instances".to_owned(),
+            resources: instances
+                .iter()
+                .map(|(id, name, status)| Resource {
+                    id: ResourceId((*id).to_owned()),
+                    name: (*name).to_owned(),
+                    status: Some((*status).to_owned()),
+                    fields: vec![("Type".to_owned(), "container".to_owned())],
                 })
                 .collect(),
         }],

@@ -7,6 +7,8 @@ use crate::provider::{
 
 pub enum AppEvent {
     ProviderDiscovered(ProviderDiscovery),
+    FocusProviders,
+    FocusResources,
     ManualRefresh,
     RefreshTimerElapsed,
     SelectNextResource,
@@ -22,6 +24,13 @@ pub enum AppEvent {
         provider_id: ProviderId,
         result: Result<WorkspaceSnapshot, WorkspaceError>,
     },
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum FocusedPanel {
+    Providers,
+    #[default]
+    Resources,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -45,6 +54,7 @@ pub struct ProviderState {
 #[derive(Default)]
 pub struct AppState {
     pub providers: Vec<ProviderState>,
+    pub focused_panel: FocusedPanel,
     /// Index into `providers` of the currently active provider — the one
     /// whose Provider Workspace is visible and being refreshed.
     ///
@@ -89,6 +99,14 @@ impl App {
     pub fn update(&mut self, event: AppEvent) -> Vec<ProviderAction> {
         match event {
             AppEvent::ProviderDiscovered(discovery) => self.handle_provider_discovered(discovery),
+            AppEvent::FocusProviders => {
+                self.state.focused_panel = FocusedPanel::Providers;
+                Vec::new()
+            }
+            AppEvent::FocusResources => {
+                self.state.focused_panel = FocusedPanel::Resources;
+                Vec::new()
+            }
             AppEvent::ManualRefresh | AppEvent::RefreshTimerElapsed => {
                 self.refresh_active_provider()
             }

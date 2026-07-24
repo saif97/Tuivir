@@ -7,7 +7,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph},
 };
 
-use crate::app::{AppState, ProviderState, WorkspaceState};
+use crate::app::{AppState, FocusedPanel, ProviderState, WorkspaceState};
 
 pub fn render(state: &AppState, frame: &mut Frame<'_>) {
     let rows = Layout::default()
@@ -33,17 +33,20 @@ pub fn render(state: &AppState, frame: &mut Frame<'_>) {
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(48), Constraint::Percentage(52)])
         .split(rows[1]);
-    render_workspace_panel(provider, frame, columns[0]);
+    render_workspace_panel(
+        provider,
+        state.focused_panel == FocusedPanel::Resources,
+        frame,
+        columns[0],
+    );
     render_details_panel(provider, frame, columns[1]);
 }
 
 fn render_provider_bar(state: &AppState, frame: &mut Frame<'_>, area: Rect) {
     let mut provider_spans = vec![
         Span::styled(
-            "Providers",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
+            "[1] Providers",
+            panel_title_style(state.focused_panel == FocusedPanel::Providers),
         ),
         Span::raw("  "),
     ];
@@ -63,7 +66,13 @@ fn render_provider_bar(state: &AppState, frame: &mut Frame<'_>, area: Rect) {
     frame.render_widget(Paragraph::new(Line::from(provider_spans)), area);
 }
 
-fn render_workspace_panel(provider: &ProviderState, frame: &mut Frame<'_>, area: Rect) {
+fn render_workspace_panel(
+    provider: &ProviderState,
+    focused: bool,
+    frame: &mut Frame<'_>,
+    area: Rect,
+) {
+    let title_style = panel_title_style(focused);
     let workspace_rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(3), Constraint::Min(1)])
@@ -79,8 +88,12 @@ fn render_workspace_panel(provider: &ProviderState, frame: &mut Frame<'_>, area:
 
     match &provider.workspace_state {
         WorkspaceState::Loading => frame.render_widget(
-            Paragraph::new("Refreshing…")
-                .block(Block::default().title(" Resources ").borders(Borders::ALL)),
+            Paragraph::new("Refreshing…").block(
+                Block::default()
+                    .title(" [2] Resources ")
+                    .title_style(title_style)
+                    .borders(Borders::ALL),
+            ),
             workspace_rows[1],
         ),
         WorkspaceState::Error(error) => frame.render_widget(
@@ -92,7 +105,12 @@ fn render_workspace_panel(provider: &ProviderState, frame: &mut Frame<'_>, area:
                 Line::from(error.message.as_str()),
             ])
             .wrap(ratatui::widgets::Wrap { trim: true })
-            .block(Block::default().title(" Error ").borders(Borders::ALL)),
+            .block(
+                Block::default()
+                    .title(" [2] Error ")
+                    .title_style(title_style)
+                    .borders(Borders::ALL),
+            ),
             workspace_rows[1],
         ),
         WorkspaceState::Ready(snapshot) => {
@@ -127,12 +145,23 @@ fn render_workspace_panel(provider: &ProviderState, frame: &mut Frame<'_>, area:
             frame.render_widget(
                 List::new(items).block(
                     Block::default()
-                        .title(format!(" {title} "))
+                        .title(format!(" [2] {title} "))
+                        .title_style(title_style)
                         .borders(Borders::ALL),
                 ),
                 workspace_rows[1],
             );
         }
+    }
+}
+
+fn panel_title_style(focused: bool) -> Style {
+    if focused {
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
     }
 }
 
@@ -177,4 +206,20 @@ pub fn render_to_text(state: &AppState, width: u16, height: u16) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn focused_panel_titles_are_visually_distinct() {
+        assert_eq!(
+            panel_title_style(true),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
+        );
+        assert_eq!(panel_title_style(false), Style::default());
+    }
 }
