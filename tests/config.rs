@@ -6,7 +6,7 @@ use std::{
 
 use virtui::{
     command::{Command, CommandScope},
-    config::{ConfigError, Env, LoadError, ReadFile, load},
+    config::{ConfigError, Env, FileSystemReader, LoadError, ReadFile, load},
     keys::Key,
     provider::ResourceCommand,
 };
@@ -279,5 +279,26 @@ fn claiming_ctrl_c_for_another_command_is_rejected() {
                 key: "ctrl+c".to_owned()
             }]
         }
+    );
+}
+
+/// The production filesystem adapter reads an actual file, so startup does not
+/// need a second reader implementation.
+#[test]
+fn the_real_filesystem_reader_reads_a_file_from_disk() {
+    let path = std::env::temp_dir().join("virtui-fsreader-test.toml");
+    std::fs::write(&path, "[keybindings]\n\"resource.restart\" = [\"x\"]\n").unwrap();
+    let env = Env {
+        config_file: Some(path.clone()),
+        ..Default::default()
+    };
+
+    let registry = load(&env, &FileSystemReader);
+    let _ = std::fs::remove_file(&path);
+    let registry = registry.expect("reads the real file from disk");
+
+    assert_eq!(
+        registry.resolve(CommandScope::ResourceView, key("x")),
+        Some(Command::Resource(ResourceCommand::Restart))
     );
 }

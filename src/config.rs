@@ -55,10 +55,30 @@ pub struct Env {
     pub home: Option<PathBuf>,
 }
 
+impl Env {
+    /// Builds the environment from the real process environment.
+    pub fn from_environment() -> Self {
+        Self {
+            config_file: std::env::var_os("VIRTUI_CONFIG_FILE").map(PathBuf::from),
+            xdg_config_home: std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
+            home: std::env::var_os("HOME").map(PathBuf::from),
+        }
+    }
+}
+
 /// Reads a configuration file's contents, isolated so tests can supply an
 /// in-memory filesystem.
 pub trait ReadFile {
     fn read(&self, path: &Path) -> io::Result<String>;
+}
+
+/// Reads configuration from the real filesystem.
+pub struct FileSystemReader;
+
+impl ReadFile for FileSystemReader {
+    fn read(&self, path: &Path) -> io::Result<String> {
+        std::fs::read_to_string(path)
+    }
 }
 
 /// Why a configuration file could not be loaded as an effective registry.
@@ -77,6 +97,36 @@ pub enum LoadError {
     Unparsable { path: PathBuf, message: String },
     /// The file parsed, but its keybindings were rejected.
     Invalid { path: PathBuf, errors: Vec<ConfigError> },
+}
+
+impl fmt::Display for LoadError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ExplicitNotAbsolute { path } => write!(
+                formatter,
+                "VIRTUI_CONFIG_FILE must be an absolute path, not {}",
+                path.display()
+            ),
+            Self::ExplicitMissing { path } => {
+                write!(formatter, "Configuration file does not exist: {}", path.display())
+            }
+            Self::Unreadable { path } => write!(
+                formatter,
+                "Configuration file could not be read: {}",
+                path.display()
+            ),
+            Self::Unparsable { path, message } => {
+                write!(formatter, "Could not parse {}: {}", path.display(), message)
+            }
+            Self::Invalid { path, errors } => {
+                write!(formatter, "Invalid configuration in {}:", path.display())?;
+                for error in errors {
+                    write!(formatter, "\n  {error}")?;
+                }
+                Ok(())
+            }
+        }
+    }
 }
 
 /// Loads configuration once, layering any `[keybindings]` over the compiled

@@ -1753,3 +1753,55 @@ fn an_unbound_focus_command_omits_its_inline_hint() {
     );
     assert!(screen.contains("Containers"));
 }
+
+#[test]
+fn one_override_changes_dispatch_help_and_the_inline_hint_together() {
+    let registry = CommandRegistry::effective(&[
+        ("resource.restart".to_owned(), vec!["x".to_owned()]),
+        ("focus.providers".to_owned(), vec!["9".to_owned()]),
+    ])
+    .expect("a valid override set");
+    let mut app = App::with_registry(registry);
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+
+    // The inline hint follows the override.
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(screen.starts_with("[9] Providers"), "rendered:\n{screen}");
+
+    // Contextual help follows the override.
+    handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+    );
+    let help = render_to_text(app.state(), 100, 24);
+    assert!(help.contains("x  Restart"), "rendered:\n{help}");
+    assert!(!help.contains("r  Restart"), "rendered:\n{help}");
+
+    // Close help so the workspace scope is active, then dispatch the new key.
+    handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+    );
+    let (_, requests) = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+    );
+    assert!(matches!(
+        requests.as_slice(),
+        [ProviderRequest::ExecuteResourceCommand {
+            command: ResourceCommand::Restart,
+            ..
+        }]
+    ));
+
+    // The replaced default key no longer dispatches Restart.
+    let (_, stale) = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE),
+    );
+    assert!(stale.is_empty(), "the old Restart key is unbound");
+}

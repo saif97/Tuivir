@@ -14,6 +14,8 @@ use tokio::sync::mpsc;
 use virtui::{
     app::{App, AppEvent},
     cli::{CliRunner, TokioCliRunner},
+    command::CommandRegistry,
+    config::{Env, FileSystemReader, load},
     provider::ProviderRequest,
     runtime::{ProviderRuntime, RefreshTimer, ShellControl, handle_key},
     ui,
@@ -21,17 +23,26 @@ use virtui::{
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
+    // Configuration is loaded and validated before raw mode so a bad file
+    // exits with a readable diagnostic instead of scrambling the terminal.
+    let registry = match load(&Env::from_environment(), &FileSystemReader) {
+        Ok(registry) => registry,
+        Err(error) => {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+    };
     let mut terminal = ratatui::init();
-    let result = run(&mut terminal).await;
+    let result = run(&mut terminal, registry).await;
     ratatui::restore();
     result
 }
 
-async fn run(terminal: &mut DefaultTerminal) -> io::Result<()> {
+async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::Result<()> {
     let cli = Arc::new(TokioCliRunner) as Arc<dyn CliRunner>;
     let runtime = ProviderRuntime::with_builtin_providers(cli);
     let (completion_tx, mut completion_rx) = mpsc::unbounded_channel();
-    let mut app = App::new();
+    let mut app = App::with_registry(registry);
 
     for discovered in runtime.discover().await {
         let requests = app.update(AppEvent::ProviderDiscovered(discovered));
