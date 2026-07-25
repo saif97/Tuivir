@@ -6,7 +6,7 @@ use crate::{
     cli::{CliRunner, ProcessError, ProcessSpec},
     provider::{
         ProviderDiscovery, ProviderId, ProviderWorkspace, Resource, ResourceCommand, ResourceId,
-        ResourcePanel, WorkspaceError, WorkspaceSnapshot,
+        ResourcePanel, ResourceState, WorkspaceError, WorkspaceSnapshot,
     },
 };
 
@@ -102,11 +102,13 @@ impl ProviderWorkspace for IncusWorkspace {
             let resources = rows
                 .into_iter()
                 .map(|row| {
-                    let available_commands = incus_commands(&row.status);
+                    let state = incus_resource_state(&row.status);
+                    let available_commands = incus_commands(state);
                     Resource {
                         id: ResourceId::new(&row.name),
                         name: row.name,
                         status: Some(row.status),
+                        state,
                         fields: vec![
                             ("Type".to_owned(), row.instance_type),
                             ("Architecture".to_owned(), row.architecture),
@@ -131,6 +133,7 @@ impl ProviderWorkspace for IncusWorkspace {
         cli: &'a dyn CliRunner,
         resource_id: &'a ResourceId,
         command: ResourceCommand,
+        state: ResourceState,
     ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
             let verb = match command {
@@ -139,7 +142,14 @@ impl ProviderWorkspace for IncusWorkspace {
                 ResourceCommand::Restart => "restart",
                 ResourceCommand::Delete => "delete",
             };
-            cli.run(ProcessSpec::new("incus", &[verb, resource_id.0.as_str()]))
+            let mut args = vec![verb];
+            // Incus deletes an instance plainly only from a stopped state; a
+            // running or frozen one needs the force the user already confirmed.
+            if command == ResourceCommand::Delete && state != ResourceState::Stopped {
+                args.push("--force");
+            }
+            args.push(resource_id.0.as_str());
+            cli.run(ProcessSpec::new("incus", &args))
                 .await
                 .map_err(|error| {
                     command_error(
@@ -152,15 +162,37 @@ impl ProviderWorkspace for IncusWorkspace {
     }
 }
 
-fn incus_commands(status: &str) -> Vec<ResourceCommand> {
-    if status.eq_ignore_ascii_case("running") {
-        vec![
+/// Maps an Incus instance status onto the shared vocabulary.
+///
+/// Incus reports settled statuses (`Running`, `Stopped`, `Frozen`, `Error`)
+/// alongside the transitional ones an operation passes through; anything else
+/// is deliberately left `Unknown` rather than assumed to be stopped.
+fn incus_resource_state(status: &str) -> ResourceState {
+    match status.to_ascii_lowercase().as_str() {
+        "running" => ResourceState::Running,
+        "stopped" => ResourceState::Stopped,
+        "frozen" => ResourceState::Paused,
+        "starting" | "stopping" | "freezing" | "thawing" => ResourceState::Transitioning,
+        "error" => ResourceState::Broken,
+        _ => ResourceState::Unknown,
+    }
+}
+
+fn incus_commands(state: ResourceState) -> Vec<ResourceCommand> {
+    match state {
+        ResourceState::Running => vec![
             ResourceCommand::Stop,
             ResourceCommand::Restart,
             ResourceCommand::Delete,
-        ]
-    } else {
-        vec![ResourceCommand::Start, ResourceCommand::Delete]
+        ],
+        ResourceState::Stopped => vec![ResourceCommand::Start, ResourceCommand::Delete],
+        // Starting a frozen instance fails — it needs an unfreeze Virtui does
+        // not offer yet — and a transitioning, errored, or unrecognised
+        // instance has no lifecycle Command that reliably applies.
+        ResourceState::Paused
+        | ResourceState::Transitioning
+        | ResourceState::Broken
+        | ResourceState::Unknown => vec![ResourceCommand::Delete],
     }
 }
 

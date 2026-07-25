@@ -6,7 +6,7 @@ use crate::{
     cli::{CliRunner, ProcessError, ProcessSpec},
     provider::{
         ProviderDiscovery, ProviderId, ProviderWorkspace, Resource, ResourceCommand, ResourceId,
-        ResourcePanel, WorkspaceError, WorkspaceSnapshot,
+        ResourcePanel, ResourceState, WorkspaceError, WorkspaceSnapshot,
     },
 };
 
@@ -99,11 +99,13 @@ impl ProviderWorkspace for DockerWorkspace {
                     let row: ContainerRow = serde_json::from_str(line).map_err(|error| {
                         refresh_error(format!("Docker returned malformed container data: {error}"))
                     })?;
-                    let available_commands = docker_commands(&row.state);
+                    let state = docker_resource_state(&row.state);
+                    let available_commands = docker_commands(state);
                     Ok(Resource {
                         id: ResourceId::new(row.id),
                         name: row.names,
                         status: Some(row.state),
+                        state,
                         fields: vec![
                             ("Image".to_owned(), row.image),
                             ("Status".to_owned(), row.status),
@@ -127,6 +129,7 @@ impl ProviderWorkspace for DockerWorkspace {
         cli: &'a dyn CliRunner,
         resource_id: &'a ResourceId,
         command: ResourceCommand,
+        state: ResourceState,
     ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
             let verb = match command {
@@ -135,31 +138,58 @@ impl ProviderWorkspace for DockerWorkspace {
                 ResourceCommand::Restart => "restart",
                 ResourceCommand::Delete => "rm",
             };
-            cli.run(ProcessSpec::new(
-                "docker",
-                &["container", verb, resource_id.0.as_str()],
-            ))
-            .await
-            .map_err(|error| {
-                command_error(
-                    error,
-                    &format!("Docker could not {command} container {resource_id}"),
-                )
-            })?;
+            let mut args = vec!["container", verb];
+            // Docker removes a container plainly only from a stopped state; a
+            // running, paused, or restarting one needs the force the user
+            // already confirmed.
+            if command == ResourceCommand::Delete && state != ResourceState::Stopped {
+                args.push("--force");
+            }
+            args.push(resource_id.0.as_str());
+            cli.run(ProcessSpec::new("docker", &args))
+                .await
+                .map_err(|error| {
+                    command_error(
+                        error,
+                        &format!("Docker could not {command} container {resource_id}"),
+                    )
+                })?;
             Ok(())
         })
     }
 }
 
-fn docker_commands(state: &str) -> Vec<ResourceCommand> {
-    if state.eq_ignore_ascii_case("running") {
-        vec![
+/// Maps a Docker container's `State` onto the shared vocabulary.
+///
+/// Docker's own set is `created`, `running`, `paused`, `restarting`,
+/// `removing`, `exited`, and `dead`; anything else is deliberately left
+/// `Unknown` rather than assumed to be stopped.
+fn docker_resource_state(state: &str) -> ResourceState {
+    match state.to_ascii_lowercase().as_str() {
+        "running" => ResourceState::Running,
+        "exited" | "created" => ResourceState::Stopped,
+        "paused" => ResourceState::Paused,
+        "restarting" | "removing" => ResourceState::Transitioning,
+        "dead" => ResourceState::Broken,
+        _ => ResourceState::Unknown,
+    }
+}
+
+fn docker_commands(state: ResourceState) -> Vec<ResourceCommand> {
+    match state {
+        ResourceState::Running => vec![
             ResourceCommand::Stop,
             ResourceCommand::Restart,
             ResourceCommand::Delete,
-        ]
-    } else {
-        vec![ResourceCommand::Start, ResourceCommand::Delete]
+        ],
+        ResourceState::Stopped => vec![ResourceCommand::Start, ResourceCommand::Delete],
+        // Starting a paused container fails — it needs an unpause Virtui does
+        // not offer yet — and a transitioning, dead, or unrecognised container
+        // has no lifecycle Command that reliably applies. Deletion always does.
+        ResourceState::Paused
+        | ResourceState::Transitioning
+        | ResourceState::Broken
+        | ResourceState::Unknown => vec![ResourceCommand::Delete],
     }
 }
 

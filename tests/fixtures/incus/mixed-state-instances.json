@@ -1,0 +1,51 @@
+[
+  {
+    "name": "api",
+    "status": "Running",
+    "type": "container",
+    "architecture": "x86_64",
+    "location": "server-a"
+  },
+  {
+    "name": "database",
+    "status": "Stopped",
+    "type": "virtual-machine",
+    "architecture": "x86_64",
+    "location": "server-b"
+  },
+  {
+    "name": "cache",
+    "status": "Frozen",
+    "type": "container",
+    "architecture": "x86_64",
+    "location": "server-a"
+  },
+  {
+    "name": "builder",
+    "status": "Starting",
+    "type": "container",
+    "architecture": "x86_64",
+    "location": "server-a"
+  },
+  {
+    "name": "gateway",
+    "status": "Stopping",
+    "type": "container",
+    "architecture": "x86_64",
+    "location": "server-b"
+  },
+  {
+    "name": "broken",
+    "status": "Error",
+    "type": "virtual-machine",
+    "architecture": "x86_64",
+    "location": "server-b"
+  },
+  {
+    "name": "future",
+    "status": "Teleporting",
+    "type": "container",
+    "architecture": "x86_64",
+    "location": "server-c"
+  }
+]
