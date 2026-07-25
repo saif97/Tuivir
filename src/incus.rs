@@ -145,7 +145,7 @@ impl ProviderWorkspace for IncusWorkspace {
             let mut args = vec![verb];
             // Incus deletes an instance plainly only from a stopped state; a
             // running or frozen one needs the force the user already confirmed.
-            if command == ResourceCommand::Delete && !state.is_stopped() {
+            if command == ResourceCommand::Delete && state != ResourceState::Stopped {
                 args.push("--force");
             }
             args.push(resource_id.0.as_str());

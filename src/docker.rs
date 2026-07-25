@@ -142,7 +142,7 @@ impl ProviderWorkspace for DockerWorkspace {
             // Docker removes a container plainly only from a stopped state; a
             // running, paused, or restarting one needs the force the user
             // already confirmed.
-            if command == ResourceCommand::Delete && !state.is_stopped() {
+            if command == ResourceCommand::Delete && state != ResourceState::Stopped {
                 args.push("--force");
             }
             args.push(resource_id.0.as_str());

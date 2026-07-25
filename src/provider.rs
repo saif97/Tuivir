@@ -73,16 +73,6 @@ pub enum ResourceState {
     Unknown,
 }
 
-impl ResourceState {
-    /// Whether the Resource is settled enough to delete without stopping it.
-    ///
-    /// Deleting anything else has to force, so a Provider status Virtui has
-    /// never seen fails safe rather than producing a Command that cannot work.
-    pub fn is_stopped(self) -> bool {
-        self == Self::Stopped
-    }
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// A specific request the application asks a Provider Workspace to perform.
 ///

@@ -8,6 +8,7 @@ use ratatui::{
 };
 
 use crate::app::{AppState, FocusedPanel, ProviderState, WorkspaceState};
+use crate::provider::ResourceState;
 
 pub fn render(state: &AppState, frame: &mut Frame<'_>) {
     let status_height = u16::from(!state.running_commands.is_empty());
@@ -100,7 +101,7 @@ pub fn render(state: &AppState, frame: &mut Frame<'_>) {
         // before the single confirmation that authorises both. The wording
         // stays on the outcome: a paused or restarting Resource is not running,
         // but removing it still stops it.
-        if !confirmation.state.is_stopped() {
+        if confirmation.state != ResourceState::Stopped {
             lines.push(Line::from("It will be stopped and removed."));
         }
         lines.push(Line::from("Press y/Enter to confirm or n/Esc to cancel."));
