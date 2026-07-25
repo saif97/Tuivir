@@ -8,7 +8,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use tokio::sync::{Notify, mpsc};
 use virtui::{
     app::{App, AppEvent},
-    cli::{CliError, CliOutput, CliRunner, CommandSpec},
+    cli::{CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec},
     docker::DockerWorkspace,
     provider::{
         ProviderDiscovery, ProviderId, ProviderRequest, Resource, ResourceCommand, ResourceId,
@@ -63,21 +63,20 @@ struct DelayedCli {
 struct MissingCli;
 
 struct ExpectedCli {
-    commands: Arc<Mutex<Vec<CommandSpec>>>,
+    commands: Arc<Mutex<Vec<ProcessSpec>>>,
 }
 
 impl CliRunner for ExpectedCli {
     fn run<'a>(
         &'a self,
-        command: CommandSpec,
-    ) -> Pin<Box<dyn Future<Output = Result<CliOutput, CliError>> + Send + 'a>> {
+        command: ProcessSpec,
+    ) -> Pin<Box<dyn Future<Output = Result<ProcessOutput, ProcessError>> + Send + 'a>> {
         Box::pin(async move {
             self.commands
                 .lock()
                 .expect("recorded command lock")
                 .push(command);
-            Ok(CliOutput {
-                success: true,
+            Ok(ProcessOutput {
                 stdout: String::new(),
                 stderr: String::new(),
             })
@@ -85,24 +84,43 @@ impl CliRunner for ExpectedCli {
     }
 }
 
+struct RejectingCli {
+    stderr: String,
+}
+
+impl CliRunner for RejectingCli {
+    fn run<'a>(
+        &'a self,
+        _command: ProcessSpec,
+    ) -> Pin<Box<dyn Future<Output = Result<ProcessOutput, ProcessError>> + Send + 'a>> {
+        Box::pin(async move {
+            Err(ProcessError::Exited(ProcessFailure {
+                exit_code: Some(1),
+                stdout: String::new(),
+                stderr: self.stderr.clone(),
+            }))
+        })
+    }
+}
+
 impl CliRunner for MissingCli {
     fn run<'a>(
         &'a self,
-        _command: CommandSpec,
-    ) -> Pin<Box<dyn Future<Output = Result<CliOutput, CliError>> + Send + 'a>> {
-        Box::pin(async { Err(CliError::NotFound) })
+        _command: ProcessSpec,
+    ) -> Pin<Box<dyn Future<Output = Result<ProcessOutput, ProcessError>> + Send + 'a>> {
+        Box::pin(async { Err(ProcessError::ExecutableNotFound) })
     }
 }
 
 impl CliRunner for DelayedCli {
     fn run<'a>(
         &'a self,
-        command: CommandSpec,
-    ) -> Pin<Box<dyn Future<Output = Result<CliOutput, CliError>> + Send + 'a>> {
+        command: ProcessSpec,
+    ) -> Pin<Box<dyn Future<Output = Result<ProcessOutput, ProcessError>> + Send + 'a>> {
         Box::pin(async move {
             assert_eq!(
                 command,
-                CommandSpec::new(
+                ProcessSpec::new(
                     "docker",
                     &[
                         "container",
@@ -116,8 +134,7 @@ impl CliRunner for DelayedCli {
             );
             self.started.notify_one();
             self.release.notified().await;
-            Ok(CliOutput {
-                success: true,
+            Ok(ProcessOutput {
                 stdout: concat!(
                     "{\"ID\":\"container-a\",\"Image\":\"nginx:1.27\",\"Names\":\"api\",\"State\":\"running\",\"Status\":\"Up\"}\n",
                     "{\"ID\":\"container-b\",\"Image\":\"alpine:3.21\",\"Names\":\"worker\",\"State\":\"running\",\"Status\":\"Up\"}\n"
@@ -168,10 +185,48 @@ async fn runtime_executes_resource_command_and_publishes_its_completion() {
     ));
     assert_eq!(
         *commands.lock().expect("recorded command lock"),
-        [CommandSpec::new(
+        [ProcessSpec::new(
             "docker",
             &["container", "restart", "container-a"]
         )]
+    );
+}
+
+#[tokio::test]
+async fn a_resource_command_that_exits_non_zero_reaches_the_screen_as_a_failure() {
+    use std::time::Duration;
+
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+    let request = app
+        .update(AppEvent::ResourceCommandInvoked(ResourceCommand::Restart))
+        .into_iter()
+        .next()
+        .expect("restart request");
+    let runtime = ProviderRuntime::new(
+        vec![Arc::new(DockerWorkspace) as Arc<dyn virtui::provider::ProviderWorkspace>],
+        Arc::new(RejectingCli {
+            stderr: "no such container".to_owned(),
+        }),
+    );
+    let (events, mut completions) = mpsc::unbounded_channel();
+
+    runtime.dispatch(request, events);
+    let completion = tokio::time::timeout(Duration::from_millis(100), completions.recv())
+        .await
+        .expect("Command completion should not time out")
+        .expect("Command completion event");
+    let follow_up = app.update(completion);
+
+    assert!(follow_up.is_empty(), "failed Commands do not refresh");
+    let screen = render_to_text(app.state(), 160, 24);
+    assert!(
+        screen.contains("Docker restart failed for api (container-a): no such container"),
+        "rendered screen:\n{screen}"
     );
 }
 
