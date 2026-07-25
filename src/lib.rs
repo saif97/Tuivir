@@ -3,6 +3,7 @@ pub mod cli;
 pub mod command;
 pub mod docker;
 pub mod incus;
+pub mod keys;
 pub mod provider;
 pub mod runtime;
 pub mod ui;
