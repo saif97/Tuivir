@@ -5,7 +5,7 @@ use virtui::{
     cli::{CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec},
     docker::DockerWorkspace,
     provider::{
-        ProviderRequest, ProviderWorkspace, ResourceCommand, ResourceId, WorkspaceError,
+        ProviderRequest, ProviderWorkspace, ResourceCommand, ResourceId, RunState, WorkspaceError,
         WorkspaceSnapshot,
     },
     ui::render_to_text,
@@ -117,6 +117,7 @@ async fn docker_restart_generates_the_expected_cli_request() {
             &cli,
             &ResourceId::new("container-a"),
             ResourceCommand::Restart,
+            RunState::Running,
         )
         .await
         .expect("Docker restart succeeds");
@@ -134,6 +135,7 @@ async fn docker_start_generates_the_expected_cli_request() {
             &cli,
             &ResourceId::new("container-a"),
             ResourceCommand::Start,
+            RunState::Stopped,
         )
         .await
         .expect("Docker start succeeds");
@@ -147,13 +149,18 @@ async fn docker_stop_generates_the_expected_cli_request() {
     )]);
 
     DockerWorkspace
-        .execute_command(&cli, &ResourceId::new("container-a"), ResourceCommand::Stop)
+        .execute_command(
+            &cli,
+            &ResourceId::new("container-a"),
+            ResourceCommand::Stop,
+            RunState::Running,
+        )
         .await
         .expect("Docker stop succeeds");
 }
 
 #[tokio::test]
-async fn docker_delete_generates_the_expected_cli_request() {
+async fn deleting_a_stopped_container_generates_the_expected_cli_request() {
     let cli = FixtureCli::new([(
         ProcessSpec::new("docker", &["container", "rm", "container-a"]),
         success("container-a\n"),
@@ -164,9 +171,31 @@ async fn docker_delete_generates_the_expected_cli_request() {
             &cli,
             &ResourceId::new("container-a"),
             ResourceCommand::Delete,
+            RunState::Stopped,
         )
         .await
         .expect("Docker delete succeeds");
+}
+
+#[tokio::test]
+async fn deleting_a_running_container_forces_removal_without_a_second_query() {
+    // The fixture answers exactly one CLI request and panics on any other, so
+    // this also proves the Run State travels with the request instead of being
+    // rediscovered through the Docker CLI.
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("docker", &["container", "rm", "--force", "container-a"]),
+        success("container-a\n"),
+    )]);
+
+    DockerWorkspace
+        .execute_command(
+            &cli,
+            &ResourceId::new("container-a"),
+            ResourceCommand::Delete,
+            RunState::Running,
+        )
+        .await
+        .expect("Docker force delete succeeds");
 }
 
 #[tokio::test]
@@ -181,6 +210,7 @@ async fn a_silent_command_failure_names_the_operation_and_container() {
             &cli,
             &ResourceId::new("container-a"),
             ResourceCommand::Restart,
+            RunState::Running,
         )
         .await
         .expect_err("a non-zero exit is never a successful command");
@@ -195,7 +225,9 @@ async fn a_silent_command_failure_names_the_operation_and_container() {
 async fn a_failed_command_reports_what_docker_wrote_to_stderr() {
     let cli = FixtureCli::new([(
         ProcessSpec::new("docker", &["container", "rm", "container-a"]),
-        failure("Error response from daemon: container is running"),
+        failure(
+            "Error response from daemon: removal of container container-a is already in progress",
+        ),
     )]);
 
     let error = DockerWorkspace
@@ -203,13 +235,14 @@ async fn a_failed_command_reports_what_docker_wrote_to_stderr() {
             &cli,
             &ResourceId::new("container-a"),
             ResourceCommand::Delete,
+            RunState::Stopped,
         )
         .await
         .expect_err("a non-zero exit is never a successful command");
 
     assert_eq!(
         error.message,
-        "Error response from daemon: container is running"
+        "Error response from daemon: removal of container container-a is already in progress"
     );
 }
 

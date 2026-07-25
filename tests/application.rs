@@ -12,7 +12,7 @@ use virtui::{
     docker::DockerWorkspace,
     provider::{
         ProviderDiscovery, ProviderId, ProviderRequest, Resource, ResourceCommand, ResourceId,
-        ResourcePanel, WorkspaceError, WorkspaceSnapshot,
+        ResourcePanel, RunState, WorkspaceError, WorkspaceSnapshot,
     },
     runtime::{ProviderRuntime, RefreshTimer, ShellControl, handle_key},
     ui::render_to_text,
@@ -481,6 +481,7 @@ fn failed_resource_command_identifies_provider_resource_and_attempted_command() 
         resource_id,
         resource_name,
         command,
+        ..
     } = request.into_iter().next().expect("restart request")
     else {
         panic!("expected Resource Command request");
@@ -897,6 +898,76 @@ fn delete_requires_target_identifying_confirmation_before_dispatch() {
 }
 
 #[test]
+fn confirming_a_running_resource_warns_it_is_stopped_and_dispatches_its_run_state() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+
+    handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE),
+    );
+    let confirmation = render_to_text(app.state(), 100, 24);
+    assert!(
+        confirmation.contains("It is running and will be stopped and removed."),
+        "rendered screen:\n{confirmation}"
+    );
+
+    let (_, confirmed_requests) = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE),
+    );
+    assert!(matches!(
+        confirmed_requests.as_slice(),
+        [ProviderRequest::ExecuteResourceCommand {
+            command: ResourceCommand::Delete,
+            run_state: RunState::Running,
+            ..
+        }]
+    ));
+}
+
+#[test]
+fn confirming_a_stopped_resource_promises_no_stop_and_dispatches_its_run_state() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(stopped_snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+
+    handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE),
+    );
+    let confirmation = render_to_text(app.state(), 100, 24);
+    assert!(
+        confirmation.contains("Delete Docker resource api (container-a)?"),
+        "rendered screen:\n{confirmation}"
+    );
+    assert!(
+        !confirmation.contains("will be stopped"),
+        "a stopped Resource is never promised a stop:\n{confirmation}"
+    );
+
+    let (_, confirmed_requests) = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE),
+    );
+    assert!(matches!(
+        confirmed_requests.as_slice(),
+        [ProviderRequest::ExecuteResourceCommand {
+            command: ResourceCommand::Delete,
+            run_state: RunState::Stopped,
+            ..
+        }]
+    ));
+}
+
+#[test]
 fn n_cancels_delete_confirmation_without_dispatching() {
     let mut app = App::new();
     let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
@@ -1094,6 +1165,28 @@ fn late_docker_result_cannot_replace_the_active_incus_workspace() {
 }
 
 fn snapshot(containers: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
+    container_snapshot(containers, RunState::Running)
+}
+
+fn stopped_snapshot(containers: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
+    container_snapshot(containers, RunState::Stopped)
+}
+
+fn container_snapshot(containers: &[(&str, &str, &str)], run_state: RunState) -> WorkspaceSnapshot {
+    let (status, available_commands) = match run_state {
+        RunState::Running => (
+            "running",
+            vec![
+                ResourceCommand::Stop,
+                ResourceCommand::Restart,
+                ResourceCommand::Delete,
+            ],
+        ),
+        RunState::Stopped => (
+            "exited",
+            vec![ResourceCommand::Start, ResourceCommand::Delete],
+        ),
+    };
     WorkspaceSnapshot {
         panels: vec![ResourcePanel {
             title: "Containers".to_owned(),
@@ -1102,13 +1195,10 @@ fn snapshot(containers: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
                 .map(|(id, name, image)| Resource {
                     id: ResourceId((*id).to_owned()),
                     name: (*name).to_owned(),
-                    status: Some("running".to_owned()),
+                    status: Some(status.to_owned()),
+                    run_state,
                     fields: vec![("Image".to_owned(), (*image).to_owned())],
-                    available_commands: vec![
-                        ResourceCommand::Stop,
-                        ResourceCommand::Restart,
-                        ResourceCommand::Delete,
-                    ],
+                    available_commands: available_commands.clone(),
                 })
                 .collect(),
         }],
@@ -1121,20 +1211,28 @@ fn incus_snapshot(instances: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
             title: "Instances".to_owned(),
             resources: instances
                 .iter()
-                .map(|(id, name, status)| Resource {
-                    id: ResourceId((*id).to_owned()),
-                    name: (*name).to_owned(),
-                    status: Some((*status).to_owned()),
-                    fields: vec![("Type".to_owned(), "container".to_owned())],
-                    available_commands: if status.eq_ignore_ascii_case("running") {
-                        vec![
-                            ResourceCommand::Stop,
-                            ResourceCommand::Restart,
-                            ResourceCommand::Delete,
-                        ]
-                    } else {
-                        vec![ResourceCommand::Start, ResourceCommand::Delete]
-                    },
+                .map(|(id, name, status)| {
+                    let running = status.eq_ignore_ascii_case("running");
+                    Resource {
+                        id: ResourceId((*id).to_owned()),
+                        name: (*name).to_owned(),
+                        status: Some((*status).to_owned()),
+                        run_state: if running {
+                            RunState::Running
+                        } else {
+                            RunState::Stopped
+                        },
+                        fields: vec![("Type".to_owned(), "container".to_owned())],
+                        available_commands: if running {
+                            vec![
+                                ResourceCommand::Stop,
+                                ResourceCommand::Restart,
+                                ResourceCommand::Delete,
+                            ]
+                        } else {
+                            vec![ResourceCommand::Start, ResourceCommand::Delete]
+                        },
+                    }
                 })
                 .collect(),
         }],
@@ -1160,6 +1258,7 @@ fn command_completed(request: ProviderRequest, result: Result<(), WorkspaceError
             resource_id,
             resource_name,
             command,
+            ..
         } => AppEvent::ResourceCommandCompleted {
             request_id,
             provider_id,

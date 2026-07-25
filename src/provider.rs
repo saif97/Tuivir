@@ -45,6 +45,17 @@ impl fmt::Display for ResourceCommand {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Whether a Provider reported a Resource as running at the last refresh.
+///
+/// Providers translate their own status vocabulary into this; the shell carries
+/// it from the Resource into the request so a Command never has to ask the
+/// Provider CLI what it already knows.
+pub enum RunState {
+    Running,
+    Stopped,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// A specific request the application asks a Provider Workspace to perform.
 ///
@@ -60,6 +71,9 @@ pub enum ProviderRequest {
         resource_id: ResourceId,
         resource_name: String,
         command: ResourceCommand,
+        /// What the last refresh reported for this Resource, carried here so
+        /// the Provider Workspace never re-queries it while dispatching.
+        run_state: RunState,
     },
 }
 
@@ -86,6 +100,8 @@ pub struct Resource {
     /// Provider-defined status text shown next to the resource in the list,
     /// such as a Docker container's running/exited state.
     pub status: Option<String>,
+    /// The provider-neutral reading of `status` that the shell can act on.
+    pub run_state: RunState,
     /// Provider-defined label/value fields for the selected-resource details panel.
     pub fields: Vec<(String, String)>,
     /// Lifecycle Commands currently available for this provider Resource.
@@ -160,10 +176,16 @@ pub trait ProviderWorkspace: Send + Sync {
         cli: &'a dyn CliRunner,
     ) -> Pin<Box<dyn Future<Output = Result<WorkspaceSnapshot, WorkspaceError>> + Send + 'a>>;
 
+    /// Runs one lifecycle Command against a Resource.
+    ///
+    /// `run_state` is what the last refresh reported for that Resource, so a
+    /// Command that must behave differently for a running Resource can do so
+    /// without a second Provider CLI query.
     fn execute_command<'a>(
         &'a self,
         cli: &'a dyn CliRunner,
         resource_id: &'a ResourceId,
         command: ResourceCommand,
+        run_state: RunState,
     ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>>;
 }

@@ -8,6 +8,7 @@ use ratatui::{
 };
 
 use crate::app::{AppState, FocusedPanel, ProviderState, WorkspaceState};
+use crate::provider::RunState;
 
 pub fn render(state: &AppState, frame: &mut Frame<'_>) {
     let status_height = u16::from(!state.running_commands.is_empty());
@@ -92,17 +93,18 @@ pub fn render(state: &AppState, frame: &mut Frame<'_>) {
     if let Some(confirmation) = &state.confirmation {
         let area = centered_rect(64, 5, frame.area());
         frame.render_widget(Clear, area);
+        let mut lines = vec![Line::from(format!(
+            "Delete {} resource {} ({})?",
+            confirmation.provider_name, confirmation.resource_name, confirmation.resource_id
+        ))];
+        // Deleting a running Resource stops it first, so say so before the
+        // single confirmation that authorises both.
+        if confirmation.run_state == RunState::Running {
+            lines.push(Line::from("It is running and will be stopped and removed."));
+        }
+        lines.push(Line::from("Press y/Enter to confirm or n/Esc to cancel."));
         frame.render_widget(
-            Paragraph::new(vec![
-                Line::from(format!(
-                    "Delete {} resource {} ({})?",
-                    confirmation.provider_name,
-                    confirmation.resource_name,
-                    confirmation.resource_id
-                )),
-                Line::from("Press y/Enter to confirm or n/Esc to cancel."),
-            ])
-            .block(
+            Paragraph::new(lines).block(
                 Block::default()
                     .title(" Confirm deletion ")
                     .borders(Borders::ALL),

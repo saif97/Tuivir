@@ -6,7 +6,7 @@ use crate::{
     cli::{CliRunner, ProcessError, ProcessSpec},
     provider::{
         ProviderDiscovery, ProviderId, ProviderWorkspace, Resource, ResourceCommand, ResourceId,
-        ResourcePanel, WorkspaceError, WorkspaceSnapshot,
+        ResourcePanel, RunState, WorkspaceError, WorkspaceSnapshot,
     },
 };
 
@@ -99,11 +99,13 @@ impl ProviderWorkspace for DockerWorkspace {
                     let row: ContainerRow = serde_json::from_str(line).map_err(|error| {
                         refresh_error(format!("Docker returned malformed container data: {error}"))
                     })?;
-                    let available_commands = docker_commands(&row.state);
+                    let run_state = docker_run_state(&row.state);
+                    let available_commands = docker_commands(run_state);
                     Ok(Resource {
                         id: ResourceId::new(row.id),
                         name: row.names,
                         status: Some(row.state),
+                        run_state,
                         fields: vec![
                             ("Image".to_owned(), row.image),
                             ("Status".to_owned(), row.status),
@@ -127,6 +129,7 @@ impl ProviderWorkspace for DockerWorkspace {
         cli: &'a dyn CliRunner,
         resource_id: &'a ResourceId,
         command: ResourceCommand,
+        run_state: RunState,
     ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
             let verb = match command {
@@ -135,31 +138,42 @@ impl ProviderWorkspace for DockerWorkspace {
                 ResourceCommand::Restart => "restart",
                 ResourceCommand::Delete => "rm",
             };
-            cli.run(ProcessSpec::new(
-                "docker",
-                &["container", verb, resource_id.0.as_str()],
-            ))
-            .await
-            .map_err(|error| {
-                command_error(
-                    error,
-                    &format!("Docker could not {command} container {resource_id}"),
-                )
-            })?;
+            let mut args = vec!["container", verb];
+            // Docker refuses to remove a running container; the user has
+            // already confirmed stopping it, so ask for that in one request.
+            if command == ResourceCommand::Delete && run_state == RunState::Running {
+                args.push("--force");
+            }
+            args.push(resource_id.0.as_str());
+            cli.run(ProcessSpec::new("docker", &args))
+                .await
+                .map_err(|error| {
+                    command_error(
+                        error,
+                        &format!("Docker could not {command} container {resource_id}"),
+                    )
+                })?;
             Ok(())
         })
     }
 }
 
-fn docker_commands(state: &str) -> Vec<ResourceCommand> {
+fn docker_run_state(state: &str) -> RunState {
     if state.eq_ignore_ascii_case("running") {
-        vec![
+        RunState::Running
+    } else {
+        RunState::Stopped
+    }
+}
+
+fn docker_commands(run_state: RunState) -> Vec<ResourceCommand> {
+    match run_state {
+        RunState::Running => vec![
             ResourceCommand::Stop,
             ResourceCommand::Restart,
             ResourceCommand::Delete,
-        ]
-    } else {
-        vec![ResourceCommand::Start, ResourceCommand::Delete]
+        ],
+        RunState::Stopped => vec![ResourceCommand::Start, ResourceCommand::Delete],
     }
 }
 

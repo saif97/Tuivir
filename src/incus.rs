@@ -6,7 +6,7 @@ use crate::{
     cli::{CliRunner, ProcessError, ProcessSpec},
     provider::{
         ProviderDiscovery, ProviderId, ProviderWorkspace, Resource, ResourceCommand, ResourceId,
-        ResourcePanel, WorkspaceError, WorkspaceSnapshot,
+        ResourcePanel, RunState, WorkspaceError, WorkspaceSnapshot,
     },
 };
 
@@ -102,11 +102,13 @@ impl ProviderWorkspace for IncusWorkspace {
             let resources = rows
                 .into_iter()
                 .map(|row| {
-                    let available_commands = incus_commands(&row.status);
+                    let run_state = incus_run_state(&row.status);
+                    let available_commands = incus_commands(run_state);
                     Resource {
                         id: ResourceId::new(&row.name),
                         name: row.name,
                         status: Some(row.status),
+                        run_state,
                         fields: vec![
                             ("Type".to_owned(), row.instance_type),
                             ("Architecture".to_owned(), row.architecture),
@@ -131,6 +133,7 @@ impl ProviderWorkspace for IncusWorkspace {
         cli: &'a dyn CliRunner,
         resource_id: &'a ResourceId,
         command: ResourceCommand,
+        run_state: RunState,
     ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
             let verb = match command {
@@ -139,7 +142,14 @@ impl ProviderWorkspace for IncusWorkspace {
                 ResourceCommand::Restart => "restart",
                 ResourceCommand::Delete => "delete",
             };
-            cli.run(ProcessSpec::new("incus", &[verb, resource_id.0.as_str()]))
+            let mut args = vec![verb];
+            // Incus refuses to delete a running instance; the user has already
+            // confirmed stopping it, so ask for that in one request.
+            if command == ResourceCommand::Delete && run_state == RunState::Running {
+                args.push("--force");
+            }
+            args.push(resource_id.0.as_str());
+            cli.run(ProcessSpec::new("incus", &args))
                 .await
                 .map_err(|error| {
                     command_error(
@@ -152,15 +162,22 @@ impl ProviderWorkspace for IncusWorkspace {
     }
 }
 
-fn incus_commands(status: &str) -> Vec<ResourceCommand> {
+fn incus_run_state(status: &str) -> RunState {
     if status.eq_ignore_ascii_case("running") {
-        vec![
+        RunState::Running
+    } else {
+        RunState::Stopped
+    }
+}
+
+fn incus_commands(run_state: RunState) -> Vec<ResourceCommand> {
+    match run_state {
+        RunState::Running => vec![
             ResourceCommand::Stop,
             ResourceCommand::Restart,
             ResourceCommand::Delete,
-        ]
-    } else {
-        vec![ResourceCommand::Start, ResourceCommand::Delete]
+        ],
+        RunState::Stopped => vec![ResourceCommand::Start, ResourceCommand::Delete],
     }
 }
 
