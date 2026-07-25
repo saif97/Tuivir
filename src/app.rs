@@ -171,8 +171,10 @@ impl App {
     /// first bindings into the state the renderer reads.
     pub fn with_registry(commands: CommandRegistry) -> Self {
         let hints = KeyHints::from_registry(&commands);
-        let mut state = AppState::default();
-        state.hints = hints;
+        let state = AppState {
+            hints,
+            ..AppState::default()
+        };
         Self {
             state,
             commands,
