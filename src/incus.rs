@@ -5,8 +5,8 @@ use serde::Deserialize;
 use crate::{
     cli::{CliError, CliRunner, CommandSpec},
     provider::{
-        ProviderDiscovery, ProviderId, ProviderWorkspace, Resource, ResourceId, ResourcePanel,
-        WorkspaceError, WorkspaceSnapshot,
+        ProviderDiscovery, ProviderId, ProviderWorkspace, Resource, ResourceCommand, ResourceId,
+        ResourcePanel, WorkspaceError, WorkspaceSnapshot,
     },
 };
 
@@ -98,15 +98,19 @@ impl ProviderWorkspace for IncusWorkspace {
                 .map_err(|error| WorkspaceError::new(error.to_string()))?;
             let resources = rows
                 .into_iter()
-                .map(|row| Resource {
-                    id: ResourceId::new(&row.name),
-                    name: row.name,
-                    status: Some(row.status),
-                    fields: vec![
-                        ("Type".to_owned(), row.instance_type),
-                        ("Architecture".to_owned(), row.architecture),
-                        ("Location".to_owned(), row.location),
-                    ],
+                .map(|row| {
+                    let available_commands = incus_commands(&row.status);
+                    Resource {
+                        id: ResourceId::new(&row.name),
+                        name: row.name,
+                        status: Some(row.status),
+                        fields: vec![
+                            ("Type".to_owned(), row.instance_type),
+                            ("Architecture".to_owned(), row.architecture),
+                            ("Location".to_owned(), row.location),
+                        ],
+                        available_commands,
+                    }
                 })
                 .collect();
 
@@ -117,6 +121,47 @@ impl ProviderWorkspace for IncusWorkspace {
                 }],
             })
         })
+    }
+
+    fn execute_command<'a>(
+        &'a self,
+        cli: &'a dyn CliRunner,
+        resource_id: &'a ResourceId,
+        command: ResourceCommand,
+    ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>> {
+        Box::pin(async move {
+            let verb = match command {
+                ResourceCommand::Start => "start",
+                ResourceCommand::Stop => "stop",
+                ResourceCommand::Restart => "restart",
+                ResourceCommand::Delete => "delete",
+            };
+            let output = cli
+                .run(CommandSpec::new("incus", &[verb, resource_id.0.as_str()]))
+                .await
+                .map_err(command_cli_error)?;
+            if !output.success {
+                let message = output.stderr.trim();
+                return Err(WorkspaceError::new(if message.is_empty() {
+                    "Incus command failed"
+                } else {
+                    message
+                }));
+            }
+            Ok(())
+        })
+    }
+}
+
+fn incus_commands(status: &str) -> Vec<ResourceCommand> {
+    if status.eq_ignore_ascii_case("running") {
+        vec![
+            ResourceCommand::Stop,
+            ResourceCommand::Restart,
+            ResourceCommand::Delete,
+        ]
+    } else {
+        vec![ResourceCommand::Start, ResourceCommand::Delete]
     }
 }
 
@@ -144,4 +189,12 @@ fn refresh_error(message: impl AsRef<str>) -> WorkspaceError {
         "{}. Run `incus list` to verify access to the current Target Environment.",
         message.as_ref()
     ))
+}
+
+fn command_cli_error(error: CliError) -> WorkspaceError {
+    let message = match error {
+        CliError::NotFound => "Incus CLI is no longer available".to_owned(),
+        CliError::Failed(message) => message,
+    };
+    WorkspaceError::new(message)
 }

@@ -25,14 +25,41 @@ impl fmt::Display for ProviderId {
 /// from overwriting newer application state.
 pub struct ProviderRequestId(pub(crate) u64);
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ResourceCommand {
+    Start,
+    Stop,
+    Restart,
+    Delete,
+}
+
+impl fmt::Display for ResourceCommand {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = match self {
+            Self::Start => "start",
+            Self::Stop => "stop",
+            Self::Restart => "restart",
+            Self::Delete => "delete",
+        };
+        formatter.write_str(name)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
-/// A specific operation the application asks a Provider Workspace to perform.
+/// A specific request the application asks a Provider Workspace to perform.
 ///
-/// The runtime executes actions outside the single-owner application state.
-pub enum ProviderAction {
+/// The runtime executes requests outside the single-owner application state.
+pub enum ProviderRequest {
     RefreshWorkspace {
         request_id: ProviderRequestId,
         provider_id: ProviderId,
+    },
+    ExecuteResourceCommand {
+        request_id: ProviderRequestId,
+        provider_id: ProviderId,
+        resource_id: ResourceId,
+        resource_name: String,
+        command: ResourceCommand,
     },
 }
 
@@ -61,6 +88,8 @@ pub struct Resource {
     pub status: Option<String>,
     /// Provider-defined label/value fields for the selected-resource details panel.
     pub fields: Vec<(String, String)>,
+    /// Lifecycle Commands currently available for this provider Resource.
+    pub available_commands: Vec<ResourceCommand>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -130,4 +159,11 @@ pub trait ProviderWorkspace: Send + Sync {
         &'a self,
         cli: &'a dyn CliRunner,
     ) -> Pin<Box<dyn Future<Output = Result<WorkspaceSnapshot, WorkspaceError>> + Send + 'a>>;
+
+    fn execute_command<'a>(
+        &'a self,
+        cli: &'a dyn CliRunner,
+        resource_id: &'a ResourceId,
+        command: ResourceCommand,
+    ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>>;
 }

@@ -5,8 +5,8 @@ use serde::Deserialize;
 use crate::{
     cli::{CliError, CliRunner, CommandSpec},
     provider::{
-        ProviderDiscovery, ProviderId, ProviderWorkspace, Resource, ResourceId, ResourcePanel,
-        WorkspaceError, WorkspaceSnapshot,
+        ProviderDiscovery, ProviderId, ProviderWorkspace, Resource, ResourceCommand, ResourceId,
+        ResourcePanel, WorkspaceError, WorkspaceSnapshot,
     },
 };
 
@@ -98,6 +98,7 @@ impl ProviderWorkspace for DockerWorkspace {
                     let row: ContainerRow = serde_json::from_str(line).map_err(|error| {
                         refresh_error(format!("Docker returned malformed container data: {error}"))
                     })?;
+                    let available_commands = docker_commands(&row.state);
                     Ok(Resource {
                         id: ResourceId::new(row.id),
                         name: row.names,
@@ -106,6 +107,7 @@ impl ProviderWorkspace for DockerWorkspace {
                             ("Image".to_owned(), row.image),
                             ("Status".to_owned(), row.status),
                         ],
+                        available_commands,
                     })
                 })
                 .collect::<Result<Vec<_>, WorkspaceError>>()?;
@@ -117,6 +119,48 @@ impl ProviderWorkspace for DockerWorkspace {
                 }],
             })
         })
+    }
+
+    fn execute_command<'a>(
+        &'a self,
+        cli: &'a dyn CliRunner,
+        resource_id: &'a ResourceId,
+        command: ResourceCommand,
+    ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>> {
+        Box::pin(async move {
+            let verb = match command {
+                ResourceCommand::Start => "start",
+                ResourceCommand::Stop => "stop",
+                ResourceCommand::Restart => "restart",
+                ResourceCommand::Delete => "rm",
+            };
+            let output = cli
+                .run(CommandSpec::new(
+                    "docker",
+                    &["container", verb, resource_id.0.as_str()],
+                ))
+                .await
+                .map_err(command_cli_error)?;
+            if !output.success {
+                return Err(WorkspaceError::new(cli_message(
+                    &output.stderr,
+                    "Docker command failed",
+                )));
+            }
+            Ok(())
+        })
+    }
+}
+
+fn docker_commands(state: &str) -> Vec<ResourceCommand> {
+    if state.eq_ignore_ascii_case("running") {
+        vec![
+            ResourceCommand::Stop,
+            ResourceCommand::Restart,
+            ResourceCommand::Delete,
+        ]
+    } else {
+        vec![ResourceCommand::Start, ResourceCommand::Delete]
     }
 }
 
@@ -146,4 +190,12 @@ fn refresh_error(message: impl Into<String>) -> WorkspaceError {
         "{}. Run `docker container ls --all` to verify access to the current Target Environment.",
         message.into()
     ))
+}
+
+fn command_cli_error(error: CliError) -> WorkspaceError {
+    let message = match error {
+        CliError::NotFound => "Docker CLI is no longer available".to_owned(),
+        CliError::Failed(message) => message,
+    };
+    WorkspaceError::new(message)
 }

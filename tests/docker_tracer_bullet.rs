@@ -4,7 +4,10 @@ use virtui::{
     app::{App, AppEvent},
     cli::{CliError, CliOutput, CliRunner, CommandSpec},
     docker::DockerWorkspace,
-    provider::{ProviderAction, ProviderWorkspace, WorkspaceError, WorkspaceSnapshot},
+    provider::{
+        ProviderRequest, ProviderWorkspace, ResourceCommand, ResourceId, WorkspaceError,
+        WorkspaceSnapshot,
+    },
     ui::render_to_text,
 };
 
@@ -57,11 +60,11 @@ fn failure(stderr: &str) -> Result<CliOutput, CliError> {
 }
 
 fn refresh_completed(
-    action: ProviderAction,
+    request: ProviderRequest,
     result: Result<WorkspaceSnapshot, WorkspaceError>,
 ) -> AppEvent {
-    match action {
-        ProviderAction::RefreshWorkspace {
+    match request {
+        ProviderRequest::RefreshWorkspace {
             request_id,
             provider_id,
         } => AppEvent::RefreshCompleted {
@@ -69,7 +72,72 @@ fn refresh_completed(
             provider_id,
             result,
         },
+        ProviderRequest::ExecuteResourceCommand { .. } => panic!("expected refresh request"),
     }
+}
+
+#[tokio::test]
+async fn docker_restart_generates_the_expected_cli_request() {
+    let cli = FixtureCli::new([(
+        CommandSpec::new("docker", &["container", "restart", "container-a"]),
+        success("container-a\n"),
+    )]);
+
+    DockerWorkspace
+        .execute_command(
+            &cli,
+            &ResourceId::new("container-a"),
+            ResourceCommand::Restart,
+        )
+        .await
+        .expect("Docker restart succeeds");
+}
+
+#[tokio::test]
+async fn docker_start_generates_the_expected_cli_request() {
+    let cli = FixtureCli::new([(
+        CommandSpec::new("docker", &["container", "start", "container-a"]),
+        success("container-a\n"),
+    )]);
+
+    DockerWorkspace
+        .execute_command(
+            &cli,
+            &ResourceId::new("container-a"),
+            ResourceCommand::Start,
+        )
+        .await
+        .expect("Docker start succeeds");
+}
+
+#[tokio::test]
+async fn docker_stop_generates_the_expected_cli_request() {
+    let cli = FixtureCli::new([(
+        CommandSpec::new("docker", &["container", "stop", "container-a"]),
+        success("container-a\n"),
+    )]);
+
+    DockerWorkspace
+        .execute_command(&cli, &ResourceId::new("container-a"), ResourceCommand::Stop)
+        .await
+        .expect("Docker stop succeeds");
+}
+
+#[tokio::test]
+async fn docker_delete_generates_the_expected_cli_request() {
+    let cli = FixtureCli::new([(
+        CommandSpec::new("docker", &["container", "rm", "container-a"]),
+        success("container-a\n"),
+    )]);
+
+    DockerWorkspace
+        .execute_command(
+            &cli,
+            &ResourceId::new("container-a"),
+            ResourceCommand::Delete,
+        )
+        .await
+        .expect("Docker delete succeeds");
 }
 
 #[tokio::test]
@@ -101,8 +169,8 @@ async fn discovered_docker_workspace_renders_target_environment_and_containers()
         .await
         .expect("the fixture represents an installed Docker CLI");
     let mut app = App::new();
-    let actions = app.update(AppEvent::ProviderDiscovered(discovered));
-    let request = actions
+    let requests = app.update(AppEvent::ProviderDiscovered(discovered));
+    let request = requests
         .into_iter()
         .next()
         .expect("discovery requests the first workspace refresh");
@@ -170,10 +238,10 @@ async fn installed_but_unreachable_docker_stays_visible_with_actionable_error() 
     let discovered = docker.discover(&cli).await.expect("Docker is installed");
     let mut app = App::new();
 
-    let actions = app.update(AppEvent::ProviderDiscovered(discovered));
+    let requests = app.update(AppEvent::ProviderDiscovered(discovered));
 
     assert!(
-        actions.is_empty(),
+        requests.is_empty(),
         "an unreachable provider is not refreshed"
     );
     let screen = render_to_text(app.state(), 100, 24);
@@ -183,7 +251,7 @@ async fn installed_but_unreachable_docker_stays_visible_with_actionable_error() 
 }
 
 #[tokio::test]
-async fn failed_container_refresh_identifies_docker_operation_and_target() {
+async fn failed_container_refresh_identifies_docker_command_and_target() {
     let cli = FixtureCli::new([
         (
             CommandSpec::new("docker", &["context", "show"]),

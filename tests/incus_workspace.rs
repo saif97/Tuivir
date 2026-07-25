@@ -9,7 +9,10 @@ use virtui::{
     app::{App, AppEvent},
     cli::{CliError, CliOutput, CliRunner, CommandSpec},
     incus::IncusWorkspace,
-    provider::{ProviderAction, ProviderWorkspace, WorkspaceError, WorkspaceSnapshot},
+    provider::{
+        ProviderRequest, ProviderWorkspace, ResourceCommand, ResourceId, WorkspaceError,
+        WorkspaceSnapshot,
+    },
     runtime::ProviderRuntime,
     ui::render_to_text,
 };
@@ -63,11 +66,11 @@ fn failure(stderr: &str) -> Result<CliOutput, CliError> {
 }
 
 fn refresh_completed(
-    action: ProviderAction,
+    request: ProviderRequest,
     result: Result<WorkspaceSnapshot, WorkspaceError>,
 ) -> AppEvent {
-    match action {
-        ProviderAction::RefreshWorkspace {
+    match request {
+        ProviderRequest::RefreshWorkspace {
             request_id,
             provider_id,
         } => AppEvent::RefreshCompleted {
@@ -75,7 +78,68 @@ fn refresh_completed(
             provider_id,
             result,
         },
+        ProviderRequest::ExecuteResourceCommand { .. } => panic!("expected refresh request"),
     }
+}
+
+#[tokio::test]
+async fn incus_start_generates_the_expected_cli_request() {
+    let cli = FixtureCli::new([(
+        CommandSpec::new("incus", &["start", "instance-a"]),
+        success(""),
+    )]);
+
+    IncusWorkspace
+        .execute_command(&cli, &ResourceId::new("instance-a"), ResourceCommand::Start)
+        .await
+        .expect("Incus start succeeds");
+}
+
+#[tokio::test]
+async fn incus_stop_generates_the_expected_cli_request() {
+    let cli = FixtureCli::new([(
+        CommandSpec::new("incus", &["stop", "instance-a"]),
+        success(""),
+    )]);
+
+    IncusWorkspace
+        .execute_command(&cli, &ResourceId::new("instance-a"), ResourceCommand::Stop)
+        .await
+        .expect("Incus stop succeeds");
+}
+
+#[tokio::test]
+async fn incus_restart_generates_the_expected_cli_request() {
+    let cli = FixtureCli::new([(
+        CommandSpec::new("incus", &["restart", "instance-a"]),
+        success(""),
+    )]);
+
+    IncusWorkspace
+        .execute_command(
+            &cli,
+            &ResourceId::new("instance-a"),
+            ResourceCommand::Restart,
+        )
+        .await
+        .expect("Incus restart succeeds");
+}
+
+#[tokio::test]
+async fn incus_delete_generates_the_expected_cli_request() {
+    let cli = FixtureCli::new([(
+        CommandSpec::new("incus", &["delete", "instance-a"]),
+        success(""),
+    )]);
+
+    IncusWorkspace
+        .execute_command(
+            &cli,
+            &ResourceId::new("instance-a"),
+            ResourceCommand::Delete,
+        )
+        .await
+        .expect("Incus delete succeeds");
 }
 
 #[tokio::test]
@@ -171,10 +235,10 @@ async fn installed_but_unreachable_incus_stays_visible_with_provider_specific_er
 
     let discovered = incus.discover(&cli).await.expect("Incus is installed");
     let mut app = App::new();
-    let actions = app.update(AppEvent::ProviderDiscovered(discovered));
+    let requests = app.update(AppEvent::ProviderDiscovered(discovered));
 
     assert!(
-        actions.is_empty(),
+        requests.is_empty(),
         "an unreachable provider is not refreshed"
     );
     let screen = render_to_text(app.state(), 200, 24);
@@ -211,7 +275,7 @@ async fn incus_with_unreadable_current_project_stays_visible() {
 }
 
 #[tokio::test]
-async fn failed_instance_refresh_identifies_incus_operation_and_target() {
+async fn failed_instance_refresh_identifies_incus_command_and_target() {
     let cli = FixtureCli::new([(
         CommandSpec::new("incus", &["list", "--format=json"]),
         failure("Error: Unable to connect to Incus"),
