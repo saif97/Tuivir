@@ -6,7 +6,7 @@ use crate::{
     cli::{CliRunner, ProcessError, ProcessSpec},
     provider::{
         ProviderDiscovery, ProviderId, ProviderWorkspace, Resource, ResourceCommand, ResourceId,
-        ResourcePanel, RunState, WorkspaceError, WorkspaceSnapshot,
+        ResourcePanel, ResourceState, WorkspaceError, WorkspaceSnapshot,
     },
 };
 
@@ -102,13 +102,13 @@ impl ProviderWorkspace for IncusWorkspace {
             let resources = rows
                 .into_iter()
                 .map(|row| {
-                    let run_state = incus_run_state(&row.status);
-                    let available_commands = incus_commands(run_state);
+                    let state = incus_resource_state(&row.status);
+                    let available_commands = incus_commands(state);
                     Resource {
                         id: ResourceId::new(&row.name),
                         name: row.name,
                         status: Some(row.status),
-                        run_state,
+                        state,
                         fields: vec![
                             ("Type".to_owned(), row.instance_type),
                             ("Architecture".to_owned(), row.architecture),
@@ -133,7 +133,7 @@ impl ProviderWorkspace for IncusWorkspace {
         cli: &'a dyn CliRunner,
         resource_id: &'a ResourceId,
         command: ResourceCommand,
-        run_state: RunState,
+        state: ResourceState,
     ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
             let verb = match command {
@@ -143,9 +143,9 @@ impl ProviderWorkspace for IncusWorkspace {
                 ResourceCommand::Delete => "delete",
             };
             let mut args = vec![verb];
-            // Incus refuses to delete a running instance; the user has already
-            // confirmed stopping it, so ask for that in one request.
-            if command == ResourceCommand::Delete && run_state == RunState::Running {
+            // Incus deletes an instance plainly only from a stopped state; a
+            // running or frozen one needs the force the user already confirmed.
+            if command == ResourceCommand::Delete && !state.is_stopped() {
                 args.push("--force");
             }
             args.push(resource_id.0.as_str());
@@ -162,22 +162,37 @@ impl ProviderWorkspace for IncusWorkspace {
     }
 }
 
-fn incus_run_state(status: &str) -> RunState {
-    if status.eq_ignore_ascii_case("running") {
-        RunState::Running
-    } else {
-        RunState::Stopped
+/// Maps an Incus instance status onto the shared vocabulary.
+///
+/// Incus reports settled statuses (`Running`, `Stopped`, `Frozen`, `Error`)
+/// alongside the transitional ones an operation passes through; anything else
+/// is deliberately left `Unknown` rather than assumed to be stopped.
+fn incus_resource_state(status: &str) -> ResourceState {
+    match status.to_ascii_lowercase().as_str() {
+        "running" => ResourceState::Running,
+        "stopped" => ResourceState::Stopped,
+        "frozen" => ResourceState::Paused,
+        "starting" | "stopping" | "freezing" | "thawing" => ResourceState::Transitioning,
+        "error" => ResourceState::Broken,
+        _ => ResourceState::Unknown,
     }
 }
 
-fn incus_commands(run_state: RunState) -> Vec<ResourceCommand> {
-    match run_state {
-        RunState::Running => vec![
+fn incus_commands(state: ResourceState) -> Vec<ResourceCommand> {
+    match state {
+        ResourceState::Running => vec![
             ResourceCommand::Stop,
             ResourceCommand::Restart,
             ResourceCommand::Delete,
         ],
-        RunState::Stopped => vec![ResourceCommand::Start, ResourceCommand::Delete],
+        ResourceState::Stopped => vec![ResourceCommand::Start, ResourceCommand::Delete],
+        // Starting a frozen instance fails — it needs an unfreeze Virtui does
+        // not offer yet — and a transitioning, errored, or unrecognised
+        // instance has no lifecycle Command that reliably applies.
+        ResourceState::Paused
+        | ResourceState::Transitioning
+        | ResourceState::Broken
+        | ResourceState::Unknown => vec![ResourceCommand::Delete],
     }
 }
 

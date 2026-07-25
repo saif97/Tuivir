@@ -202,7 +202,7 @@ impl ProviderRuntime {
                 resource_id,
                 resource_name,
                 command,
-                run_state,
+                state,
             } => {
                 let Some(workspace) = self
                     .workspaces
@@ -215,7 +215,7 @@ impl ProviderRuntime {
                 let cli = Arc::clone(&self.cli);
                 tokio::spawn(async move {
                     let result = workspace
-                        .execute_command(cli.as_ref(), &resource_id, command, run_state)
+                        .execute_command(cli.as_ref(), &resource_id, command, state)
                         .await;
                     let _ = events.send(AppEvent::ResourceCommandCompleted {
                         request_id,

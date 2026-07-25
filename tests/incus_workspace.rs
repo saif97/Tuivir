@@ -10,8 +10,8 @@ use virtui::{
     cli::{CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec},
     incus::IncusWorkspace,
     provider::{
-        ProviderRequest, ProviderWorkspace, ResourceCommand, ResourceId, RunState, WorkspaceError,
-        WorkspaceSnapshot,
+        ProviderRequest, ProviderWorkspace, ResourceCommand, ResourceId, ResourceState,
+        WorkspaceError, WorkspaceSnapshot,
     },
     runtime::ProviderRuntime,
     ui::render_to_text,
@@ -109,7 +109,7 @@ async fn incus_start_generates_the_expected_cli_request() {
             &cli,
             &ResourceId::new("instance-a"),
             ResourceCommand::Start,
-            RunState::Stopped,
+            ResourceState::Stopped,
         )
         .await
         .expect("Incus start succeeds");
@@ -127,7 +127,7 @@ async fn incus_stop_generates_the_expected_cli_request() {
             &cli,
             &ResourceId::new("instance-a"),
             ResourceCommand::Stop,
-            RunState::Running,
+            ResourceState::Running,
         )
         .await
         .expect("Incus stop succeeds");
@@ -145,7 +145,7 @@ async fn incus_restart_generates_the_expected_cli_request() {
             &cli,
             &ResourceId::new("instance-a"),
             ResourceCommand::Restart,
-            RunState::Running,
+            ResourceState::Running,
         )
         .await
         .expect("Incus restart succeeds");
@@ -163,17 +163,76 @@ async fn deleting_a_stopped_instance_generates_the_expected_cli_request() {
             &cli,
             &ResourceId::new("instance-a"),
             ResourceCommand::Delete,
-            RunState::Stopped,
+            ResourceState::Stopped,
         )
         .await
         .expect("Incus delete succeeds");
 }
 
+/// Incus deletes an instance without `--force` only when it is stopped; a
+/// frozen or transitioning one is refused outright.
+#[tokio::test]
+async fn deleting_an_instance_that_is_not_stopped_forces_removal() {
+    for state in [
+        ResourceState::Paused,
+        ResourceState::Transitioning,
+        ResourceState::Broken,
+        ResourceState::Unknown,
+    ] {
+        let cli = FixtureCli::new([(
+            ProcessSpec::new("incus", &["delete", "--force", "instance-a"]),
+            success(""),
+        )]);
+
+        IncusWorkspace
+            .execute_command(
+                &cli,
+                &ResourceId::new("instance-a"),
+                ResourceCommand::Delete,
+                state,
+            )
+            .await
+            .unwrap_or_else(|error| panic!("force delete from {state:?} succeeds: {error:?}"));
+    }
+}
+
+#[tokio::test]
+async fn incus_maps_every_instance_status_into_the_shared_vocabulary() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("incus", &["list", "--format=json"]),
+        success(include_str!("fixtures/incus/mixed-state-instances.json")),
+    )]);
+
+    let snapshot = IncusWorkspace
+        .refresh(&cli)
+        .await
+        .expect("fixture lists instances");
+
+    let states = snapshot
+        .resources()
+        .map(|resource| (resource.name.as_str(), resource.state))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        states,
+        [
+            ("api", ResourceState::Running),
+            ("database", ResourceState::Stopped),
+            ("cache", ResourceState::Paused),
+            ("builder", ResourceState::Transitioning),
+            ("gateway", ResourceState::Transitioning),
+            ("broken", ResourceState::Broken),
+            // A status this Incus release never returned still has to land
+            // somewhere honest rather than masquerade as stopped.
+            ("future", ResourceState::Unknown),
+        ]
+    );
+}
+
 #[tokio::test]
 async fn deleting_a_running_instance_forces_removal_without_a_second_query() {
     // The fixture answers exactly one CLI request and panics on any other, so
-    // this also proves the Run State travels with the request instead of being
-    // rediscovered through the Incus CLI.
+    // this also proves the Resource State travels with the request instead of
+    // being rediscovered through the Incus CLI.
     let cli = FixtureCli::new([(
         ProcessSpec::new("incus", &["delete", "--force", "instance-a"]),
         success(""),
@@ -184,7 +243,7 @@ async fn deleting_a_running_instance_forces_removal_without_a_second_query() {
             &cli,
             &ResourceId::new("instance-a"),
             ResourceCommand::Delete,
-            RunState::Running,
+            ResourceState::Running,
         )
         .await
         .expect("Incus force delete succeeds");
@@ -390,7 +449,7 @@ async fn a_silent_command_failure_names_the_operation_and_instance() {
             &cli,
             &ResourceId::new("instance-a"),
             ResourceCommand::Restart,
-            RunState::Running,
+            ResourceState::Running,
         )
         .await
         .expect_err("a non-zero exit is never a successful command");
@@ -410,7 +469,7 @@ async fn a_failed_command_reports_what_incus_wrote_to_stderr() {
             &cli,
             &ResourceId::new("instance-a"),
             ResourceCommand::Delete,
-            RunState::Stopped,
+            ResourceState::Stopped,
         )
         .await
         .expect_err("a non-zero exit is never a successful command");
@@ -435,7 +494,7 @@ async fn an_incus_cli_that_cannot_be_started_names_incus_in_the_error() {
             &cli,
             &ResourceId::new("instance-a"),
             ResourceCommand::Stop,
-            RunState::Running,
+            ResourceState::Running,
         )
         .await
         .expect_err("a CLI that never started is never a successful command");

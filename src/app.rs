@@ -5,7 +5,7 @@ use crossterm::event::KeyEvent;
 use crate::command::CommandRegistry;
 use crate::provider::{
     ProviderDiscovery, ProviderId, ProviderRequest, ProviderRequestId, ResourceCommand, ResourceId,
-    RunState, WorkspaceError, WorkspaceSnapshot,
+    ResourceState, WorkspaceError, WorkspaceSnapshot,
 };
 
 pub enum AppEvent {
@@ -121,7 +121,7 @@ pub struct ResourceCommandConfirmation {
     pub command: ResourceCommand,
     /// What the Resource was doing when the Command was invoked, so the prompt
     /// can say what confirming will really do and the request can carry it on.
-    pub run_state: RunState,
+    pub state: ResourceState,
 }
 
 pub struct App {
@@ -380,7 +380,7 @@ impl App {
         let provider_id = provider.id.clone();
         let provider_name = provider.name.clone();
         let resource_name = resource.name.clone();
-        let run_state = resource.run_state;
+        let state = resource.state;
         if command == ResourceCommand::Delete {
             self.state.confirmation = Some(ResourceCommandConfirmation {
                 provider_id,
@@ -388,7 +388,7 @@ impl App {
                 resource_id,
                 resource_name,
                 command,
-                run_state,
+                state,
             });
             return Vec::new();
         }
@@ -398,7 +398,7 @@ impl App {
             resource_id,
             resource_name,
             command,
-            run_state,
+            state,
         )
     }
 
@@ -412,7 +412,7 @@ impl App {
             confirmation.resource_id,
             confirmation.resource_name,
             confirmation.command,
-            confirmation.run_state,
+            confirmation.state,
         )
     }
 
@@ -423,7 +423,7 @@ impl App {
         resource_id: ResourceId,
         resource_name: String,
         command: ResourceCommand,
-        run_state: RunState,
+        state: ResourceState,
     ) -> Vec<ProviderRequest> {
         self.state.command_error = None;
         let request_id = ProviderRequestId(self.next_request_id);
@@ -443,7 +443,7 @@ impl App {
             resource_id,
             resource_name,
             command,
-            run_state,
+            state,
         }]
     }
 

@@ -46,14 +46,41 @@ impl fmt::Display for ResourceCommand {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-/// Whether a Provider reported a Resource as running at the last refresh.
+/// What a Provider reported a Resource to be doing at the last refresh.
 ///
-/// Providers translate their own status vocabulary into this; the shell carries
-/// it from the Resource into the request so a Command never has to ask the
-/// Provider CLI what it already knows.
-pub enum RunState {
+/// This is a provider-neutral vocabulary that each Provider Workspace maps its
+/// own status words into, so the shell can act on a Resource's state without
+/// branching on Provider identity. [`Resource::status`] keeps the Provider's
+/// own word for display.
+///
+/// Only [`ResourceState::Stopped`] is ever positively determined. Every other
+/// variant, `Unknown` included, means "not settled and stopped", which is what
+/// makes forcing a deletion the safe default: an unrecognised status can never
+/// masquerade as a stopped Resource.
+pub enum ResourceState {
     Running,
+    /// Settled and not running: safe to remove without stopping anything first.
     Stopped,
+    /// Suspended but still resident — Docker `paused`, Incus `Frozen`.
+    Paused,
+    /// Moving between states — Docker `restarting`/`removing`, Incus
+    /// `Starting`/`Stopping`/`Freezing`/`Thawing`.
+    Transitioning,
+    /// The Provider reports the Resource as unusable — Docker `dead`, Incus
+    /// `Error`.
+    Broken,
+    /// A status word this Provider Workspace does not recognise.
+    Unknown,
+}
+
+impl ResourceState {
+    /// Whether the Resource is settled enough to delete without stopping it.
+    ///
+    /// Deleting anything else has to force, so a Provider status Virtui has
+    /// never seen fails safe rather than producing a Command that cannot work.
+    pub fn is_stopped(self) -> bool {
+        self == Self::Stopped
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -73,7 +100,7 @@ pub enum ProviderRequest {
         command: ResourceCommand,
         /// What the last refresh reported for this Resource, carried here so
         /// the Provider Workspace never re-queries it while dispatching.
-        run_state: RunState,
+        state: ResourceState,
     },
 }
 
@@ -101,7 +128,7 @@ pub struct Resource {
     /// such as a Docker container's running/exited state.
     pub status: Option<String>,
     /// The provider-neutral reading of `status` that the shell can act on.
-    pub run_state: RunState,
+    pub state: ResourceState,
     /// Provider-defined label/value fields for the selected-resource details panel.
     pub fields: Vec<(String, String)>,
     /// Lifecycle Commands currently available for this provider Resource.
@@ -178,7 +205,7 @@ pub trait ProviderWorkspace: Send + Sync {
 
     /// Runs one lifecycle Command against a Resource.
     ///
-    /// `run_state` is what the last refresh reported for that Resource, so a
+    /// `state` is what the last refresh reported for that Resource, so a
     /// Command that must behave differently for a running Resource can do so
     /// without a second Provider CLI query.
     fn execute_command<'a>(
@@ -186,6 +213,6 @@ pub trait ProviderWorkspace: Send + Sync {
         cli: &'a dyn CliRunner,
         resource_id: &'a ResourceId,
         command: ResourceCommand,
-        run_state: RunState,
+        state: ResourceState,
     ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>>;
 }

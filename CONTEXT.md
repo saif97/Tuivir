@@ -32,6 +32,6 @@ _Avoid_: Context, condition
 An ordered association between one or more key combinations and a Command. The first combination is the preferred inline hint when the interface has room to show only one.
 _Avoid_: Shortcut, hotkey
 
-**Run State**:
-Whether a Provider reported a Resource as running or stopped at the last refresh. Providers translate their own status vocabulary into it, and an invoked Command carries it so Virtui never asks a Provider CLI for what it already knows.
-_Avoid_: Status, power state, phase
+**Resource State**:
+What a Provider reported a Resource to be doing at the last refresh, in one vocabulary shared by every Provider: running, stopped, paused, transitioning, broken, or unknown. Each Provider Workspace maps its own status words into it, and an invoked Command carries it so Virtui never asks a Provider CLI for what it already knows. Only _stopped_ is positively determined; every other state, unknown included, means "not settled and stopped", so a Command that must treat those differently fails safe.
+_Avoid_: Status, run state, power state, phase

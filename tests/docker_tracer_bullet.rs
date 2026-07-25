@@ -5,8 +5,8 @@ use virtui::{
     cli::{CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec},
     docker::DockerWorkspace,
     provider::{
-        ProviderRequest, ProviderWorkspace, ResourceCommand, ResourceId, RunState, WorkspaceError,
-        WorkspaceSnapshot,
+        ProviderRequest, ProviderWorkspace, ResourceCommand, ResourceId, ResourceState,
+        WorkspaceError, WorkspaceSnapshot,
     },
     ui::render_to_text,
 };
@@ -117,7 +117,7 @@ async fn docker_restart_generates_the_expected_cli_request() {
             &cli,
             &ResourceId::new("container-a"),
             ResourceCommand::Restart,
-            RunState::Running,
+            ResourceState::Running,
         )
         .await
         .expect("Docker restart succeeds");
@@ -135,7 +135,7 @@ async fn docker_start_generates_the_expected_cli_request() {
             &cli,
             &ResourceId::new("container-a"),
             ResourceCommand::Start,
-            RunState::Stopped,
+            ResourceState::Stopped,
         )
         .await
         .expect("Docker start succeeds");
@@ -153,7 +153,7 @@ async fn docker_stop_generates_the_expected_cli_request() {
             &cli,
             &ResourceId::new("container-a"),
             ResourceCommand::Stop,
-            RunState::Running,
+            ResourceState::Running,
         )
         .await
         .expect("Docker stop succeeds");
@@ -171,7 +171,7 @@ async fn deleting_a_stopped_container_generates_the_expected_cli_request() {
             &cli,
             &ResourceId::new("container-a"),
             ResourceCommand::Delete,
-            RunState::Stopped,
+            ResourceState::Stopped,
         )
         .await
         .expect("Docker delete succeeds");
@@ -180,8 +180,8 @@ async fn deleting_a_stopped_container_generates_the_expected_cli_request() {
 #[tokio::test]
 async fn deleting_a_running_container_forces_removal_without_a_second_query() {
     // The fixture answers exactly one CLI request and panics on any other, so
-    // this also proves the Run State travels with the request instead of being
-    // rediscovered through the Docker CLI.
+    // this also proves the Resource State travels with the request instead of
+    // being rediscovered through the Docker CLI.
     let cli = FixtureCli::new([(
         ProcessSpec::new("docker", &["container", "rm", "--force", "container-a"]),
         success("container-a\n"),
@@ -192,10 +192,70 @@ async fn deleting_a_running_container_forces_removal_without_a_second_query() {
             &cli,
             &ResourceId::new("container-a"),
             ResourceCommand::Delete,
-            RunState::Running,
+            ResourceState::Running,
         )
         .await
         .expect("Docker force delete succeeds");
+}
+
+/// Docker removes a container without `--force` only from a settled, stopped
+/// state. Every other state — verified against the daemon for `paused` — needs
+/// the force the user already confirmed.
+#[tokio::test]
+async fn deleting_a_container_that_is_not_stopped_forces_removal() {
+    for state in [
+        ResourceState::Paused,
+        ResourceState::Transitioning,
+        ResourceState::Broken,
+        ResourceState::Unknown,
+    ] {
+        let cli = FixtureCli::new([(
+            ProcessSpec::new("docker", &["container", "rm", "--force", "container-a"]),
+            success("container-a\n"),
+        )]);
+
+        DockerWorkspace
+            .execute_command(
+                &cli,
+                &ResourceId::new("container-a"),
+                ResourceCommand::Delete,
+                state,
+            )
+            .await
+            .unwrap_or_else(|error| panic!("force delete from {state:?} succeeds: {error:?}"));
+    }
+}
+
+#[tokio::test]
+async fn docker_maps_every_container_state_into_the_shared_vocabulary() {
+    let cli = FixtureCli::new([(
+        container_ls(),
+        success(include_str!("fixtures/docker/mixed-state-containers.jsonl")),
+    )]);
+
+    let snapshot = DockerWorkspace
+        .refresh(&cli)
+        .await
+        .expect("fixture lists containers");
+
+    let states = snapshot
+        .resources()
+        .map(|resource| (resource.id.0.as_str(), resource.state))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        states,
+        [
+            ("container-running", ResourceState::Running),
+            ("container-exited", ResourceState::Stopped),
+            ("container-created", ResourceState::Stopped),
+            ("container-paused", ResourceState::Paused),
+            ("container-restarting", ResourceState::Transitioning),
+            ("container-dead", ResourceState::Broken),
+            // A state this Docker release never returned still has to land
+            // somewhere honest rather than masquerade as stopped.
+            ("container-future", ResourceState::Unknown),
+        ]
+    );
 }
 
 #[tokio::test]
@@ -210,7 +270,7 @@ async fn a_silent_command_failure_names_the_operation_and_container() {
             &cli,
             &ResourceId::new("container-a"),
             ResourceCommand::Restart,
-            RunState::Running,
+            ResourceState::Running,
         )
         .await
         .expect_err("a non-zero exit is never a successful command");
@@ -235,7 +295,7 @@ async fn a_failed_command_reports_what_docker_wrote_to_stderr() {
             &cli,
             &ResourceId::new("container-a"),
             ResourceCommand::Delete,
-            RunState::Stopped,
+            ResourceState::Stopped,
         )
         .await
         .expect_err("a non-zero exit is never a successful command");
