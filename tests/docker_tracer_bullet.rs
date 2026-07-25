@@ -1,6 +1,6 @@
 use std::{collections::VecDeque, future::Future, pin::Pin, sync::Mutex};
 
-use vertui::{
+use virtui::{
     app::{App, AppEvent},
     cli::{CliError, CliOutput, CliRunner, CommandSpec},
     docker::DockerWorkspace,

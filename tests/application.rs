@@ -2,7 +2,7 @@ use std::{future::Future, pin::Pin, sync::Arc};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use tokio::sync::{Notify, mpsc};
-use vertui::{
+use virtui::{
     app::{App, AppEvent},
     cli::{CliError, CliOutput, CliRunner, CommandSpec},
     docker::DockerWorkspace,
@@ -143,7 +143,7 @@ async fn slow_provider_refresh_does_not_block_navigation() {
     let started = Arc::new(Notify::new());
     let release = Arc::new(Notify::new());
     let runtime = ProviderRuntime::new(
-        vec![Arc::new(DockerWorkspace) as Arc<dyn vertui::provider::ProviderWorkspace>],
+        vec![Arc::new(DockerWorkspace) as Arc<dyn virtui::provider::ProviderWorkspace>],
         Arc::new(DelayedCli {
             started: Arc::clone(&started),
             release: Arc::clone(&release),
@@ -167,7 +167,7 @@ async fn slow_provider_refresh_does_not_block_navigation() {
 #[tokio::test]
 async fn provider_is_omitted_when_docker_cli_is_absent() {
     let runtime = ProviderRuntime::new(
-        vec![Arc::new(DockerWorkspace) as Arc<dyn vertui::provider::ProviderWorkspace>],
+        vec![Arc::new(DockerWorkspace) as Arc<dyn virtui::provider::ProviderWorkspace>],
         Arc::new(MissingCli),
     );
     let mut app = App::new();
