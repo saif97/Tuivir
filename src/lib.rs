@@ -1,6 +1,7 @@
 pub mod app;
 pub mod cli;
 pub mod command;
+pub mod config;
 pub mod docker;
 pub mod incus;
 pub mod keys;

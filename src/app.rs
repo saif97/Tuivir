@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use crossterm::event::KeyEvent;
 
-use crate::command::CommandRegistry;
+use crate::command::{Command, CommandRegistry, CommandScope};
+use crate::keys::Key;
 use crate::provider::{
     ProviderDiscovery, ProviderId, ProviderRequest, ProviderRequestId, ResourceCommand, ResourceId,
     ResourceState, WorkspaceError, WorkspaceSnapshot,
@@ -164,7 +165,12 @@ impl App {
         {
             return None;
         }
-        let command = self.commands.resource_command_for_key(key)?;
+        let Some(Command::Resource(command)) = self
+            .commands
+            .resolve(CommandScope::ResourceView, Key::from_event(*key)?)
+        else {
+            return None;
+        };
         self.selected_resource()?
             .available_commands
             .contains(&command)
@@ -463,17 +469,21 @@ impl App {
             target,
             entries: self
                 .commands
-                .resource_commands()
-                .iter()
-                .filter_map(|command| {
-                    command.bindings.first().map(|binding| HelpEntry {
-                        key: binding.label.to_owned(),
-                        description: if available_commands.contains(&command.command) {
-                            command.description.to_owned()
-                        } else {
-                            format!("{} (unavailable)", command.description)
-                        },
-                    })
+                .in_scope(CommandScope::ResourceView)
+                .map(|registered| HelpEntry {
+                    key: registered
+                        .keys
+                        .first()
+                        .expect("a Command in scope is bound")
+                        .to_string(),
+                    description: match registered.command {
+                        Command::Resource(command)
+                            if !available_commands.contains(&command) =>
+                        {
+                            format!("{} (unavailable)", registered.description)
+                        }
+                        _ => registered.description.to_owned(),
+                    },
                 })
                 .collect(),
         });
