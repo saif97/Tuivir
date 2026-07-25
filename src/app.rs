@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 
-use crossterm::event::KeyEvent;
-
 use crate::command::{Command, CommandRegistry, CommandScope};
 use crate::keys::Key;
 use crate::provider::{
@@ -9,21 +7,14 @@ use crate::provider::{
     ResourceState, WorkspaceError, WorkspaceSnapshot,
 };
 
+/// Facts the application receives: provider discovery, the refresh clock, and
+/// asynchronous completions.
+///
+/// User intentions are [`Command`]s, resolved from keys, not events. Keeping
+/// the two separate means a keypress never looks like a completed refresh.
 pub enum AppEvent {
     ProviderDiscovered(ProviderDiscovery),
-    FocusProviders,
-    FocusResources,
-    ManualRefresh,
     RefreshTimerElapsed,
-    SelectNextResource,
-    SelectPreviousResource,
-    SelectNextProvider,
-    SelectPreviousProvider,
-    ResourceCommandInvoked(ResourceCommand),
-    ToggleHelp,
-    ConfirmResourceCommand,
-    CancelConfirmation,
-    DismissCommandError,
     /// The result of an earlier [`ProviderRequest::RefreshWorkspace`].
     ///
     /// The application verifies the request is still pending before accepting
@@ -160,23 +151,6 @@ impl App {
         &self.state
     }
 
-    pub fn resource_command_for_key(&self, key: &KeyEvent) -> Option<ResourceCommand> {
-        if self.state.focused_panel != FocusedPanel::Resources || self.state.help_overlay.is_some()
-        {
-            return None;
-        }
-        let Some(Command::Resource(command)) = self
-            .commands
-            .resolve(CommandScope::ResourceView, Key::from_event(*key)?)
-        else {
-            return None;
-        };
-        self.selected_resource()?
-            .available_commands
-            .contains(&command)
-            .then_some(command)
-    }
-
     /// Applies one application event and returns any provider work to run.
     ///
     /// This method performs no I/O; the runtime executes returned requests and
@@ -184,41 +158,7 @@ impl App {
     pub fn update(&mut self, event: AppEvent) -> Vec<ProviderRequest> {
         match event {
             AppEvent::ProviderDiscovered(discovery) => self.handle_provider_discovered(discovery),
-            AppEvent::FocusProviders => {
-                self.state.focused_panel = FocusedPanel::Providers;
-                Vec::new()
-            }
-            AppEvent::FocusResources => {
-                self.state.focused_panel = FocusedPanel::Resources;
-                Vec::new()
-            }
-            AppEvent::ManualRefresh | AppEvent::RefreshTimerElapsed => {
-                self.refresh_active_provider()
-            }
-            AppEvent::SelectNextResource => {
-                self.move_resource_selection(1);
-                Vec::new()
-            }
-            AppEvent::SelectPreviousResource => {
-                self.move_resource_selection(-1);
-                Vec::new()
-            }
-            AppEvent::SelectNextProvider => self.move_provider_selection(1),
-            AppEvent::SelectPreviousProvider => self.move_provider_selection(-1),
-            AppEvent::ResourceCommandInvoked(command) => self.handle_resource_command(command),
-            AppEvent::ToggleHelp => {
-                self.toggle_help();
-                Vec::new()
-            }
-            AppEvent::ConfirmResourceCommand => self.confirm_resource_command(),
-            AppEvent::CancelConfirmation => {
-                self.state.confirmation = None;
-                Vec::new()
-            }
-            AppEvent::DismissCommandError => {
-                self.state.command_error = None;
-                Vec::new()
-            }
+            AppEvent::RefreshTimerElapsed => self.refresh_active_provider(),
             AppEvent::RefreshCompleted {
                 request_id,
                 provider_id,
@@ -239,6 +179,109 @@ impl App {
                 command,
                 result,
             ),
+        }
+    }
+
+    /// The structural Command Scope the interface is in right now.
+    ///
+    /// A modal replaces the ordinary workspace scope; otherwise the focused
+    /// panel selects the workspace scope.
+    pub fn active_scope(&self) -> CommandScope {
+        if self.state.confirmation.is_some() {
+            CommandScope::Confirmation
+        } else if self.state.command_error.is_some() {
+            CommandScope::CommandFailure
+        } else if self.state.help_overlay.is_some() {
+            CommandScope::HelpOverlay
+        } else {
+            match self.state.focused_panel {
+                FocusedPanel::Providers => CommandScope::ProviderSelector,
+                FocusedPanel::Resources => CommandScope::ResourceView,
+            }
+        }
+    }
+
+    /// Resolves one pressed key against the effective registry in the active
+    /// scope. The caller normalizes the terminal event into the registry's
+    /// [`Key`] type, so this never sees a crossterm event.
+    pub fn resolve_command(&self, key: Key) -> Option<Command> {
+        self.commands.resolve(self.active_scope(), key)
+    }
+
+    /// Resolves a key the registry reserves no matter the scope or the
+    /// configuration — only the emergency Quit.
+    pub fn reserved(&self, key: Key) -> Option<Command> {
+        self.commands.reserved(key)
+    }
+
+    /// Carries out one resolved user intention and returns any provider work.
+    pub fn invoke(&mut self, command: Command) -> Vec<ProviderRequest> {
+        match command {
+            Command::Quit => Vec::new(),
+            Command::ToggleHelp => {
+                self.toggle_help();
+                Vec::new()
+            }
+            Command::Refresh => self.refresh_active_provider(),
+            Command::FocusProviders => {
+                self.state.focused_panel = FocusedPanel::Providers;
+                Vec::new()
+            }
+            Command::FocusResources => {
+                self.state.focused_panel = FocusedPanel::Resources;
+                Vec::new()
+            }
+            Command::SelectNext => self.select_by_focus(1),
+            Command::SelectPrevious => self.select_by_focus(-1),
+            Command::SelectNextFast => {
+                self.move_resource_selection(5);
+                Vec::new()
+            }
+            Command::SelectPreviousFast => {
+                self.move_resource_selection(-5);
+                Vec::new()
+            }
+            Command::NextWorkspace => self.move_provider_selection(1),
+            Command::PreviousWorkspace => self.move_provider_selection(-1),
+            Command::Confirm => self.confirm_or_dismiss(),
+            Command::Cancel => {
+                self.cancel_or_dismiss();
+                Vec::new()
+            }
+            Command::Resource(command) => self.handle_resource_command(command),
+        }
+    }
+
+    /// Moves the selection in whichever panel has focus.
+    fn select_by_focus(&mut self, delta: isize) -> Vec<ProviderRequest> {
+        match self.state.focused_panel {
+            FocusedPanel::Providers => self.move_provider_selection(delta),
+            FocusedPanel::Resources => {
+                self.move_resource_selection(delta);
+                Vec::new()
+            }
+        }
+    }
+
+    /// Accepts the open modal: confirms a Resource Command, or dismisses a
+    /// reported failure.
+    fn confirm_or_dismiss(&mut self) -> Vec<ProviderRequest> {
+        if self.state.confirmation.is_some() {
+            self.confirm_resource_command()
+        } else {
+            self.state.command_error = None;
+            Vec::new()
+        }
+    }
+
+    /// Cancels or returns from the open modal.
+    fn cancel_or_dismiss(&mut self) {
+        if self.state.confirmation.is_some() {
+            self.state.confirmation = None;
+        } else if self.state.command_error.is_some() {
+            self.state.command_error = None;
+        } else if self.state.help_overlay.is_some() {
+            self.state.help_overlay = None;
         }
     }
 
