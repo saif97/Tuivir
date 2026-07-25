@@ -1,8 +1,11 @@
 use std::collections::HashMap;
 
+use crossterm::event::KeyEvent;
+
+use crate::command::CommandRegistry;
 use crate::provider::{
-    ProviderAction, ProviderDiscovery, ProviderId, ProviderRequestId, ResourceId, WorkspaceError,
-    WorkspaceSnapshot,
+    ProviderDiscovery, ProviderId, ProviderRequest, ProviderRequestId, ResourceCommand, ResourceId,
+    WorkspaceError, WorkspaceSnapshot,
 };
 
 pub enum AppEvent {
@@ -15,7 +18,11 @@ pub enum AppEvent {
     SelectPreviousResource,
     SelectNextProvider,
     SelectPreviousProvider,
-    /// The result of an earlier [`ProviderAction::RefreshWorkspace`].
+    ResourceCommandInvoked(ResourceCommand),
+    ToggleHelp,
+    ConfirmResourceCommand,
+    CancelConfirmation,
+    /// The result of an earlier [`ProviderRequest::RefreshWorkspace`].
     ///
     /// The application verifies the request is still pending before accepting
     /// this event.
@@ -23,6 +30,14 @@ pub enum AppEvent {
         request_id: ProviderRequestId,
         provider_id: ProviderId,
         result: Result<WorkspaceSnapshot, WorkspaceError>,
+    },
+    ResourceCommandCompleted {
+        request_id: ProviderRequestId,
+        provider_id: ProviderId,
+        resource_id: ResourceId,
+        resource_name: String,
+        command: ResourceCommand,
+        result: Result<(), WorkspaceError>,
     },
 }
 
@@ -60,10 +75,35 @@ pub struct AppState {
     ///
     /// `None` represents startup before any installed provider is discovered.
     pub active_provider: Option<usize>,
+    pub help_overlay: Option<HelpOverlay>,
+    pub confirmation: Option<ResourceCommandConfirmation>,
+    pub command_error: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HelpEntry {
+    pub key: String,
+    pub description: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HelpOverlay {
+    pub target: String,
+    pub entries: Vec<HelpEntry>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResourceCommandConfirmation {
+    pub provider_id: ProviderId,
+    pub provider_name: String,
+    pub resource_id: ResourceId,
+    pub resource_name: String,
+    pub command: ResourceCommand,
 }
 
 pub struct App {
     state: AppState,
+    commands: CommandRegistry,
     /// Monotonically allocates request IDs in the main event loop.
     next_request_id: u64,
     /// Requests whose completions may still update their Provider Workspace.
@@ -83,6 +123,7 @@ impl App {
     pub fn new() -> Self {
         Self {
             state: AppState::default(),
+            commands: CommandRegistry::default(),
             next_request_id: 1,
             pending: HashMap::new(),
         }
@@ -92,11 +133,23 @@ impl App {
         &self.state
     }
 
+    pub fn resource_command_for_key(&self, key: &KeyEvent) -> Option<ResourceCommand> {
+        if self.state.focused_panel != FocusedPanel::Resources || self.state.help_overlay.is_some()
+        {
+            return None;
+        }
+        let command = self.commands.resource_command_for_key(key)?;
+        self.selected_resource()?
+            .available_commands
+            .contains(&command)
+            .then_some(command)
+    }
+
     /// Applies one application event and returns any provider work to run.
     ///
-    /// This method performs no I/O; the runtime executes returned actions and
+    /// This method performs no I/O; the runtime executes returned requests and
     /// feeds their completions back as events.
-    pub fn update(&mut self, event: AppEvent) -> Vec<ProviderAction> {
+    pub fn update(&mut self, event: AppEvent) -> Vec<ProviderRequest> {
         match event {
             AppEvent::ProviderDiscovered(discovery) => self.handle_provider_discovered(discovery),
             AppEvent::FocusProviders => {
@@ -120,15 +173,40 @@ impl App {
             }
             AppEvent::SelectNextProvider => self.move_provider_selection(1),
             AppEvent::SelectPreviousProvider => self.move_provider_selection(-1),
+            AppEvent::ResourceCommandInvoked(command) => self.handle_resource_command(command),
+            AppEvent::ToggleHelp => {
+                self.toggle_help();
+                Vec::new()
+            }
+            AppEvent::ConfirmResourceCommand => self.confirm_resource_command(),
+            AppEvent::CancelConfirmation => {
+                self.state.confirmation = None;
+                Vec::new()
+            }
             AppEvent::RefreshCompleted {
                 request_id,
                 provider_id,
                 result,
             } => self.apply_refresh_completed(request_id, provider_id, result),
+            AppEvent::ResourceCommandCompleted {
+                request_id,
+                provider_id,
+                resource_id,
+                resource_name,
+                command,
+                result,
+            } => self.apply_resource_command_result(
+                request_id,
+                provider_id,
+                resource_id,
+                resource_name,
+                command,
+                result,
+            ),
         }
     }
 
-    fn handle_provider_discovered(&mut self, discovery: ProviderDiscovery) -> Vec<ProviderAction> {
+    fn handle_provider_discovered(&mut self, discovery: ProviderDiscovery) -> Vec<ProviderRequest> {
         let activates_provider = self.state.active_provider.is_none();
         let should_refresh_active_provider = activates_provider && discovery.error.is_none();
         let initial_workspace_state = match discovery.error {
@@ -159,7 +237,7 @@ impl App {
         request_id: ProviderRequestId,
         provider_id: ProviderId,
         result: Result<WorkspaceSnapshot, WorkspaceError>,
-    ) -> Vec<ProviderAction> {
+    ) -> Vec<ProviderRequest> {
         if self.pending.remove(&request_id) != Some(provider_id.clone()) {
             return Vec::new();
         }
@@ -193,17 +271,170 @@ impl App {
         Vec::new()
     }
 
-    fn start_refresh(&mut self, provider_id: ProviderId) -> ProviderAction {
+    fn start_refresh(&mut self, provider_id: ProviderId) -> ProviderRequest {
         let request_id = ProviderRequestId(self.next_request_id);
         self.next_request_id += 1;
         self.pending.insert(request_id, provider_id.clone());
-        ProviderAction::RefreshWorkspace {
+        ProviderRequest::RefreshWorkspace {
             request_id,
             provider_id,
         }
     }
 
-    fn refresh_active_provider(&mut self) -> Vec<ProviderAction> {
+    fn apply_resource_command_result(
+        &mut self,
+        request_id: ProviderRequestId,
+        provider_id: ProviderId,
+        resource_id: ResourceId,
+        resource_name: String,
+        command: ResourceCommand,
+        result: Result<(), WorkspaceError>,
+    ) -> Vec<ProviderRequest> {
+        if self.pending.remove(&request_id) != Some(provider_id.clone()) {
+            return Vec::new();
+        }
+        let current_provider_name = self
+            .state
+            .active_provider
+            .and_then(|active| self.state.providers.get(active))
+            .filter(|provider| {
+                provider.id == provider_id
+                    && provider.selected_resource.as_ref() == Some(&resource_id)
+            })
+            .map(|provider| provider.name.clone());
+        let Some(provider_name) = current_provider_name else {
+            return Vec::new();
+        };
+        if let Err(error) = result {
+            self.state.command_error = Some(format!(
+                "{provider_name} {command} failed for {resource_name} ({resource_id}): {}",
+                error.message
+            ));
+            return Vec::new();
+        }
+        self.state.command_error = None;
+        self.refresh_active_provider()
+    }
+
+    fn handle_resource_command(&mut self, command: ResourceCommand) -> Vec<ProviderRequest> {
+        let Some(provider) = self
+            .state
+            .active_provider
+            .and_then(|active| self.state.providers.get(active))
+        else {
+            return Vec::new();
+        };
+        let Some(resource_id) = provider.selected_resource.clone() else {
+            return Vec::new();
+        };
+        let WorkspaceState::Ready(snapshot) = &provider.workspace_state else {
+            return Vec::new();
+        };
+        let Some(resource) = snapshot
+            .resources()
+            .find(|resource| resource.id == resource_id)
+        else {
+            return Vec::new();
+        };
+        if !resource.available_commands.contains(&command) {
+            return Vec::new();
+        }
+        let provider_id = provider.id.clone();
+        let provider_name = provider.name.clone();
+        let resource_name = resource.name.clone();
+        if command == ResourceCommand::Delete {
+            self.state.confirmation = Some(ResourceCommandConfirmation {
+                provider_id,
+                provider_name,
+                resource_id,
+                resource_name,
+                command,
+            });
+            return Vec::new();
+        }
+        self.dispatch_resource_command(provider_id, resource_id, resource_name, command)
+    }
+
+    fn confirm_resource_command(&mut self) -> Vec<ProviderRequest> {
+        let Some(confirmation) = self.state.confirmation.take() else {
+            return Vec::new();
+        };
+        self.dispatch_resource_command(
+            confirmation.provider_id,
+            confirmation.resource_id,
+            confirmation.resource_name,
+            confirmation.command,
+        )
+    }
+
+    fn dispatch_resource_command(
+        &mut self,
+        provider_id: ProviderId,
+        resource_id: ResourceId,
+        resource_name: String,
+        command: ResourceCommand,
+    ) -> Vec<ProviderRequest> {
+        self.state.command_error = None;
+        let request_id = ProviderRequestId(self.next_request_id);
+        self.next_request_id += 1;
+        self.pending.insert(request_id, provider_id.clone());
+
+        vec![ProviderRequest::ExecuteResourceCommand {
+            request_id,
+            provider_id,
+            resource_id,
+            resource_name,
+            command,
+        }]
+    }
+
+    fn toggle_help(&mut self) {
+        if self.state.help_overlay.take().is_some() {
+            return;
+        }
+        if self.state.focused_panel != FocusedPanel::Resources {
+            return;
+        }
+        let Some(resource) = self.selected_resource() else {
+            return;
+        };
+        let target = resource.name.clone();
+        let available_commands = resource.available_commands.clone();
+        self.state.help_overlay = Some(HelpOverlay {
+            target,
+            entries: self
+                .commands
+                .resource_commands()
+                .iter()
+                .filter_map(|command| {
+                    command.bindings.first().map(|binding| HelpEntry {
+                        key: binding.label.to_owned(),
+                        description: if available_commands.contains(&command.command) {
+                            command.description.to_owned()
+                        } else {
+                            format!("{} (unavailable)", command.description)
+                        },
+                    })
+                })
+                .collect(),
+        });
+    }
+
+    fn selected_resource(&self) -> Option<&crate::provider::Resource> {
+        let provider = self
+            .state
+            .active_provider
+            .and_then(|active| self.state.providers.get(active))?;
+        let selected = provider.selected_resource.as_ref()?;
+        let WorkspaceState::Ready(snapshot) = &provider.workspace_state else {
+            return None;
+        };
+        snapshot
+            .resources()
+            .find(|resource| &resource.id == selected)
+    }
+
+    fn refresh_active_provider(&mut self) -> Vec<ProviderRequest> {
         let Some(active_provider) = self.state.active_provider else {
             return Vec::new();
         };
@@ -246,7 +477,7 @@ impl App {
         provider.selected_resource = resources.get(next).map(|resource| resource.id.clone());
     }
 
-    fn move_provider_selection(&mut self, delta: isize) -> Vec<ProviderAction> {
+    fn move_provider_selection(&mut self, delta: isize) -> Vec<ProviderRequest> {
         let provider_count = self.state.providers.len();
         if provider_count < 2 {
             return Vec::new();

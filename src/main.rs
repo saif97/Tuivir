@@ -14,7 +14,7 @@ use tokio::sync::mpsc;
 use virtui::{
     app::{App, AppEvent},
     cli::{CliRunner, TokioCliRunner},
-    provider::ProviderAction,
+    provider::ProviderRequest,
     runtime::{ProviderRuntime, RefreshTimer, ShellControl, handle_key},
     ui,
 };
@@ -34,8 +34,8 @@ async fn run(terminal: &mut DefaultTerminal) -> io::Result<()> {
     let mut app = App::new();
 
     for discovered in runtime.discover().await {
-        let actions = app.update(AppEvent::ProviderDiscovered(discovered));
-        dispatch_all(&runtime, &completion_tx, actions);
+        let requests = app.update(AppEvent::ProviderDiscovered(discovered));
+        dispatch_all(&runtime, &completion_tx, requests);
     }
 
     let (key_tx, mut key_rx) = mpsc::unbounded_channel();
@@ -50,19 +50,19 @@ async fn run(terminal: &mut DefaultTerminal) -> io::Result<()> {
 
         tokio::select! {
             Some(key) = key_rx.recv() => {
-                let (control, actions) = handle_key(&mut app, key);
-                dispatch_all(&runtime, &completion_tx, actions);
+                let (control, requests) = handle_key(&mut app, key);
+                dispatch_all(&runtime, &completion_tx, requests);
                 if control == ShellControl::Quit {
                     break Ok(());
                 }
             }
             Some(event) = completion_rx.recv() => {
-                let actions = app.update(event);
-                dispatch_all(&runtime, &completion_tx, actions);
+                let requests = app.update(event);
+                dispatch_all(&runtime, &completion_tx, requests);
             }
             _ = refresh_timer.tick() => {
-                let actions = app.update(AppEvent::RefreshTimerElapsed);
-                dispatch_all(&runtime, &completion_tx, actions);
+                let requests = app.update(AppEvent::RefreshTimerElapsed);
+                dispatch_all(&runtime, &completion_tx, requests);
             }
         }
     };
@@ -75,10 +75,10 @@ async fn run(terminal: &mut DefaultTerminal) -> io::Result<()> {
 fn dispatch_all(
     runtime: &ProviderRuntime,
     completion_tx: &mpsc::UnboundedSender<AppEvent>,
-    actions: Vec<ProviderAction>,
+    requests: Vec<ProviderRequest>,
 ) {
-    for action in actions {
-        runtime.dispatch(action, completion_tx.clone());
+    for request in requests {
+        runtime.dispatch(request, completion_tx.clone());
     }
 }
 

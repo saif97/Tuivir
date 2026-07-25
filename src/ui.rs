@@ -4,7 +4,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
 };
 
 use crate::app::{AppState, FocusedPanel, ProviderState, WorkspaceState};
@@ -39,7 +39,56 @@ pub fn render(state: &AppState, frame: &mut Frame<'_>) {
         frame,
         columns[0],
     );
-    render_details_panel(provider, frame, columns[1]);
+    render_details_panel(provider, state.command_error.as_deref(), frame, columns[1]);
+
+    if let Some(help) = &state.help_overlay {
+        let area = centered_rect(42, (help.entries.len() as u16 + 2).max(4), frame.area());
+        let lines = help
+            .entries
+            .iter()
+            .map(|entry| Line::from(format!("{}  {}", entry.key, entry.description)))
+            .collect::<Vec<_>>();
+        frame.render_widget(Clear, area);
+        frame.render_widget(
+            Paragraph::new(lines).block(
+                Block::default()
+                    .title(format!(" Commands for {} ", help.target))
+                    .borders(Borders::ALL),
+            ),
+            area,
+        );
+    }
+
+    if let Some(confirmation) = &state.confirmation {
+        let area = centered_rect(64, 5, frame.area());
+        frame.render_widget(Clear, area);
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::from(format!(
+                    "Delete {} resource {} ({})?",
+                    confirmation.provider_name,
+                    confirmation.resource_name,
+                    confirmation.resource_id
+                )),
+                Line::from("Press y/Enter to confirm or n/Esc to cancel."),
+            ])
+            .block(
+                Block::default()
+                    .title(" Confirm deletion ")
+                    .borders(Borders::ALL),
+            ),
+            area,
+        );
+    }
+}
+
+fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
+    Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width: width.min(area.width),
+        height: height.min(area.height),
+    }
 }
 
 fn render_provider_bar(state: &AppState, frame: &mut Frame<'_>, area: Rect) {
@@ -165,8 +214,13 @@ fn panel_title_style(focused: bool) -> Style {
     }
 }
 
-fn render_details_panel(provider: &ProviderState, frame: &mut Frame<'_>, area: Rect) {
-    let details = match &provider.workspace_state {
+fn render_details_panel(
+    provider: &ProviderState,
+    command_error: Option<&str>,
+    frame: &mut Frame<'_>,
+    area: Rect,
+) {
+    let mut details = match &provider.workspace_state {
         WorkspaceState::Ready(snapshot) => snapshot
             .resources()
             .find(|resource| provider.selected_resource.as_ref() == Some(&resource.id))
@@ -186,8 +240,14 @@ fn render_details_panel(provider: &ProviderState, frame: &mut Frame<'_>, area: R
             .unwrap_or_else(|| vec![Line::from("Select a resource")]),
         _ => vec![Line::from("No details available")],
     };
+    if let Some(error) = command_error {
+        details.push(Line::from(""));
+        details.push(Line::styled(error, Style::default().fg(Color::Red)));
+    }
     frame.render_widget(
-        Paragraph::new(details).block(Block::default().title(" Details ").borders(Borders::ALL)),
+        Paragraph::new(details)
+            .wrap(ratatui::widgets::Wrap { trim: true })
+            .block(Block::default().title(" Details ").borders(Borders::ALL)),
         area,
     );
 }

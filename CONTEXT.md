@@ -19,3 +19,15 @@ _Avoid_: Selected backend, current tab
 **Target Environment**:
 The Docker context or Incus remote and project already selected through the provider's CLI configuration.
 _Avoid_: Cluster, server, connection
+
+**Command**:
+A registered user intention that Virtui can invoke within its Command Scope.
+_Avoid_: Action, handler
+
+**Command Scope**:
+The structural part of the interface in which a Command may be invoked, such as a focused panel or a Provider Workspace's resource view. Mutable resource state does not change a Command's scope.
+_Avoid_: Context, condition
+
+**Keybinding**:
+An ordered association between one or more key combinations and a Command. The first combination is the preferred inline hint when the interface has room to show only one.
+_Avoid_: Shortcut, hotkey

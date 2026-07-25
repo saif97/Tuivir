@@ -8,7 +8,7 @@ use crate::{
     cli::CliRunner,
     docker::DockerWorkspace,
     incus::IncusWorkspace,
-    provider::{ProviderAction, ProviderDiscovery, ProviderId, ProviderWorkspace},
+    provider::{ProviderDiscovery, ProviderId, ProviderRequest, ProviderWorkspace},
 };
 
 /// The cadence for refreshing the Active Workspace.
@@ -20,9 +20,39 @@ pub enum ShellControl {
     Quit,
 }
 
-pub fn handle_key(app: &mut App, key: KeyEvent) -> (ShellControl, Vec<ProviderAction>) {
+pub fn handle_key(app: &mut App, key: KeyEvent) -> (ShellControl, Vec<ProviderRequest>) {
     if key.kind != KeyEventKind::Press {
         return (ShellControl::Continue, Vec::new());
+    }
+    if app.state().confirmation.is_some() {
+        return match key.code {
+            KeyCode::Char('y') | KeyCode::Enter => (
+                ShellControl::Continue,
+                app.update(AppEvent::ConfirmResourceCommand),
+            ),
+            KeyCode::Char('n') | KeyCode::Esc => (
+                ShellControl::Continue,
+                app.update(AppEvent::CancelConfirmation),
+            ),
+            _ => (ShellControl::Continue, Vec::new()),
+        };
+    }
+    if app.state().help_overlay.is_some() {
+        return match key.code {
+            KeyCode::Char('?') | KeyCode::Char('q') | KeyCode::Esc => {
+                (ShellControl::Continue, app.update(AppEvent::ToggleHelp))
+            }
+            _ => (ShellControl::Continue, Vec::new()),
+        };
+    }
+    if key.code == KeyCode::Char('?') {
+        return (ShellControl::Continue, app.update(AppEvent::ToggleHelp));
+    }
+    if let Some(command) = app.resource_command_for_key(&key) {
+        return (
+            ShellControl::Continue,
+            app.update(AppEvent::ResourceCommandInvoked(command)),
+        );
     }
     match key.code {
         KeyCode::Char('q') | KeyCode::Esc => (ShellControl::Quit, Vec::new()),
@@ -42,7 +72,13 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> (ShellControl, Vec<ProviderAc
             };
             (ShellControl::Continue, app.update(event))
         }
-        KeyCode::Char('r') => (ShellControl::Continue, app.update(AppEvent::ManualRefresh)),
+        KeyCode::Char('r')
+            if key
+                .modifiers
+                .contains(crossterm::event::KeyModifiers::CONTROL) =>
+        {
+            (ShellControl::Continue, app.update(AppEvent::ManualRefresh))
+        }
         KeyCode::Char(']') => (
             ShellControl::Continue,
             app.update(AppEvent::SelectNextProvider),
@@ -82,7 +118,7 @@ impl RefreshTimer {
     }
 }
 
-/// Executes provider actions without giving background work access to `App`.
+/// Executes provider requests without giving background work access to `App`.
 pub struct ProviderRuntime {
     /// Compiled-in workspaces in their stable provider-selector order.
     workspaces: Vec<(ProviderId, Arc<dyn ProviderWorkspace>)>,
@@ -122,14 +158,14 @@ impl ProviderRuntime {
         discovered
     }
 
-    /// Starts an action in the background and sends its result back as an event.
+    /// Starts a request in the background and sends its result back as an event.
     pub fn dispatch(
         &self,
-        action: ProviderAction,
+        request: ProviderRequest,
         events: tokio::sync::mpsc::UnboundedSender<AppEvent>,
     ) {
-        match action {
-            ProviderAction::RefreshWorkspace {
+        match request {
+            ProviderRequest::RefreshWorkspace {
                 request_id,
                 provider_id,
             } => {
@@ -147,6 +183,36 @@ impl ProviderRuntime {
                     let _ = events.send(AppEvent::RefreshCompleted {
                         request_id,
                         provider_id,
+                        result,
+                    });
+                });
+            }
+            ProviderRequest::ExecuteResourceCommand {
+                request_id,
+                provider_id,
+                resource_id,
+                resource_name,
+                command,
+            } => {
+                let Some(workspace) = self
+                    .workspaces
+                    .iter()
+                    .find(|(id, _)| id == &provider_id)
+                    .map(|(_, workspace)| Arc::clone(workspace))
+                else {
+                    return;
+                };
+                let cli = Arc::clone(&self.cli);
+                tokio::spawn(async move {
+                    let result = workspace
+                        .execute_command(cli.as_ref(), &resource_id, command)
+                        .await;
+                    let _ = events.send(AppEvent::ResourceCommandCompleted {
+                        request_id,
+                        provider_id,
+                        resource_id,
+                        resource_name,
+                        command,
                         result,
                     });
                 });
