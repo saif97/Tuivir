@@ -5,9 +5,10 @@ use std::{
 };
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::style::Color;
 use tokio::sync::{Notify, mpsc};
 use virtui::{
-    app::{App, AppEvent},
+    app::{App, AppEvent, AppState},
     cli::{CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec},
     docker::DockerWorkspace,
     provider::{
@@ -15,8 +16,31 @@ use virtui::{
         ResourcePanel, ResourceState, WorkspaceError, WorkspaceSnapshot,
     },
     runtime::{ProviderRuntime, RefreshTimer, ShellControl, handle_key},
-    ui::render_to_text,
+    ui::{render_foreground_colours, render_to_text},
 };
+
+/// Reports the single foreground colour `text` is rendered in, panicking when
+/// it is absent from the screen or split across colours.
+fn foreground_of(state: &AppState, width: u16, height: u16, text: &str) -> Color {
+    let screen = render_to_text(state, width, height);
+    let colours = render_foreground_colours(state, width, height);
+    // Cell symbols such as a panel border are multi-byte, so a byte offset into
+    // the rendered line is not a screen column until it is counted in chars.
+    let (row, column) = screen
+        .lines()
+        .enumerate()
+        .find_map(|(row, line)| {
+            line.find(text)
+                .map(|offset| (row, line[..offset].chars().count()))
+        })
+        .unwrap_or_else(|| panic!("{text:?} is on screen"));
+    let cells = &colours[row][column..column + text.chars().count()];
+    assert!(
+        cells.iter().all(|colour| colour == &cells[0]),
+        "{text:?} is rendered in one colour, not {cells:?}"
+    );
+    cells[0]
+}
 
 fn docker_discovery() -> ProviderDiscovery {
     ProviderDiscovery {
@@ -423,6 +447,60 @@ fn stop_key_dispatches_for_a_running_container() {
 }
 
 #[test]
+fn resume_key_dispatches_for_a_paused_container_and_carries_its_state() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(paused_snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+
+    let (_, requests) = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE),
+    );
+
+    assert!(matches!(
+        requests.as_slice(),
+        [ProviderRequest::ExecuteResourceCommand {
+            provider_id,
+            resource_id,
+            resource_name,
+            command: ResourceCommand::Resume,
+            state: ResourceState::Paused,
+            ..
+        }] if provider_id == &ProviderId::new("docker")
+            && resource_id == &ResourceId::new("container-a")
+            && resource_name == "api"
+    ));
+}
+
+/// Resuming anything that is not suspended would fail in the Provider CLI, so
+/// the shell never dispatches it from another Resource State.
+#[test]
+fn resume_key_dispatches_nothing_for_a_resource_that_is_not_paused() {
+    for snapshot in [
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+        stopped_snapshot(&[("container-a", "api", "nginx:1.27")]),
+        container_snapshot(
+            &[("container-a", "api", "nginx:1.27")],
+            ResourceState::Broken,
+        ),
+    ] {
+        let mut app = App::new();
+        let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+        app.update(refresh_completed(initial, Ok(snapshot)));
+
+        let (_, requests) = handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE),
+        );
+
+        assert!(requests.is_empty());
+    }
+}
+
+#[test]
 fn successful_resource_command_refreshes_the_active_workspace_and_preserves_selection() {
     let mut app = App::new();
     let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
@@ -803,6 +881,42 @@ fn question_mark_shows_registered_commands_for_the_focused_resource() {
 }
 
 #[test]
+fn help_offers_resume_only_while_the_resource_is_suspended() {
+    let mut paused = App::new();
+    let initial = refresh_request(paused.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    paused.update(refresh_completed(
+        initial,
+        Ok(paused_snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+    handle_key(
+        &mut paused,
+        KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+    );
+    let screen = render_to_text(paused.state(), 100, 24);
+    assert!(screen.contains("p  Resume"), "rendered screen:\n{screen}");
+    assert!(
+        !screen.contains("p  Resume (unavailable)"),
+        "rendered screen:\n{screen}"
+    );
+
+    let mut running = App::new();
+    let initial = refresh_request(running.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    running.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+    handle_key(
+        &mut running,
+        KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+    );
+    let screen = render_to_text(running.state(), 100, 24);
+    assert!(
+        screen.contains("p  Resume (unavailable)"),
+        "rendered screen:\n{screen}"
+    );
+}
+
+#[test]
 fn question_mark_closes_the_help_overlay_when_it_is_already_open() {
     let mut app = App::new();
     let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
@@ -1108,6 +1222,48 @@ fn resource_panel_keeps_its_navigation_shortcut_while_loading_or_unavailable() {
 }
 
 #[test]
+fn each_resource_status_is_coloured_by_its_resource_state() {
+    for (state, status, colour) in [
+        (ResourceState::Running, "running", Color::Green),
+        (ResourceState::Stopped, "exited", Color::DarkGray),
+        (ResourceState::Paused, "paused", Color::Yellow),
+        (ResourceState::Transitioning, "restarting", Color::Blue),
+        (ResourceState::Broken, "dead", Color::Red),
+        // An unrecognised Provider status stays neutral rather than borrowing
+        // the colour of a state Virtui understands.
+        (ResourceState::Unknown, "teleporting", Color::Reset),
+    ] {
+        let mut app = App::new();
+        let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+        app.update(refresh_completed(
+            initial,
+            Ok(container_snapshot(
+                &[("container-a", "api", "nginx:1.27")],
+                state,
+            )),
+        ));
+
+        assert_eq!(
+            foreground_of(app.state(), 100, 24, status),
+            colour,
+            "{state:?} status should be rendered in {colour:?}"
+        );
+    }
+}
+
+#[test]
+fn a_resource_name_is_left_uncoloured_by_its_resource_state() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+
+    assert_eq!(foreground_of(app.state(), 100, 24, "api"), Color::Reset);
+}
+
+#[test]
 fn bracket_keys_switch_the_active_workspace() {
     let mut app = App::new();
     let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
@@ -1232,7 +1388,10 @@ fn container_snapshot(
             "exited",
             vec![ResourceCommand::Start, ResourceCommand::Delete],
         ),
-        ResourceState::Paused => ("paused", vec![ResourceCommand::Delete]),
+        ResourceState::Paused => (
+            "paused",
+            vec![ResourceCommand::Resume, ResourceCommand::Delete],
+        ),
         ResourceState::Transitioning => ("restarting", vec![ResourceCommand::Delete]),
         ResourceState::Broken => ("dead", vec![ResourceCommand::Delete]),
         ResourceState::Unknown => ("teleporting", vec![ResourceCommand::Delete]),

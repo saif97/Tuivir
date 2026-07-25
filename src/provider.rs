@@ -30,6 +30,9 @@ pub enum ResourceCommand {
     Start,
     Stop,
     Restart,
+    /// Returns a suspended Resource to running — Docker `unpause`, Incus
+    /// `unfreeze`.
+    Resume,
     Delete,
 }
 
@@ -39,6 +42,7 @@ impl fmt::Display for ResourceCommand {
             Self::Start => "start",
             Self::Stop => "stop",
             Self::Restart => "restart",
+            Self::Resume => "resume",
             Self::Delete => "delete",
         };
         formatter.write_str(name)

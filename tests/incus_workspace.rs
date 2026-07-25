@@ -152,6 +152,24 @@ async fn incus_restart_generates_the_expected_cli_request() {
 }
 
 #[tokio::test]
+async fn incus_resume_generates_the_expected_cli_request() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("incus", &["unfreeze", "instance-a"]),
+        success(""),
+    )]);
+
+    IncusWorkspace
+        .execute_command(
+            &cli,
+            &ResourceId::new("instance-a"),
+            ResourceCommand::Resume,
+            ResourceState::Paused,
+        )
+        .await
+        .expect("Incus resume succeeds");
+}
+
+#[tokio::test]
 async fn deleting_a_stopped_instance_generates_the_expected_cli_request() {
     let cli = FixtureCli::new([(
         ProcessSpec::new("incus", &["delete", "instance-a"]),
@@ -225,6 +243,41 @@ async fn incus_maps_every_instance_status_into_the_shared_vocabulary() {
             // somewhere honest rather than masquerade as stopped.
             ("future", ResourceState::Unknown),
         ]
+    );
+}
+
+/// `incus unfreeze` succeeds only against a frozen instance, so no other state
+/// may offer the Command that runs it.
+#[tokio::test]
+async fn only_a_frozen_instance_offers_the_resume_command() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("incus", &["list", "--format=json"]),
+        success(include_str!("fixtures/incus/mixed-state-instances.json")),
+    )]);
+
+    let snapshot = IncusWorkspace
+        .refresh(&cli)
+        .await
+        .expect("fixture lists instances");
+
+    let resumable = snapshot
+        .resources()
+        .filter(|resource| {
+            resource
+                .available_commands
+                .contains(&ResourceCommand::Resume)
+        })
+        .map(|resource| resource.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(resumable, ["cache"]);
+
+    let frozen = snapshot
+        .resources()
+        .find(|resource| resource.name == "cache")
+        .expect("fixture has a frozen instance");
+    assert_eq!(
+        frozen.available_commands,
+        [ResourceCommand::Resume, ResourceCommand::Delete]
     );
 }
 

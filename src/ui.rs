@@ -1,6 +1,7 @@
 use ratatui::{
     Frame, Terminal,
     backend::TestBackend,
+    buffer::Cell,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
@@ -244,7 +245,10 @@ fn render_workspace_panel(
                     } else {
                         " "
                     };
-                    ListItem::new(format!("{marker} {}  {status}", resource.name))
+                    ListItem::new(Line::from(vec![
+                        Span::raw(format!("{marker} {}  ", resource.name)),
+                        Span::styled(status.to_owned(), resource_state_style(resource.state)),
+                    ]))
                 })
                 .collect::<Vec<_>>();
             let items = if items.is_empty() {
@@ -267,6 +271,23 @@ fn render_workspace_panel(
             );
         }
     }
+}
+
+/// Colours a Resource's status by its Resource State, so a paused or broken
+/// Resource is distinguishable without reading the text.
+///
+/// `Unknown` is deliberately left neutral: a status this Provider Workspace
+/// does not recognise must not borrow the colour of a state Virtui understands.
+fn resource_state_style(state: ResourceState) -> Style {
+    let colour = match state {
+        ResourceState::Running => Color::Green,
+        ResourceState::Stopped => Color::DarkGray,
+        ResourceState::Paused => Color::Yellow,
+        ResourceState::Transitioning => Color::Blue,
+        ResourceState::Broken => Color::Red,
+        ResourceState::Unknown => Color::Reset,
+    };
+    Style::default().fg(colour)
 }
 
 fn panel_title_style(focused: bool) -> Style {
@@ -309,19 +330,36 @@ fn render_details_panel(provider: &ProviderState, frame: &mut Frame<'_>, area: R
 }
 
 pub fn render_to_text(state: &AppState, width: u16, height: u16) -> String {
+    render_to_buffer(state, width, height, |cell| cell.symbol().to_owned())
+        .into_iter()
+        .map(|row| row.concat())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Renders one cell per screen position, reporting only its foreground colour.
+///
+/// This is the colour counterpart of [`render_to_text`]: the two share a
+/// coordinate system, so a test can locate text in one and read its colour from
+/// the other.
+pub fn render_foreground_colours(state: &AppState, width: u16, height: u16) -> Vec<Vec<Color>> {
+    render_to_buffer(state, width, height, |cell| cell.fg)
+}
+
+fn render_to_buffer<T>(
+    state: &AppState,
+    width: u16,
+    height: u16,
+    read: impl Fn(&Cell) -> T,
+) -> Vec<Vec<T>> {
     let backend = TestBackend::new(width, height);
     let mut terminal = Terminal::new(backend).expect("test terminal");
     terminal.draw(|frame| render(state, frame)).expect("draw");
     let buffer = terminal.backend().buffer();
 
     (0..height)
-        .map(|y| {
-            (0..width)
-                .map(|x| buffer[(x, y)].symbol())
-                .collect::<String>()
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+        .map(|y| (0..width).map(|x| read(&buffer[(x, y)])).collect())
+        .collect()
 }
 
 #[cfg(test)]

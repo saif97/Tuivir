@@ -136,6 +136,7 @@ impl ProviderWorkspace for DockerWorkspace {
                 ResourceCommand::Start => "start",
                 ResourceCommand::Stop => "stop",
                 ResourceCommand::Restart => "restart",
+                ResourceCommand::Resume => "unpause",
                 ResourceCommand::Delete => "rm",
             };
             let mut args = vec!["container", verb];
@@ -183,13 +184,14 @@ fn docker_commands(state: ResourceState) -> Vec<ResourceCommand> {
             ResourceCommand::Delete,
         ],
         ResourceState::Stopped => vec![ResourceCommand::Start, ResourceCommand::Delete],
-        // Starting a paused container fails — it needs an unpause Virtui does
-        // not offer yet — and a transitioning, dead, or unrecognised container
-        // has no lifecycle Command that reliably applies. Deletion always does.
-        ResourceState::Paused
-        | ResourceState::Transitioning
-        | ResourceState::Broken
-        | ResourceState::Unknown => vec![ResourceCommand::Delete],
+        // A paused container resumes rather than starts: `docker container
+        // start` fails against it, and `unpause` fails against everything else.
+        ResourceState::Paused => vec![ResourceCommand::Resume, ResourceCommand::Delete],
+        // A transitioning, dead, or unrecognised container has no lifecycle
+        // Command that reliably applies. Deletion always does.
+        ResourceState::Transitioning | ResourceState::Broken | ResourceState::Unknown => {
+            vec![ResourceCommand::Delete]
+        }
     }
 }
 
