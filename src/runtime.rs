@@ -4,8 +4,10 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use tokio::time::{Instant, Interval, MissedTickBehavior};
 
 use crate::{
-    app::{App, AppEvent},
+    app::{App, AppEvent, FocusedPanel},
     cli::CliRunner,
+    docker::DockerWorkspace,
+    incus::IncusWorkspace,
     provider::{ProviderAction, ProviderDiscovery, ProviderId, ProviderWorkspace},
 };
 
@@ -24,14 +26,22 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> (ShellControl, Vec<ProviderAc
     }
     match key.code {
         KeyCode::Char('q') | KeyCode::Esc => (ShellControl::Quit, Vec::new()),
-        KeyCode::Char('j') | KeyCode::Down => (
-            ShellControl::Continue,
-            app.update(AppEvent::SelectNextResource),
-        ),
-        KeyCode::Char('k') | KeyCode::Up => (
-            ShellControl::Continue,
-            app.update(AppEvent::SelectPreviousResource),
-        ),
+        KeyCode::Char('1') => (ShellControl::Continue, app.update(AppEvent::FocusProviders)),
+        KeyCode::Char('2') => (ShellControl::Continue, app.update(AppEvent::FocusResources)),
+        KeyCode::Char('j') | KeyCode::Down => {
+            let event = match app.state().focused_panel {
+                FocusedPanel::Providers => AppEvent::SelectNextProvider,
+                FocusedPanel::Resources => AppEvent::SelectNextResource,
+            };
+            (ShellControl::Continue, app.update(event))
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            let event = match app.state().focused_panel {
+                FocusedPanel::Providers => AppEvent::SelectPreviousProvider,
+                FocusedPanel::Resources => AppEvent::SelectPreviousResource,
+            };
+            (ShellControl::Continue, app.update(event))
+        }
         KeyCode::Char('r') => (ShellControl::Continue, app.update(AppEvent::ManualRefresh)),
         KeyCode::Char(']') => (
             ShellControl::Continue,
@@ -80,6 +90,16 @@ pub struct ProviderRuntime {
 }
 
 impl ProviderRuntime {
+    pub fn with_builtin_providers(cli: Arc<dyn CliRunner>) -> Self {
+        Self::new(
+            vec![
+                Arc::new(DockerWorkspace) as Arc<dyn ProviderWorkspace>,
+                Arc::new(IncusWorkspace) as Arc<dyn ProviderWorkspace>,
+            ],
+            cli,
+        )
+    }
+
     pub fn new(workspaces: Vec<Arc<dyn ProviderWorkspace>>, cli: Arc<dyn CliRunner>) -> Self {
         Self {
             workspaces: workspaces
