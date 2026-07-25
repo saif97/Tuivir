@@ -504,6 +504,278 @@ fn failed_resource_command_identifies_provider_resource_and_attempted_command() 
 }
 
 #[test]
+fn selecting_another_resource_keeps_an_in_flight_resource_command() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[
+            ("container-a", "api", "nginx:1.27"),
+            ("container-b", "worker", "alpine:3.21"),
+        ])),
+    ));
+    let restart =
+        command_request(app.update(AppEvent::ResourceCommandInvoked(ResourceCommand::Restart)));
+
+    app.update(AppEvent::SelectNextResource);
+    let follow_up = app.update(command_completed(restart, Ok(())));
+
+    assert_eq!(
+        follow_up.len(),
+        1,
+        "the completed Resource Command still refreshes its Provider Workspace"
+    );
+}
+
+#[test]
+fn switching_provider_workspaces_keeps_an_in_flight_resource_command() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+    let restart =
+        command_request(app.update(AppEvent::ResourceCommandInvoked(ResourceCommand::Restart)));
+    app.update(AppEvent::ProviderDiscovered(incus_discovery()));
+    let incus_refresh = refresh_request(app.update(AppEvent::SelectNextProvider));
+    app.update(refresh_completed(
+        incus_refresh,
+        Ok(incus_snapshot(&[("instance-a", "gateway", "Running")])),
+    ));
+
+    app.update(command_completed(
+        restart,
+        Err(WorkspaceError::new("permission denied")),
+    ));
+
+    let screen = render_to_text(app.state(), 160, 24);
+    assert!(
+        screen.contains("Docker restart failed for api (container-a): permission denied"),
+        "rendered screen:\n{screen}"
+    );
+}
+
+#[test]
+fn a_running_resource_command_shows_a_status_identifying_provider_resource_and_command() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+
+    app.update(AppEvent::ResourceCommandInvoked(ResourceCommand::Restart));
+
+    let screen = render_to_text(app.state(), 160, 24);
+    assert!(
+        screen.contains("Running Docker restart for api (container-a)"),
+        "rendered screen:\n{screen}"
+    );
+}
+
+#[test]
+fn a_successful_resource_command_refreshes_only_its_own_provider_workspace() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+    let restart =
+        command_request(app.update(AppEvent::ResourceCommandInvoked(ResourceCommand::Restart)));
+    app.update(AppEvent::ProviderDiscovered(incus_discovery()));
+    let incus_refresh = refresh_request(app.update(AppEvent::SelectNextProvider));
+    app.update(refresh_completed(
+        incus_refresh,
+        Ok(incus_snapshot(&[("instance-a", "gateway", "Running")])),
+    ));
+
+    let follow_up = app.update(command_completed(restart, Ok(())));
+
+    assert!(
+        follow_up.is_empty(),
+        "a Docker Resource Command does not refresh the active Incus workspace"
+    );
+}
+
+#[test]
+fn a_failed_resource_command_opens_an_error_popup_over_another_active_workspace() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+    let restart =
+        command_request(app.update(AppEvent::ResourceCommandInvoked(ResourceCommand::Restart)));
+    app.update(AppEvent::ProviderDiscovered(incus_discovery()));
+    let incus_refresh = refresh_request(app.update(AppEvent::SelectNextProvider));
+    app.update(refresh_completed(
+        incus_refresh,
+        Ok(incus_snapshot(&[("instance-a", "gateway", "Running")])),
+    ));
+
+    app.update(command_completed(
+        restart,
+        Err(WorkspaceError::new("permission denied")),
+    ));
+
+    let screen = render_to_text(app.state(), 160, 24);
+    assert!(
+        screen.contains("Command failed"),
+        "rendered screen:\n{screen}"
+    );
+    assert!(
+        screen.contains("Docker restart failed for api (container-a): permission denied"),
+        "rendered screen:\n{screen}"
+    );
+}
+
+#[test]
+fn escape_dismisses_the_command_failure_popup_without_quitting() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+    let restart =
+        command_request(app.update(AppEvent::ResourceCommandInvoked(ResourceCommand::Restart)));
+    app.update(command_completed(
+        restart,
+        Err(WorkspaceError::new("permission denied")),
+    ));
+
+    assert!(
+        render_to_text(app.state(), 160, 24).contains("Press Esc to dismiss."),
+        "the failure popup says how to dismiss it"
+    );
+    let (control, requests) = handle_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+
+    assert_eq!(control, ShellControl::Continue);
+    assert!(requests.is_empty());
+    let screen = render_to_text(app.state(), 160, 24);
+    assert!(
+        !screen.contains("Command failed"),
+        "rendered screen:\n{screen}"
+    );
+}
+
+#[test]
+fn the_command_failure_popup_keeps_the_whole_message_on_a_narrow_terminal() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+    let restart =
+        command_request(app.update(AppEvent::ResourceCommandInvoked(ResourceCommand::Restart)));
+
+    app.update(command_completed(
+        restart,
+        Err(WorkspaceError::new("permission denied")),
+    ));
+
+    let screen = render_to_text(app.state(), 60, 24);
+    assert!(
+        screen.contains("denied"),
+        "the popup wraps instead of clipping its message:\n{screen}"
+    );
+}
+
+#[test]
+fn a_successful_resource_command_clears_its_status_without_opening_a_popup() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+    let restart =
+        command_request(app.update(AppEvent::ResourceCommandInvoked(ResourceCommand::Restart)));
+    assert!(
+        render_to_text(app.state(), 160, 24).contains("Running Docker restart for api"),
+        "the dispatched Resource Command is visible while it runs"
+    );
+
+    let refresh = refresh_request(app.update(command_completed(restart, Ok(()))));
+    app.update(refresh_completed(
+        refresh,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.28")])),
+    ));
+
+    let screen = render_to_text(app.state(), 160, 24);
+    assert!(
+        !screen.contains("Running Docker restart for api"),
+        "rendered screen:\n{screen}"
+    );
+    assert!(
+        !screen.contains("Command failed"),
+        "rendered screen:\n{screen}"
+    );
+    assert!(
+        screen.contains("Image: nginx:1.28"),
+        "the refreshed Provider Workspace is the success feedback:\n{screen}"
+    );
+}
+
+#[test]
+fn switching_providers_invalidates_a_refresh_but_not_a_running_resource_command() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+    let restart =
+        command_request(app.update(AppEvent::ResourceCommandInvoked(ResourceCommand::Restart)));
+    let stale_docker = refresh_request(app.update(AppEvent::ManualRefresh));
+    app.update(AppEvent::ProviderDiscovered(incus_discovery()));
+    let incus_refresh = refresh_request(app.update(AppEvent::SelectNextProvider));
+    app.update(refresh_completed(
+        incus_refresh,
+        Ok(incus_snapshot(&[("instance-a", "gateway", "Running")])),
+    ));
+    let current_screen = render_to_text(app.state(), 160, 24);
+
+    app.update(refresh_completed(
+        stale_docker,
+        Ok(snapshot(&[("container-z", "zombie", "nginx:1.27")])),
+    ));
+
+    assert_eq!(
+        render_to_text(app.state(), 160, 24),
+        current_screen,
+        "a stale refresh snapshot does not disturb the Active Workspace"
+    );
+    assert!(current_screen.contains("Running Docker restart for api (container-a)"));
+
+    app.update(AppEvent::SelectPreviousProvider);
+    let docker_screen = render_to_text(app.state(), 160, 24);
+    assert!(
+        !docker_screen.contains("zombie"),
+        "a stale refresh snapshot cannot overwrite newer application state:\n{docker_screen}"
+    );
+
+    app.update(command_completed(
+        restart,
+        Err(WorkspaceError::new("permission denied")),
+    ));
+
+    let screen = render_to_text(app.state(), 160, 24);
+    assert!(
+        screen.contains("Docker restart failed for api (container-a): permission denied"),
+        "rendered screen:\n{screen}"
+    );
+    assert!(
+        !screen.contains("Running Docker restart for api (container-a)"),
+        "rendered screen:\n{screen}"
+    );
+}
+
+#[test]
 fn question_mark_shows_registered_commands_for_the_focused_resource() {
     let mut app = App::new();
     let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
@@ -871,6 +1143,33 @@ fn incus_snapshot(instances: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
 
 fn refresh_request(requests: Vec<ProviderRequest>) -> ProviderRequest {
     requests.into_iter().next().expect("refresh request")
+}
+
+fn command_request(requests: Vec<ProviderRequest>) -> ProviderRequest {
+    requests
+        .into_iter()
+        .next()
+        .expect("Resource Command request")
+}
+
+fn command_completed(request: ProviderRequest, result: Result<(), WorkspaceError>) -> AppEvent {
+    match request {
+        ProviderRequest::ExecuteResourceCommand {
+            request_id,
+            provider_id,
+            resource_id,
+            resource_name,
+            command,
+        } => AppEvent::ResourceCommandCompleted {
+            request_id,
+            provider_id,
+            resource_id,
+            resource_name,
+            command,
+            result,
+        },
+        ProviderRequest::RefreshWorkspace { .. } => panic!("expected Resource Command request"),
+    }
 }
 
 fn refresh_completed(
