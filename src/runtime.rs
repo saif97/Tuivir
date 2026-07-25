@@ -37,6 +37,15 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> (ShellControl, Vec<ProviderRe
             _ => (ShellControl::Continue, Vec::new()),
         };
     }
+    if app.state().command_error.is_some() {
+        return match key.code {
+            KeyCode::Esc | KeyCode::Enter => (
+                ShellControl::Continue,
+                app.update(AppEvent::DismissCommandError),
+            ),
+            _ => (ShellControl::Continue, Vec::new()),
+        };
+    }
     if app.state().help_overlay.is_some() {
         return match key.code {
             KeyCode::Char('?') | KeyCode::Char('q') | KeyCode::Esc => {

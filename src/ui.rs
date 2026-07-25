@@ -10,12 +10,18 @@ use ratatui::{
 use crate::app::{AppState, FocusedPanel, ProviderState, WorkspaceState};
 
 pub fn render(state: &AppState, frame: &mut Frame<'_>) {
+    let status_height = u16::from(!state.running_commands.is_empty());
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(1)])
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(1),
+            Constraint::Length(status_height),
+        ])
         .split(frame.area());
 
     render_provider_bar(state, frame, rows[0]);
+    render_running_command_status(state, frame, rows[2]);
 
     let Some(provider) = state
         .active_provider
@@ -39,7 +45,7 @@ pub fn render(state: &AppState, frame: &mut Frame<'_>) {
         frame,
         columns[0],
     );
-    render_details_panel(provider, state.command_error.as_deref(), frame, columns[1]);
+    render_details_panel(provider, frame, columns[1]);
 
     if let Some(help) = &state.help_overlay {
         let area = centered_rect(42, (help.entries.len() as u16 + 2).max(4), frame.area());
@@ -53,6 +59,30 @@ pub fn render(state: &AppState, frame: &mut Frame<'_>) {
             Paragraph::new(lines).block(
                 Block::default()
                     .title(format!(" Commands for {} ", help.target))
+                    .borders(Borders::ALL),
+            ),
+            area,
+        );
+    }
+
+    if let Some(error) = &state.command_error {
+        // Narrow terminals wrap the message instead of clipping it: an error
+        // that cannot name its Provider, Resource, and Command is not an
+        // identifying one.
+        let message_width = error.chars().count() as u16;
+        let width = (message_width + 4).min(frame.area().width);
+        let wrapped_lines = message_width.div_ceil(width.saturating_sub(2).max(1));
+        let area = centered_rect(width, wrapped_lines + 3, frame.area());
+        frame.render_widget(Clear, area);
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::styled(error.as_str(), Style::default().fg(Color::Red)),
+                Line::from("Press Esc to dismiss."),
+            ])
+            .wrap(ratatui::widgets::Wrap { trim: true })
+            .block(
+                Block::default()
+                    .title(" Command failed ")
                     .borders(Borders::ALL),
             ),
             area,
@@ -89,6 +119,37 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
         width: width.min(area.width),
         height: height.min(area.height),
     }
+}
+
+/// Shows every Resource Command still running, wherever the user has navigated.
+///
+/// Each entry names the Provider, Resource, and Command it was dispatched for,
+/// so the status identifies its target even while another Provider Workspace
+/// is active.
+fn render_running_command_status(state: &AppState, frame: &mut Frame<'_>, area: Rect) {
+    if state.running_commands.is_empty() {
+        return;
+    }
+    let status = state
+        .running_commands
+        .iter()
+        .map(|running| {
+            format!(
+                "Running {} {} for {} ({})…",
+                running.provider_name, running.command, running.resource_name, running.resource_id
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("   ");
+    frame.render_widget(
+        Paragraph::new(Line::styled(
+            status,
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )),
+        area,
+    );
 }
 
 fn render_provider_bar(state: &AppState, frame: &mut Frame<'_>, area: Rect) {
@@ -214,13 +275,8 @@ fn panel_title_style(focused: bool) -> Style {
     }
 }
 
-fn render_details_panel(
-    provider: &ProviderState,
-    command_error: Option<&str>,
-    frame: &mut Frame<'_>,
-    area: Rect,
-) {
-    let mut details = match &provider.workspace_state {
+fn render_details_panel(provider: &ProviderState, frame: &mut Frame<'_>, area: Rect) {
+    let details = match &provider.workspace_state {
         WorkspaceState::Ready(snapshot) => snapshot
             .resources()
             .find(|resource| provider.selected_resource.as_ref() == Some(&resource.id))
@@ -240,10 +296,6 @@ fn render_details_panel(
             .unwrap_or_else(|| vec![Line::from("Select a resource")]),
         _ => vec![Line::from("No details available")],
     };
-    if let Some(error) = command_error {
-        details.push(Line::from(""));
-        details.push(Line::styled(error, Style::default().fg(Color::Red)));
-    }
     frame.render_widget(
         Paragraph::new(details)
             .wrap(ratatui::widgets::Wrap { trim: true })

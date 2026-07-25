@@ -22,6 +22,7 @@ pub enum AppEvent {
     ToggleHelp,
     ConfirmResourceCommand,
     CancelConfirmation,
+    DismissCommandError,
     /// The result of an earlier [`ProviderRequest::RefreshWorkspace`].
     ///
     /// The application verifies the request is still pending before accepting
@@ -78,6 +79,25 @@ pub struct AppState {
     pub help_overlay: Option<HelpOverlay>,
     pub confirmation: Option<ResourceCommandConfirmation>,
     pub command_error: Option<String>,
+    /// Dispatched Resource Commands that have not completed yet, in dispatch
+    /// order.
+    ///
+    /// Each entry stays attached to the Provider and Resource it was
+    /// dispatched for until completion, so navigating to another Resource or
+    /// Provider Workspace never discards one, and the shell can show a global
+    /// progress status that identifies the original target.
+    pub running_commands: Vec<RunningResourceCommand>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+/// One dispatched Resource Command awaiting its completion.
+pub struct RunningResourceCommand {
+    pub request_id: ProviderRequestId,
+    pub provider_id: ProviderId,
+    pub provider_name: String,
+    pub resource_id: ResourceId,
+    pub resource_name: String,
+    pub command: ResourceCommand,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -106,11 +126,14 @@ pub struct App {
     commands: CommandRegistry,
     /// Monotonically allocates request IDs in the main event loop.
     next_request_id: u64,
-    /// Requests whose completions may still update their Provider Workspace.
+    /// Refresh requests whose snapshots may still update their Provider
+    /// Workspace.
     ///
-    /// Removing an entry invalidates a background completion without needing
-    /// shared mutable state or cancellation handles in `AppState`.
-    pending: HashMap<ProviderRequestId, ProviderId>,
+    /// Removing an entry invalidates a background snapshot without needing
+    /// shared mutable state or cancellation handles in `AppState`. Navigating
+    /// away from a Provider Workspace drops its entries so a stale snapshot
+    /// cannot overwrite newer application state.
+    pending_refreshes: HashMap<ProviderRequestId, ProviderId>,
 }
 
 impl Default for App {
@@ -125,7 +148,7 @@ impl App {
             state: AppState::default(),
             commands: CommandRegistry::default(),
             next_request_id: 1,
-            pending: HashMap::new(),
+            pending_refreshes: HashMap::new(),
         }
     }
 
@@ -183,6 +206,10 @@ impl App {
                 self.state.confirmation = None;
                 Vec::new()
             }
+            AppEvent::DismissCommandError => {
+                self.state.command_error = None;
+                Vec::new()
+            }
             AppEvent::RefreshCompleted {
                 request_id,
                 provider_id,
@@ -238,7 +265,7 @@ impl App {
         provider_id: ProviderId,
         result: Result<WorkspaceSnapshot, WorkspaceError>,
     ) -> Vec<ProviderRequest> {
-        if self.pending.remove(&request_id) != Some(provider_id.clone()) {
+        if self.pending_refreshes.remove(&request_id) != Some(provider_id.clone()) {
             return Vec::new();
         }
         let Some(provider) = self
@@ -274,7 +301,8 @@ impl App {
     fn start_refresh(&mut self, provider_id: ProviderId) -> ProviderRequest {
         let request_id = ProviderRequestId(self.next_request_id);
         self.next_request_id += 1;
-        self.pending.insert(request_id, provider_id.clone());
+        self.pending_refreshes
+            .insert(request_id, provider_id.clone());
         ProviderRequest::RefreshWorkspace {
             request_id,
             provider_id,
@@ -290,21 +318,18 @@ impl App {
         command: ResourceCommand,
         result: Result<(), WorkspaceError>,
     ) -> Vec<ProviderRequest> {
-        if self.pending.remove(&request_id) != Some(provider_id.clone()) {
-            return Vec::new();
-        }
-        let current_provider_name = self
+        let Some(running) = self
             .state
-            .active_provider
-            .and_then(|active| self.state.providers.get(active))
-            .filter(|provider| {
-                provider.id == provider_id
-                    && provider.selected_resource.as_ref() == Some(&resource_id)
+            .running_commands
+            .iter()
+            .position(|running| {
+                running.request_id == request_id && running.provider_id == provider_id
             })
-            .map(|provider| provider.name.clone());
-        let Some(provider_name) = current_provider_name else {
+            .map(|index| self.state.running_commands.remove(index))
+        else {
             return Vec::new();
         };
+        let provider_name = running.provider_name;
         if let Err(error) = result {
             self.state.command_error = Some(format!(
                 "{provider_name} {command} failed for {resource_name} ({resource_id}): {}",
@@ -313,7 +338,17 @@ impl App {
             return Vec::new();
         }
         self.state.command_error = None;
+        if !self.is_active_provider(&provider_id) {
+            return Vec::new();
+        }
         self.refresh_active_provider()
+    }
+
+    fn is_active_provider(&self, provider_id: &ProviderId) -> bool {
+        self.state
+            .active_provider
+            .and_then(|active| self.state.providers.get(active))
+            .is_some_and(|provider| &provider.id == provider_id)
     }
 
     fn handle_resource_command(&mut self, command: ResourceCommand) -> Vec<ProviderRequest> {
@@ -352,7 +387,13 @@ impl App {
             });
             return Vec::new();
         }
-        self.dispatch_resource_command(provider_id, resource_id, resource_name, command)
+        self.dispatch_resource_command(
+            provider_id,
+            provider_name,
+            resource_id,
+            resource_name,
+            command,
+        )
     }
 
     fn confirm_resource_command(&mut self) -> Vec<ProviderRequest> {
@@ -361,6 +402,7 @@ impl App {
         };
         self.dispatch_resource_command(
             confirmation.provider_id,
+            confirmation.provider_name,
             confirmation.resource_id,
             confirmation.resource_name,
             confirmation.command,
@@ -370,6 +412,7 @@ impl App {
     fn dispatch_resource_command(
         &mut self,
         provider_id: ProviderId,
+        provider_name: String,
         resource_id: ResourceId,
         resource_name: String,
         command: ResourceCommand,
@@ -377,7 +420,14 @@ impl App {
         self.state.command_error = None;
         let request_id = ProviderRequestId(self.next_request_id);
         self.next_request_id += 1;
-        self.pending.insert(request_id, provider_id.clone());
+        self.state.running_commands.push(RunningResourceCommand {
+            request_id,
+            provider_id: provider_id.clone(),
+            provider_name,
+            resource_id: resource_id.clone(),
+            resource_name: resource_name.clone(),
+            command,
+        });
 
         vec![ProviderRequest::ExecuteResourceCommand {
             request_id,
@@ -446,7 +496,11 @@ impl App {
         else {
             return Vec::new();
         };
-        if self.pending.values().any(|pending| pending == &provider_id) {
+        if self
+            .pending_refreshes
+            .values()
+            .any(|pending| pending == &provider_id)
+        {
             return Vec::new();
         }
         vec![self.start_refresh(provider_id)]
@@ -486,7 +540,7 @@ impl App {
             return Vec::new();
         };
         let previous_provider = self.state.providers[active_provider].id.clone();
-        self.pending
+        self.pending_refreshes
             .retain(|_, provider_id| provider_id != &previous_provider);
         self.state.active_provider =
             Some((active_provider as isize + delta).rem_euclid(provider_count as isize) as usize);
