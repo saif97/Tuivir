@@ -160,6 +160,24 @@ async fn docker_stop_generates_the_expected_cli_request() {
 }
 
 #[tokio::test]
+async fn docker_resume_generates_the_expected_cli_request() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("docker", &["container", "unpause", "container-a"]),
+        success("container-a\n"),
+    )]);
+
+    DockerWorkspace
+        .execute_command(
+            &cli,
+            &ResourceId::new("container-a"),
+            ResourceCommand::Resume,
+            ResourceState::Paused,
+        )
+        .await
+        .expect("Docker resume succeeds");
+}
+
+#[tokio::test]
 async fn deleting_a_stopped_container_generates_the_expected_cli_request() {
     let cli = FixtureCli::new([(
         ProcessSpec::new("docker", &["container", "rm", "container-a"]),
@@ -255,6 +273,41 @@ async fn docker_maps_every_container_state_into_the_shared_vocabulary() {
             // somewhere honest rather than masquerade as stopped.
             ("container-future", ResourceState::Unknown),
         ]
+    );
+}
+
+/// `docker container unpause` succeeds only against a paused container, so no
+/// other state may offer the Command that runs it.
+#[tokio::test]
+async fn only_a_paused_container_offers_the_resume_command() {
+    let cli = FixtureCli::new([(
+        container_ls(),
+        success(include_str!("fixtures/docker/mixed-state-containers.jsonl")),
+    )]);
+
+    let snapshot = DockerWorkspace
+        .refresh(&cli)
+        .await
+        .expect("fixture lists containers");
+
+    let resumable = snapshot
+        .resources()
+        .filter(|resource| {
+            resource
+                .available_commands
+                .contains(&ResourceCommand::Resume)
+        })
+        .map(|resource| resource.id.0.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(resumable, ["container-paused"]);
+
+    let paused = snapshot
+        .resources()
+        .find(|resource| resource.id.0 == "container-paused")
+        .expect("fixture has a paused container");
+    assert_eq!(
+        paused.available_commands,
+        [ResourceCommand::Resume, ResourceCommand::Delete]
     );
 }
 

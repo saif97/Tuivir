@@ -140,6 +140,7 @@ impl ProviderWorkspace for IncusWorkspace {
                 ResourceCommand::Start => "start",
                 ResourceCommand::Stop => "stop",
                 ResourceCommand::Restart => "restart",
+                ResourceCommand::Resume => "unfreeze",
                 ResourceCommand::Delete => "delete",
             };
             let mut args = vec![verb];
@@ -186,13 +187,14 @@ fn incus_commands(state: ResourceState) -> Vec<ResourceCommand> {
             ResourceCommand::Delete,
         ],
         ResourceState::Stopped => vec![ResourceCommand::Start, ResourceCommand::Delete],
-        // Starting a frozen instance fails — it needs an unfreeze Virtui does
-        // not offer yet — and a transitioning, errored, or unrecognised
-        // instance has no lifecycle Command that reliably applies.
-        ResourceState::Paused
-        | ResourceState::Transitioning
-        | ResourceState::Broken
-        | ResourceState::Unknown => vec![ResourceCommand::Delete],
+        // A frozen instance resumes rather than starts: `incus start` fails
+        // against it, and `incus unfreeze` fails against everything else.
+        ResourceState::Paused => vec![ResourceCommand::Resume, ResourceCommand::Delete],
+        // A transitioning, errored, or unrecognised instance has no lifecycle
+        // Command that reliably applies. Deletion always does.
+        ResourceState::Transitioning | ResourceState::Broken | ResourceState::Unknown => {
+            vec![ResourceCommand::Delete]
+        }
     }
 }
 

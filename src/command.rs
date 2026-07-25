@@ -35,6 +35,7 @@ impl Default for CommandRegistry {
                 resource_command("resource.start", "Start", 'S', ResourceCommand::Start),
                 resource_command("resource.stop", "Stop", 's', ResourceCommand::Stop),
                 resource_command("resource.restart", "Restart", 'r', ResourceCommand::Restart),
+                resource_command("resource.resume", "Resume", 'p', ResourceCommand::Resume),
                 resource_command("resource.delete", "Delete", 'd', ResourceCommand::Delete),
             ],
         }

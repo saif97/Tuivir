@@ -13,3 +13,9 @@ Use the repository's five canonical triage roles. See `docs/agents/triage-labels
 ### Domain docs
 
 This is a single-context repository with `CONTEXT.md` and system-wide ADRs under `docs/adr/`. See `docs/agents/domain.md`.
+
+follow /TDD
+
+For referance you might find those projects useful 
+- /home/vibebox/projects/opensource/lazydocker/
+- /home/vibebox/projects/opensource/herdr/
