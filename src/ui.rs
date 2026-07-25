@@ -44,6 +44,7 @@ pub fn render(state: &AppState, frame: &mut Frame<'_>) {
     render_workspace_panel(
         provider,
         state.focused_panel == FocusedPanel::Resources,
+        state.hints.focus_resources.as_deref(),
         frame,
         columns[0],
     );
@@ -158,9 +159,13 @@ fn render_running_command_status(state: &AppState, frame: &mut Frame<'_>, area: 
 }
 
 fn render_provider_bar(state: &AppState, frame: &mut Frame<'_>, area: Rect) {
+    let providers_label = match &state.hints.focus_providers {
+        Some(key) => format!("[{key}] Providers"),
+        None => "Providers".to_owned(),
+    };
     let mut provider_spans = vec![
         Span::styled(
-            "[1] Providers",
+            providers_label,
             panel_title_style(state.focused_panel == FocusedPanel::Providers),
         ),
         Span::raw("  "),
@@ -184,6 +189,7 @@ fn render_provider_bar(state: &AppState, frame: &mut Frame<'_>, area: Rect) {
 fn render_workspace_panel(
     provider: &ProviderState,
     focused: bool,
+    resources_hint: Option<&str>,
     frame: &mut Frame<'_>,
     area: Rect,
 ) {
@@ -205,7 +211,7 @@ fn render_workspace_panel(
         WorkspaceState::Loading => frame.render_widget(
             Paragraph::new("Refreshing…").block(
                 Block::default()
-                    .title(" [2] Resources ")
+                    .title(workspace_panel_title(resources_hint, "Resources"))
                     .title_style(title_style)
                     .borders(Borders::ALL),
             ),
@@ -222,7 +228,7 @@ fn render_workspace_panel(
             .wrap(ratatui::widgets::Wrap { trim: true })
             .block(
                 Block::default()
-                    .title(" [2] Error ")
+                    .title(workspace_panel_title(resources_hint, "Error"))
                     .title_style(title_style)
                     .borders(Borders::ALL),
             ),
@@ -263,7 +269,7 @@ fn render_workspace_panel(
             frame.render_widget(
                 List::new(items).block(
                     Block::default()
-                        .title(format!(" [2] {title} "))
+                        .title(workspace_panel_title(resources_hint, title))
                         .title_style(title_style)
                         .borders(Borders::ALL),
                 ),
@@ -297,6 +303,15 @@ fn panel_title_style(focused: bool) -> Style {
             .add_modifier(Modifier::BOLD)
     } else {
         Style::default()
+    }
+}
+
+/// Builds a workspace panel title that prefixes the focus key, or shows only the
+/// label when the focus Command is unbound.
+fn workspace_panel_title(resources_hint: Option<&str>, label: &str) -> String {
+    match resources_hint {
+        Some(key) => format!(" [{key}] {label} "),
+        None => format!(" {label} "),
     }
 }
 

@@ -10,7 +10,7 @@ use tokio::sync::{Notify, mpsc};
 use virtui::{
     app::{App, AppEvent, AppState},
     cli::{CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec},
-    command::Command,
+    command::{Command, CommandRegistry},
     docker::DockerWorkspace,
     provider::{
         ProviderDiscovery, ProviderId, ProviderRequest, Resource, ResourceCommand, ResourceId,
@@ -1708,4 +1708,48 @@ fn escape_does_not_quit_when_no_modal_is_open() {
 
     assert_eq!(control, ShellControl::Continue);
     assert!(requests.is_empty());
+}
+
+#[test]
+fn an_overridden_focus_key_renders_its_effective_hint() {
+    let registry = CommandRegistry::effective(&[(
+        "focus.providers".to_owned(),
+        vec!["9".to_owned()],
+    )])
+    .expect("a valid override");
+    let mut app = App::with_registry(registry);
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(
+        screen.starts_with("[9] Providers"),
+        "the panel hint follows the effective binding:\n{screen}"
+    );
+    assert!(
+        !screen.contains("[1] Providers"),
+        "the replaced default hint is gone:\n{screen}"
+    );
+}
+
+#[test]
+fn an_unbound_focus_command_omits_its_inline_hint() {
+    let registry =
+        CommandRegistry::effective(&[("focus.resources".to_owned(), vec![])]).expect("unbinding");
+    let mut app = App::with_registry(registry);
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(
+        !screen.contains("[2]"),
+        "an unbound focus command shows no inline hint:\n{screen}"
+    );
+    assert!(screen.contains("Containers"));
 }

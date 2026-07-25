@@ -79,6 +79,31 @@ pub struct AppState {
     /// Provider Workspace never discards one, and the shell can show a global
     /// progress status that identifies the original target.
     pub running_commands: Vec<RunningResourceCommand>,
+    /// The first effective binding for each Command whose key is shown inline,
+    /// derived from the same registry that drives dispatch and help so the
+    /// rendered hints cannot drift. `None` means the Command is unbound and its
+    /// hint is omitted.
+    pub hints: KeyHints,
+}
+
+/// First effective bindings projected for inline display.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct KeyHints {
+    pub focus_providers: Option<String>,
+    pub focus_resources: Option<String>,
+}
+
+impl KeyHints {
+    fn from_registry(registry: &CommandRegistry) -> Self {
+        Self {
+            focus_providers: registry
+                .first_key(Command::FocusProviders)
+                .map(|key| key.to_string()),
+            focus_resources: registry
+                .first_key(Command::FocusResources)
+                .map(|key| key.to_string()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -139,9 +164,18 @@ impl Default for App {
 
 impl App {
     pub fn new() -> Self {
+        Self::with_registry(CommandRegistry::default())
+    }
+
+    /// Builds the application around an effective registry, projecting its
+    /// first bindings into the state the renderer reads.
+    pub fn with_registry(commands: CommandRegistry) -> Self {
+        let hints = KeyHints::from_registry(&commands);
+        let mut state = AppState::default();
+        state.hints = hints;
         Self {
-            state: AppState::default(),
-            commands: CommandRegistry::default(),
+            state,
+            commands,
             next_request_id: 1,
             pending_refreshes: HashMap::new(),
         }
