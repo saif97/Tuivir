@@ -3,7 +3,7 @@ use std::{future::Future, pin::Pin};
 use serde::Deserialize;
 
 use crate::{
-    cli::{CliError, CliRunner, CommandSpec},
+    cli::{CliRunner, ProcessError, ProcessSpec},
     provider::{
         ProviderDiscovery, ProviderId, ProviderWorkspace, Resource, ResourceCommand, ResourceId,
         ResourcePanel, WorkspaceError, WorkspaceSnapshot,
@@ -40,16 +40,17 @@ impl ProviderWorkspace for DockerWorkspace {
     ) -> Pin<Box<dyn Future<Output = Option<ProviderDiscovery>> + Send + 'a>> {
         Box::pin(async move {
             let result = cli
-                .run(CommandSpec::new("docker", &["context", "show"]))
+                .run(ProcessSpec::new("docker", &["context", "show"]))
                 .await;
 
             match result {
-                Err(CliError::NotFound) => None,
-                Err(CliError::Failed(message)) => Some(discovery_with_error(message)),
-                Ok(output) if !output.success => Some(discovery_with_error(cli_message(
-                    &output.stderr,
-                    "Docker could not report its current context",
-                ))),
+                Err(ProcessError::ExecutableNotFound) => None,
+                Err(ProcessError::SpawnFailed(message)) => {
+                    Some(discovery_with_error(not_started(&message)))
+                }
+                Err(ProcessError::Exited(failure)) => Some(discovery_with_error(
+                    failure.message_or("Docker could not report its current context"),
+                )),
                 Ok(output) => Some(ProviderDiscovery {
                     id: self.id(),
                     name: PROVIDER_NAME.to_owned(),
@@ -66,7 +67,7 @@ impl ProviderWorkspace for DockerWorkspace {
     ) -> Pin<Box<dyn Future<Output = Result<WorkspaceSnapshot, WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
             let output = cli
-                .run(CommandSpec::new(
+                .run(ProcessSpec::new(
                     "docker",
                     &[
                         "container",
@@ -79,16 +80,16 @@ impl ProviderWorkspace for DockerWorkspace {
                 ))
                 .await
                 .map_err(|error| match error {
-                    CliError::NotFound => WorkspaceError::new("Docker CLI is no longer available"),
-                    CliError::Failed(message) => WorkspaceError::new(message),
+                    ProcessError::ExecutableNotFound => {
+                        WorkspaceError::new("Docker CLI is no longer available")
+                    }
+                    ProcessError::SpawnFailed(message) => {
+                        WorkspaceError::new(not_started(&message))
+                    }
+                    ProcessError::Exited(failure) => {
+                        refresh_error(failure.message_or("Docker could not list containers"))
+                    }
                 })?;
-
-            if !output.success {
-                return Err(refresh_error(cli_message(
-                    &output.stderr,
-                    "Docker could not list containers",
-                )));
-            }
 
             let resources = output
                 .stdout
@@ -134,19 +135,17 @@ impl ProviderWorkspace for DockerWorkspace {
                 ResourceCommand::Restart => "restart",
                 ResourceCommand::Delete => "rm",
             };
-            let output = cli
-                .run(CommandSpec::new(
-                    "docker",
-                    &["container", verb, resource_id.0.as_str()],
-                ))
-                .await
-                .map_err(command_cli_error)?;
-            if !output.success {
-                return Err(WorkspaceError::new(cli_message(
-                    &output.stderr,
-                    "Docker command failed",
-                )));
-            }
+            cli.run(ProcessSpec::new(
+                "docker",
+                &["container", verb, resource_id.0.as_str()],
+            ))
+            .await
+            .map_err(|error| {
+                command_error(
+                    error,
+                    &format!("Docker could not {command} container {resource_id}"),
+                )
+            })?;
             Ok(())
         })
     }
@@ -176,13 +175,8 @@ fn discovery_with_error(message: impl Into<String>) -> ProviderDiscovery {
     }
 }
 
-fn cli_message(stderr: &str, fallback: &str) -> String {
-    let stderr = stderr.trim();
-    if stderr.is_empty() {
-        fallback.to_owned()
-    } else {
-        stderr.to_owned()
-    }
+fn not_started(reason: &str) -> String {
+    format!("Docker CLI could not be started: {reason}")
 }
 
 fn refresh_error(message: impl Into<String>) -> WorkspaceError {
@@ -192,10 +186,11 @@ fn refresh_error(message: impl Into<String>) -> WorkspaceError {
     ))
 }
 
-fn command_cli_error(error: CliError) -> WorkspaceError {
+fn command_error(error: ProcessError, fallback: &str) -> WorkspaceError {
     let message = match error {
-        CliError::NotFound => "Docker CLI is no longer available".to_owned(),
-        CliError::Failed(message) => message,
+        ProcessError::ExecutableNotFound => "Docker CLI is no longer available".to_owned(),
+        ProcessError::SpawnFailed(message) => not_started(&message),
+        ProcessError::Exited(failure) => failure.message_or(fallback),
     };
     WorkspaceError::new(message)
 }

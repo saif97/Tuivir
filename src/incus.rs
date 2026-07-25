@@ -3,7 +3,7 @@ use std::{future::Future, pin::Pin};
 use serde::Deserialize;
 
 use crate::{
-    cli::{CliError, CliRunner, CommandSpec},
+    cli::{CliRunner, ProcessError, ProcessSpec},
     provider::{
         ProviderDiscovery, ProviderId, ProviderWorkspace, Resource, ResourceCommand, ResourceId,
         ResourcePanel, WorkspaceError, WorkspaceSnapshot,
@@ -36,37 +36,43 @@ impl ProviderWorkspace for IncusWorkspace {
     ) -> Pin<Box<dyn Future<Output = Option<ProviderDiscovery>> + Send + 'a>> {
         Box::pin(async move {
             let remote = match cli
-                .run(CommandSpec::new("incus", &["remote", "get-default"]))
+                .run(ProcessSpec::new("incus", &["remote", "get-default"]))
                 .await
             {
-                Err(CliError::NotFound) => return None,
-                Err(CliError::Failed(message)) => {
-                    return Some(discovery_error(message, "incus remote get-default"));
-                }
-                Ok(output) if !output.success => {
+                Err(ProcessError::ExecutableNotFound) => return None,
+                Err(ProcessError::SpawnFailed(message)) => {
                     return Some(discovery_error(
-                        output.stderr.trim(),
+                        not_started(&message),
+                        "incus remote get-default",
+                    ));
+                }
+                Err(ProcessError::Exited(failure)) => {
+                    return Some(discovery_error(
+                        failure.message_or("Incus could not report its default remote"),
                         "incus remote get-default",
                     ));
                 }
                 Ok(output) => output.stdout.trim().to_owned(),
             };
             let project = match cli
-                .run(CommandSpec::new("incus", &["project", "get-current"]))
+                .run(ProcessSpec::new("incus", &["project", "get-current"]))
                 .await
             {
-                Err(CliError::NotFound) => {
+                Err(ProcessError::ExecutableNotFound) => {
                     return Some(discovery_error(
                         "Incus CLI is no longer available",
                         "incus project get-current",
                     ));
                 }
-                Err(CliError::Failed(message)) => {
-                    return Some(discovery_error(message, "incus project get-current"));
-                }
-                Ok(output) if !output.success => {
+                Err(ProcessError::SpawnFailed(message)) => {
                     return Some(discovery_error(
-                        output.stderr.trim(),
+                        not_started(&message),
+                        "incus project get-current",
+                    ));
+                }
+                Err(ProcessError::Exited(failure)) => {
+                    return Some(discovery_error(
+                        failure.message_or("Incus could not report the current project"),
                         "incus project get-current",
                     ));
                 }
@@ -88,12 +94,9 @@ impl ProviderWorkspace for IncusWorkspace {
     ) -> Pin<Box<dyn Future<Output = Result<WorkspaceSnapshot, WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
             let output = cli
-                .run(CommandSpec::new("incus", &["list", "--format=json"]))
+                .run(ProcessSpec::new("incus", &["list", "--format=json"]))
                 .await
-                .map_err(cli_error)?;
-            if !output.success {
-                return Err(refresh_error(output.stderr.trim()));
-            }
+                .map_err(refresh_failure)?;
             let rows: Vec<InstanceRow> = serde_json::from_str(&output.stdout)
                 .map_err(|error| WorkspaceError::new(error.to_string()))?;
             let resources = rows
@@ -136,18 +139,14 @@ impl ProviderWorkspace for IncusWorkspace {
                 ResourceCommand::Restart => "restart",
                 ResourceCommand::Delete => "delete",
             };
-            let output = cli
-                .run(CommandSpec::new("incus", &[verb, resource_id.0.as_str()]))
+            cli.run(ProcessSpec::new("incus", &[verb, resource_id.0.as_str()]))
                 .await
-                .map_err(command_cli_error)?;
-            if !output.success {
-                let message = output.stderr.trim();
-                return Err(WorkspaceError::new(if message.is_empty() {
-                    "Incus command failed"
-                } else {
-                    message
-                }));
-            }
+                .map_err(|error| {
+                    command_error(
+                        error,
+                        &format!("Incus could not {command} instance {resource_id}"),
+                    )
+                })?;
             Ok(())
         })
     }
@@ -177,11 +176,18 @@ fn discovery_error(message: impl AsRef<str>, command: &str) -> ProviderDiscovery
     }
 }
 
-fn cli_error(error: CliError) -> WorkspaceError {
+fn refresh_failure(error: ProcessError) -> WorkspaceError {
     match error {
-        CliError::NotFound => WorkspaceError::new("Incus CLI is not available"),
-        CliError::Failed(message) => WorkspaceError::new(message),
+        ProcessError::ExecutableNotFound => WorkspaceError::new("Incus CLI is not available"),
+        ProcessError::SpawnFailed(message) => WorkspaceError::new(not_started(&message)),
+        ProcessError::Exited(failure) => {
+            refresh_error(failure.message_or("Incus could not list instances"))
+        }
     }
+}
+
+fn not_started(reason: &str) -> String {
+    format!("Incus CLI could not be started: {reason}")
 }
 
 fn refresh_error(message: impl AsRef<str>) -> WorkspaceError {
@@ -191,10 +197,11 @@ fn refresh_error(message: impl AsRef<str>) -> WorkspaceError {
     ))
 }
 
-fn command_cli_error(error: CliError) -> WorkspaceError {
+fn command_error(error: ProcessError, fallback: &str) -> WorkspaceError {
     let message = match error {
-        CliError::NotFound => "Incus CLI is no longer available".to_owned(),
-        CliError::Failed(message) => message,
+        ProcessError::ExecutableNotFound => "Incus CLI is no longer available".to_owned(),
+        ProcessError::SpawnFailed(message) => not_started(&message),
+        ProcessError::Exited(failure) => failure.message_or(fallback),
     };
     WorkspaceError::new(message)
 }
