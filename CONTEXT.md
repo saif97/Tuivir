@@ -1,6 +1,6 @@
-# Vertui
+# Virtui
 
-Vertui is a terminal environment for inspecting and operating resources managed by local virtualization and container providers.
+Virtui is a terminal environment for inspecting and operating resources managed by local virtualization and container providers.
 
 ## Language
 
@@ -9,7 +9,7 @@ An installed system that owns and operates resources, such as Docker, Incus, or 
 _Avoid_: Backend, runtime, engine
 
 **Provider Workspace**:
-The provider-specific view of its native resources and operations within Vertui.
+The provider-specific view of its native resources and operations within Virtui.
 _Avoid_: Provider tab, unified resource view
 
 **Active Workspace**:

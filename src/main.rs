@@ -11,7 +11,7 @@ use std::{
 use crossterm::event::{self, Event, KeyEvent};
 use ratatui::DefaultTerminal;
 use tokio::sync::mpsc;
-use vertui::{
+use virtui::{
     app::{App, AppEvent},
     cli::{CliRunner, TokioCliRunner},
     provider::ProviderAction,

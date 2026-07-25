@@ -5,7 +5,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use vertui::{
+use virtui::{
     app::{App, AppEvent},
     cli::{CliError, CliOutput, CliRunner, CommandSpec},
     incus::IncusWorkspace,

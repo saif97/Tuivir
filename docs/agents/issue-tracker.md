@@ -1,15 +1,15 @@
 # Issue tracker: GitHub
 
-Issues and PRDs for this repository live in GitHub Issues at `saif97/vertui`. Use the `gh` CLI for all operations and pass `--repo saif97/vertui` when the repository cannot be inferred from the local Git remote.
+Issues and PRDs for this repository live in GitHub Issues at `saif97/virtui`. Use the `gh` CLI for all operations and pass `--repo saif97/virtui` when the repository cannot be inferred from the local Git remote.
 
 ## Conventions
 
-- **Create an issue**: `gh issue create --repo saif97/vertui --title "..." --body "..."`
-- **Read an issue**: `gh issue view --repo saif97/vertui <number> --comments`
-- **List issues**: `gh issue list --repo saif97/vertui --state open --json number,title,body,labels,comments`
-- **Comment on an issue**: `gh issue comment --repo saif97/vertui <number> --body "..."`
-- **Apply or remove labels**: `gh issue edit --repo saif97/vertui <number> --add-label "..."` or `--remove-label "..."`
-- **Close an issue**: `gh issue close --repo saif97/vertui <number> --comment "..."`
+- **Create an issue**: `gh issue create --repo saif97/virtui --title "..." --body "..."`
+- **Read an issue**: `gh issue view --repo saif97/virtui <number> --comments`
+- **List issues**: `gh issue list --repo saif97/virtui --state open --json number,title,body,labels,comments`
+- **Comment on an issue**: `gh issue comment --repo saif97/virtui <number> --body "..."`
+- **Apply or remove labels**: `gh issue edit --repo saif97/virtui <number> --add-label "..."` or `--remove-label "..."`
+- **Close an issue**: `gh issue close --repo saif97/virtui <number> --comment "..."`
 
 ## Pull requests as a triage surface
 
