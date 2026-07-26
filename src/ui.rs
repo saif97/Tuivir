@@ -8,7 +8,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
 };
 
-use crate::app::{AppState, FocusedPanel, ProviderState, WorkspaceState};
+use crate::app::{AppState, DetailContent, FocusedPanel, ProviderState, WorkspaceState};
 use crate::provider::ResourceState;
 
 pub fn render(state: &AppState, frame: &mut Frame<'_>) {
@@ -316,7 +316,7 @@ fn workspace_panel_title(resources_hint: Option<&str>, label: &str) -> String {
 }
 
 fn render_details_panel(provider: &ProviderState, frame: &mut Frame<'_>, area: Rect) {
-    let details = match &provider.workspace_state {
+    let summary = match &provider.workspace_state {
         WorkspaceState::Ready(snapshot) => snapshot
             .resources()
             .find(|resource| provider.selected_resource.as_ref() == Some(&resource.id))
@@ -336,10 +336,88 @@ fn render_details_panel(provider: &ProviderState, frame: &mut Frame<'_>, area: R
             .unwrap_or_else(|| vec![Line::from("Select a resource")]),
         _ => vec![Line::from("No details available")],
     };
+
+    let block = Block::default().title(" Details ").borders(Borders::ALL);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let views = provider.detail_views();
+    // The view strip is a control, not another summary field, so it gets a
+    // blank line to sit behind rather than running straight into the fields.
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(summary.len() as u16),
+            Constraint::Length(u16::from(!views.is_empty()) * 2),
+            Constraint::Min(0),
+        ])
+        .split(inner);
     frame.render_widget(
-        Paragraph::new(details)
-            .wrap(ratatui::widgets::Wrap { trim: true })
-            .block(Block::default().title(" Details ").borders(Borders::ALL)),
+        Paragraph::new(summary).wrap(ratatui::widgets::Wrap { trim: true }),
+        rows[0],
+    );
+
+    if views.is_empty() {
+        return;
+    }
+    render_detail_content(provider, frame, rows[2]);
+    let mut spans = Vec::new();
+    for view in views {
+        if !spans.is_empty() {
+            spans.push(Span::raw("  "));
+        }
+        if provider.selected_detail_view.as_ref() == Some(&view.id) {
+            spans.push(Span::styled(
+                format!("[ {} ]", view.title),
+                Style::default().add_modifier(Modifier::BOLD),
+            ));
+        } else {
+            spans.push(Span::raw(view.title.as_str()));
+        }
+    }
+    frame.render_widget(
+        Paragraph::new(vec![Line::default(), Line::from(spans)]),
+        rows[1],
+    );
+}
+
+/// Draws the loaded detail view, or what is happening to it.
+///
+/// An empty view and a failed one are told apart deliberately: a container that
+/// has logged nothing is not a broken one, and neither must read as the other.
+fn render_detail_content(provider: &ProviderState, frame: &mut Frame<'_>, area: Rect) {
+    let Some(details) = &provider.details else {
+        return;
+    };
+    let lines = match &details.content {
+        DetailContent::Loading => vec![Line::from(format!("Loading {}…", details.title))],
+        DetailContent::Ready(loaded) if loaded.is_empty() => vec![Line::styled(
+            format!(
+                "{} returned no {} for {}",
+                provider.name, details.title, details.resource_name
+            ),
+            Style::default().fg(Color::DarkGray),
+        )],
+        DetailContent::Ready(loaded) => loaded
+            .lines
+            .iter()
+            .map(|line| Line::from(line.as_str()))
+            .collect(),
+        DetailContent::Error(error) => vec![
+            Line::styled(
+                format!(
+                    "{} {} failed for {}:",
+                    provider.name, details.title, details.resource_name
+                ),
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+            Line::from(error.message.as_str()),
+        ],
+    };
+    frame.render_widget(
+        Paragraph::new(lines)
+            .wrap(ratatui::widgets::Wrap { trim: false })
+            .scroll((details.scroll, 0)),
         area,
     );
 }

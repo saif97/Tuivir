@@ -96,6 +96,16 @@ pub enum ProviderRequest {
         /// the Provider Workspace never re-queries it while dispatching.
         state: ResourceState,
     },
+    /// Loads one detail view for one Resource.
+    ///
+    /// The application asks for exactly the view on screen, so a Provider never
+    /// runs work for a detail the user is not looking at.
+    LoadResourceDetails {
+        request_id: ProviderRequestId,
+        provider_id: ProviderId,
+        resource_id: ResourceId,
+        view_id: DetailViewId,
+    },
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -129,10 +139,50 @@ pub struct Resource {
     pub available_commands: Vec<ResourceCommand>,
 }
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+/// Identifies one detail view a Provider Workspace offers for its Resources.
+pub struct DetailViewId(pub String);
+
+impl DetailViewId {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+}
+
+impl fmt::Display for DetailViewId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+/// One provider-native way of inspecting a selected Resource.
+///
+/// Views belong to the Provider Workspace that declared them and keep their
+/// own names — Docker's Logs is not Incus's Console Log — so the shell can
+/// offer them without knowing what either Provider inspects.
+pub struct DetailView {
+    pub id: DetailViewId,
+    pub title: String,
+}
+
+impl DetailView {
+    pub fn new(id: impl Into<String>, title: impl Into<String>) -> Self {
+        Self {
+            id: DetailViewId::new(id),
+            title: title.into(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// A provider-defined group of resources, such as Docker Containers.
 pub struct ResourcePanel {
     pub title: String,
+    /// The detail views offered for every Resource in this panel, in the order
+    /// the user moves through them. The first is shown when a Resource is
+    /// selected.
+    pub detail_views: Vec<DetailView>,
     pub resources: Vec<Resource>,
 }
 
@@ -148,6 +198,50 @@ impl WorkspaceSnapshot {
     /// Iterates every resource across all panels, in panel order.
     pub fn resources(&self) -> impl Iterator<Item = &Resource> {
         self.panels.iter().flat_map(|panel| &panel.resources)
+    }
+
+    /// The panel `resource_id` belongs to, and so the detail views offered for
+    /// it.
+    pub fn panel_of(&self, resource_id: &ResourceId) -> Option<&ResourcePanel> {
+        self.panels.iter().find(|panel| {
+            panel
+                .resources
+                .iter()
+                .any(|resource| &resource.id == resource_id)
+        })
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+/// UI-neutral output of one detail view for one Resource.
+///
+/// Provider Workspaces decide what a line is — a log record, a formatted table
+/// row, a line of YAML — and the shell only ever displays and scrolls them.
+pub struct ResourceDetails {
+    pub lines: Vec<String>,
+}
+
+impl ResourceDetails {
+    pub fn from_lines<I, S>(lines: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        Self {
+            lines: lines.into_iter().map(Into::into).collect(),
+        }
+    }
+
+    /// Splits provider output into displayable lines, dropping the trailing
+    /// blank a CLI leaves behind so it cannot read as content.
+    pub fn from_output(output: &str) -> Self {
+        Self::from_lines(output.trim_end_matches('\n').lines())
+    }
+
+    /// A view the Provider answered with nothing at all, such as a container
+    /// that has not logged yet.
+    pub fn is_empty(&self) -> bool {
+        self.lines.iter().all(|line| line.trim().is_empty())
     }
 }
 
@@ -209,4 +303,15 @@ pub trait ProviderWorkspace: Send + Sync {
         command: ResourceCommand,
         state: ResourceState,
     ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>>;
+
+    /// Loads one of the detail views this workspace declared for a Resource.
+    ///
+    /// Only the view the user is looking at is ever asked for, so this runs
+    /// exactly one Provider CLI request per visible view.
+    fn load_details<'a>(
+        &'a self,
+        cli: &'a dyn CliRunner,
+        resource_id: &'a ResourceId,
+        view_id: &'a DetailViewId,
+    ) -> Pin<Box<dyn Future<Output = Result<ResourceDetails, WorkspaceError>> + Send + 'a>>;
 }

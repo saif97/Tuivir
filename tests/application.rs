@@ -13,8 +13,9 @@ use virtui::{
     command::{Command, CommandRegistry},
     docker::DockerWorkspace,
     provider::{
-        ProviderDiscovery, ProviderId, ProviderRequest, Resource, ResourceCommand, ResourceId,
-        ResourcePanel, ResourceState, WorkspaceError, WorkspaceSnapshot,
+        DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderRequest, Resource,
+        ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourceState, WorkspaceError,
+        WorkspaceSnapshot,
     },
     runtime::{ProviderRuntime, RefreshTimer, ShellControl, handle_key},
     ui::{render_foreground_colours, render_to_text},
@@ -351,7 +352,12 @@ fn keyboard_commands_drive_navigation_manual_refresh_and_quit() {
         KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
     );
     assert_eq!(control, ShellControl::Continue);
-    assert!(requests.is_empty());
+    // Moving the selection asks only for the newly selected Resource's details.
+    assert!(matches!(
+        requests.as_slice(),
+        [ProviderRequest::LoadResourceDetails { resource_id, .. }]
+            if resource_id == &ResourceId::new("container-b")
+    ));
     assert!(render_to_text(app.state(), 100, 24).contains("Image: alpine:3.21"));
 
     let (_, requests) = handle_key(
@@ -1283,7 +1289,9 @@ fn bracket_keys_switch_the_active_workspace() {
         &mut app,
         KeyEvent::new(KeyCode::Char('['), KeyModifiers::NONE),
     );
-    assert_eq!(requests.len(), 1);
+    // Returning refreshes Docker and asks again for the detail view whose load
+    // was abandoned on the way out.
+    assert_eq!(requests.len(), 2, "unexpected requests: {requests:?}");
     assert!(
         render_to_text(app.state(), 100, 24).starts_with("[1] Providers  [ Docker ]   Fixture")
     );
@@ -1406,6 +1414,11 @@ fn container_snapshot(
     WorkspaceSnapshot {
         panels: vec![ResourcePanel {
             title: "Containers".to_owned(),
+            detail_views: vec![
+                DetailView::new("logs", "Logs"),
+                DetailView::new("stats", "Stats"),
+                DetailView::new("inspect", "Inspect"),
+            ],
             resources: containers
                 .iter()
                 .map(|(id, name, image)| Resource {
@@ -1425,6 +1438,11 @@ fn incus_snapshot(instances: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
     WorkspaceSnapshot {
         panels: vec![ResourcePanel {
             title: "Instances".to_owned(),
+            detail_views: vec![
+                DetailView::new("info", "Info"),
+                DetailView::new("config", "Config"),
+                DetailView::new("console-log", "Console Log"),
+            ],
             resources: instances
                 .iter()
                 .map(|(id, name, status)| {
@@ -1483,7 +1501,7 @@ fn command_completed(request: ProviderRequest, result: Result<(), WorkspaceError
             command,
             result,
         },
-        ProviderRequest::RefreshWorkspace { .. } => panic!("expected Resource Command request"),
+        other => panic!("expected Resource Command request, got {other:?}"),
     }
 }
 
@@ -1500,7 +1518,623 @@ fn refresh_completed(
             provider_id,
             result,
         },
-        ProviderRequest::ExecuteResourceCommand { .. } => panic!("expected refresh request"),
+        other => panic!("expected refresh request, got {other:?}"),
+    }
+}
+
+/// The one detail load among the requests an event or Command produced.
+fn detail_request(requests: Vec<ProviderRequest>) -> ProviderRequest {
+    requests
+        .into_iter()
+        .find(|request| matches!(request, ProviderRequest::LoadResourceDetails { .. }))
+        .expect("detail load request")
+}
+
+fn details_completed(
+    request: ProviderRequest,
+    result: Result<ResourceDetails, WorkspaceError>,
+) -> AppEvent {
+    match request {
+        ProviderRequest::LoadResourceDetails {
+            request_id,
+            provider_id,
+            resource_id,
+            view_id,
+        } => AppEvent::ResourceDetailsCompleted {
+            request_id,
+            provider_id,
+            resource_id,
+            view_id,
+            result,
+        },
+        other => panic!("expected detail load request, got {other:?}"),
+    }
+}
+
+/// The shell offers whatever views the Provider Workspace declared, under the
+/// Provider's own names, and shows the first of them.
+#[test]
+fn a_selected_container_offers_dockers_native_detail_views() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(
+        screen.contains("[ Logs ]  Stats  Inspect"),
+        "rendered:\n{screen}"
+    );
+}
+
+/// Detail data is lazy: settling on a Resource asks the Provider for the one
+/// view on screen and for nothing else.
+#[test]
+fn settling_on_a_resource_requests_only_the_visible_detail_view() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+
+    let requests = app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+
+    assert_eq!(requests.len(), 1, "one view is visible, so one is loaded");
+    assert!(
+        matches!(
+            &requests[0],
+            ProviderRequest::LoadResourceDetails {
+                provider_id,
+                resource_id,
+                view_id,
+                ..
+            } if provider_id == &ProviderId::new("docker")
+                && resource_id == &ResourceId::new("container-a")
+                && view_id == &DetailViewId::new("logs")
+        ),
+        "unexpected request: {:?}",
+        requests[0]
+    );
+}
+
+/// The panel says it is working before the Provider answers, then shows what
+/// the Provider returned.
+#[test]
+fn the_detail_panel_reports_loading_and_then_the_providers_own_output() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let request = detail_request(app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    )));
+
+    let loading = render_to_text(app.state(), 100, 24);
+    assert!(loading.contains("Loading Logs…"), "rendered:\n{loading}");
+
+    app.update(details_completed(
+        request,
+        Ok(ResourceDetails::from_lines(["listening on port 80"])),
+    ));
+
+    let loaded = render_to_text(app.state(), 100, 24);
+    assert!(
+        loaded.contains("listening on port 80"),
+        "rendered:\n{loaded}"
+    );
+    assert!(!loaded.contains("Loading Logs…"));
+}
+
+/// Moving between views loads the one that became visible, and only that one.
+#[test]
+fn moving_through_the_detail_views_loads_only_the_newly_visible_one() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+
+    let (_, requests) = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE),
+    );
+
+    assert!(
+        matches!(
+            requests.as_slice(),
+            [ProviderRequest::LoadResourceDetails { view_id, .. }]
+                if view_id == &DetailViewId::new("stats")
+        ),
+        "unexpected requests: {requests:?}"
+    );
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(
+        screen.contains("Logs  [ Stats ]  Inspect"),
+        "rendered:\n{screen}"
+    );
+
+    let (_, requests) = handle_key(&mut app, KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+
+    assert!(
+        matches!(
+            requests.as_slice(),
+            [ProviderRequest::LoadResourceDetails { view_id, .. }]
+                if view_id == &DetailViewId::new("logs")
+        ),
+        "unexpected requests: {requests:?}"
+    );
+    assert!(render_to_text(app.state(), 100, 24).contains("[ Logs ]  Stats  Inspect"));
+}
+
+/// The views are a ring, so moving past either end lands on the other rather
+/// than sticking.
+#[test]
+fn detail_views_wrap_around_at_both_ends() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+
+    app.invoke(Command::PreviousDetailView);
+    assert!(render_to_text(app.state(), 100, 24).contains("Logs  Stats  [ Inspect ]"));
+
+    app.invoke(Command::NextDetailView);
+    assert!(render_to_text(app.state(), 100, 24).contains("[ Logs ]  Stats  Inspect"));
+}
+
+/// The view survives moving between Resources, so reading one kind of detail
+/// down a list does not keep resetting to the first view.
+#[test]
+fn the_chosen_detail_view_survives_moving_to_another_resource() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[
+            ("container-a", "api", "nginx:1.27"),
+            ("container-b", "worker", "alpine:3.21"),
+        ])),
+    ));
+    app.invoke(Command::NextDetailView);
+
+    let requests = app.invoke(Command::SelectNext);
+
+    assert!(
+        matches!(
+            requests.as_slice(),
+            [ProviderRequest::LoadResourceDetails { resource_id, view_id, .. }]
+                if resource_id == &ResourceId::new("container-b")
+                    && view_id == &DetailViewId::new("stats")
+        ),
+        "unexpected requests: {requests:?}"
+    );
+    assert!(render_to_text(app.state(), 100, 24).contains("Logs  [ Stats ]  Inspect"));
+}
+
+/// A user who moves off a Resource before its details arrive must not have the
+/// panel filled in behind them.
+#[test]
+fn a_late_result_for_the_previous_resource_cannot_replace_current_details() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let stale = detail_request(app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[
+            ("container-a", "api", "nginx:1.27"),
+            ("container-b", "worker", "alpine:3.21"),
+        ])),
+    )));
+    let current = detail_request(app.invoke(Command::SelectNext));
+    app.update(details_completed(
+        current,
+        Ok(ResourceDetails::from_lines(["worker is up"])),
+    ));
+
+    app.update(details_completed(
+        stale,
+        Ok(ResourceDetails::from_lines(["api is up"])),
+    ));
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(screen.contains("worker is up"), "rendered:\n{screen}");
+    assert!(!screen.contains("api is up"));
+}
+
+/// The same holds for the view: Logs arriving late must not overwrite the Stats
+/// the user switched to.
+#[test]
+fn a_late_result_for_the_previous_detail_view_cannot_replace_current_details() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let stale = detail_request(app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    )));
+    let current = detail_request(app.invoke(Command::NextDetailView));
+    app.update(details_completed(
+        current,
+        Ok(ResourceDetails::from_lines(["CPU 2.40%"])),
+    ));
+
+    app.update(details_completed(
+        stale,
+        Ok(ResourceDetails::from_lines(["listening on port 80"])),
+    ));
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(screen.contains("CPU 2.40%"), "rendered:\n{screen}");
+    assert!(!screen.contains("listening on port 80"));
+}
+
+#[test]
+fn a_late_docker_detail_result_cannot_reach_the_active_incus_workspace() {
+    let mut app = App::new();
+    let docker_refresh =
+        refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let stale = detail_request(app.update(refresh_completed(
+        docker_refresh,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    )));
+    app.update(AppEvent::ProviderDiscovered(incus_discovery()));
+    app.invoke(Command::FocusProviders);
+    let incus_refresh = refresh_request(app.invoke(Command::NextWorkspace));
+    let incus_details = detail_request(app.update(refresh_completed(
+        incus_refresh,
+        Ok(incus_snapshot(&[("instance-a", "gateway", "Running")])),
+    )));
+    app.update(details_completed(
+        incus_details,
+        Ok(ResourceDetails::from_lines(["gateway is up"])),
+    ));
+    let current_screen = render_to_text(app.state(), 100, 24);
+
+    app.update(details_completed(
+        stale,
+        Ok(ResourceDetails::from_lines(["api is up"])),
+    ));
+
+    assert_eq!(render_to_text(app.state(), 100, 24), current_screen);
+    assert!(current_screen.contains("gateway is up"));
+}
+
+/// Invalidating a pending load leaves the workspace it belonged to without one,
+/// so coming back has to ask again rather than wait forever for a result that
+/// will now be refused.
+#[test]
+fn returning_to_a_workspace_whose_detail_load_was_invalidated_asks_for_it_again() {
+    let mut app = App::new();
+    let docker_refresh =
+        refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let abandoned = detail_request(app.update(refresh_completed(
+        docker_refresh,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    )));
+    app.update(AppEvent::ProviderDiscovered(incus_discovery()));
+    app.invoke(Command::FocusProviders);
+    app.invoke(Command::NextWorkspace);
+
+    let requests = app.invoke(Command::PreviousWorkspace);
+
+    let reloaded = detail_request(requests);
+    assert!(
+        matches!(
+            &reloaded,
+            ProviderRequest::LoadResourceDetails { view_id, .. }
+                if view_id == &DetailViewId::new("logs")
+        ),
+        "unexpected request: {reloaded:?}"
+    );
+    app.update(details_completed(
+        abandoned,
+        Ok(ResourceDetails::from_lines(["abandoned output"])),
+    ));
+    app.update(details_completed(
+        reloaded,
+        Ok(ResourceDetails::from_lines(["listening on port 80"])),
+    ));
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(
+        screen.contains("listening on port 80"),
+        "rendered:\n{screen}"
+    );
+    assert!(!screen.contains("abandoned output"));
+}
+
+/// Details are lazy, so the two-second clock must not keep re-running provider
+/// work for a view that is already on screen.
+#[test]
+fn an_ordinary_refresh_neither_reloads_nor_discards_the_loaded_details() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let details = detail_request(app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[
+            ("container-a", "api", "nginx:1.27"),
+            ("container-b", "worker", "alpine:3.21"),
+        ])),
+    )));
+    app.update(details_completed(
+        details,
+        Ok(ResourceDetails::from_lines(["listening on port 80"])),
+    ));
+
+    let refresh = refresh_request(app.update(AppEvent::RefreshTimerElapsed));
+    let requests = app.update(refresh_completed(
+        refresh,
+        Ok(snapshot(&[
+            ("container-b", "worker", "alpine:3.21"),
+            ("container-a", "api", "nginx:1.27"),
+        ])),
+    ));
+
+    assert!(
+        requests.is_empty(),
+        "a refresh that keeps the selection asks for nothing: {requests:?}"
+    );
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(
+        screen.contains("listening on port 80"),
+        "rendered:\n{screen}"
+    );
+}
+
+/// When the selected Resource is gone, the selection moves and the details have
+/// to follow it.
+#[test]
+fn a_refresh_that_removes_the_selected_resource_loads_the_new_selections_details() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let details = detail_request(app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    )));
+    app.update(details_completed(
+        details,
+        Ok(ResourceDetails::from_lines(["listening on port 80"])),
+    ));
+
+    let refresh = refresh_request(app.update(AppEvent::RefreshTimerElapsed));
+    let requests = app.update(refresh_completed(
+        refresh,
+        Ok(snapshot(&[("container-b", "worker", "alpine:3.21")])),
+    ));
+
+    let reloaded = detail_request(requests);
+    assert!(
+        matches!(
+            &reloaded,
+            ProviderRequest::LoadResourceDetails { resource_id, .. }
+                if resource_id == &ResourceId::new("container-b")
+        ),
+        "unexpected request: {reloaded:?}"
+    );
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(screen.contains("Loading Logs…"), "rendered:\n{screen}");
+    assert!(!screen.contains("listening on port 80"));
+}
+
+/// A container that has logged nothing is not a broken one, so the panel says
+/// which view came back empty rather than leaving a blank area.
+#[test]
+fn a_detail_view_the_provider_answered_with_nothing_gets_its_own_empty_state() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let details = detail_request(app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    )));
+
+    app.update(details_completed(details, Ok(ResourceDetails::default())));
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(
+        screen.contains("Docker returned no Logs for api"),
+        "rendered:\n{screen}"
+    );
+}
+
+#[test]
+fn a_failed_detail_view_names_the_provider_resource_and_view() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let details = detail_request(app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    )));
+
+    app.update(details_completed(
+        details,
+        Err(WorkspaceError::new("Error: No such container")),
+    ));
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(
+        screen.contains("Docker Logs failed for api"),
+        "rendered:\n{screen}"
+    );
+    assert!(screen.contains("Error: No such container"));
+}
+
+/// A failed view is the Provider's own failure, so it stays inside the detail
+/// panel instead of taking over the screen the way a failed Command does.
+#[test]
+fn a_failed_detail_view_leaves_the_resource_list_and_its_commands_alone() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let details = detail_request(app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    )));
+
+    app.update(details_completed(
+        details,
+        Err(WorkspaceError::new("Error: No such container")),
+    ));
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(screen.contains("api"), "rendered:\n{screen}");
+    assert!(!screen.contains("Press Esc to dismiss."));
+    let (_, requests) = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE),
+    );
+    assert!(
+        requests.iter().any(|request| matches!(
+            request,
+            ProviderRequest::ExecuteResourceCommand {
+                command: ResourceCommand::Restart,
+                ..
+            }
+        )),
+        "workspace Commands still resolve: {requests:?}"
+    );
+}
+
+/// More output than fits has to be reachable, and neither end may be
+/// overshot.
+#[test]
+fn scrolling_moves_through_a_long_detail_view_and_clamps_at_both_ends() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let details = detail_request(app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    )));
+    app.update(details_completed(
+        details,
+        Ok(ResourceDetails::from_lines(
+            (0..30).map(|line| format!("line-{line}")),
+        )),
+    ));
+    assert!(render_to_text(app.state(), 100, 24).contains("line-0"));
+
+    handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE),
+    );
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(!screen.contains("line-0"), "rendered:\n{screen}");
+    assert!(screen.contains("line-10"));
+
+    // Far past the end lands on the last line rather than scrolling into blank
+    // space below it.
+    for _ in 0..10 {
+        app.invoke(Command::ScrollDetailsDown);
+    }
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(screen.contains("line-29"), "rendered:\n{screen}");
+
+    for _ in 0..10 {
+        app.invoke(Command::ScrollDetailsUp);
+    }
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(screen.contains("line-0"), "rendered:\n{screen}");
+}
+
+/// Every view starts at its own top: a scrolled position belongs to the output
+/// it was scrolled through, not to the panel.
+#[test]
+fn moving_to_another_resource_starts_its_detail_view_at_the_top() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let details = detail_request(app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[
+            ("container-a", "api", "nginx:1.27"),
+            ("container-b", "worker", "alpine:3.21"),
+        ])),
+    )));
+    app.update(details_completed(
+        details,
+        Ok(ResourceDetails::from_lines(
+            (0..30).map(|line| format!("api-{line}")),
+        )),
+    ));
+    app.invoke(Command::ScrollDetailsDown);
+
+    let worker = detail_request(app.invoke(Command::SelectNext));
+    app.update(details_completed(
+        worker,
+        Ok(ResourceDetails::from_lines(
+            (0..30).map(|line| format!("worker-{line}")),
+        )),
+    ));
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(screen.contains("worker-0"), "rendered:\n{screen}");
+}
+
+/// Detail navigation is registered like every other Command, so one override
+/// moves dispatch and the help it is advertised in together.
+#[test]
+fn configured_detail_view_keys_change_dispatch_and_help_together() {
+    let registry =
+        CommandRegistry::effective(&[("detail.view.next".to_owned(), vec!["tab".to_owned()])])
+            .expect("a valid override");
+    let mut app = App::with_registry(registry);
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+
+    handle_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    assert!(render_to_text(app.state(), 100, 24).contains("Logs  [ Stats ]  Inspect"));
+
+    handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE),
+    );
+    assert!(
+        render_to_text(app.state(), 100, 24).contains("Logs  [ Stats ]  Inspect"),
+        "the replaced default no longer moves the view"
+    );
+
+    handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+    );
+    let help = render_to_text(app.state(), 100, 30);
+    assert!(
+        help.contains("tab  Next detail view"),
+        "help follows the override:\n{help}"
+    );
+    assert!(
+        help.contains("h  Previous detail view"),
+        "rendered:\n{help}"
+    );
+    assert!(help.contains("Scroll details down"), "rendered:\n{help}");
+}
+
+/// Incus details are Incus's own, so the shell must not dress them up as the
+/// Docker views it happens to render the same way.
+#[test]
+fn a_selected_instance_offers_incus_views_rather_than_docker_equivalents() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(incus_discovery())));
+
+    app.update(refresh_completed(
+        initial,
+        Ok(incus_snapshot(&[("instance-a", "gateway", "Running")])),
+    ));
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(
+        screen.contains("[ Info ]  Config  Console Log"),
+        "rendered:\n{screen}"
+    );
+    for docker_view in ["Logs", "Stats", "Inspect"] {
+        assert!(
+            !screen.contains(docker_view),
+            "Incus does not borrow Docker's {docker_view} view:\n{screen}"
+        );
     }
 }
 
@@ -1673,11 +2307,9 @@ fn help_lists_fast_navigation_under_its_effective_bindings() {
     assert!(help.contains("J  Select five ahead"), "rendered:\n{help}");
     assert!(help.contains("K  Select five back"), "rendered:\n{help}");
 
-    let registry = CommandRegistry::effective(&[(
-        "selection.next.fast".to_owned(),
-        vec!["pagedown".to_owned()],
-    )])
-    .expect("a valid override");
+    let registry =
+        CommandRegistry::effective(&[("selection.next.fast".to_owned(), vec!["f5".to_owned()])])
+            .expect("a valid override");
     let mut configured = App::with_registry(registry);
     let initial =
         refresh_request(configured.update(AppEvent::ProviderDiscovered(docker_discovery())));
@@ -1689,7 +2321,7 @@ fn help_lists_fast_navigation_under_its_effective_bindings() {
     );
     let help = render_to_text(configured.state(), 100, 24);
     assert!(
-        help.contains("pagedown  Select five ahead"),
+        help.contains("f5  Select five ahead"),
         "help follows the override:\n{help}"
     );
     assert!(
@@ -1703,30 +2335,21 @@ fn help_lists_fast_navigation_under_its_effective_bindings() {
 #[test]
 fn configured_fast_navigation_keys_replace_the_capital_defaults() {
     let registry = CommandRegistry::effective(&[
-        (
-            "selection.next.fast".to_owned(),
-            vec!["pagedown".to_owned()],
-        ),
-        (
-            "selection.previous.fast".to_owned(),
-            vec!["pageup".to_owned()],
-        ),
+        ("selection.next.fast".to_owned(), vec!["f5".to_owned()]),
+        ("selection.previous.fast".to_owned(), vec!["f6".to_owned()]),
     ])
     .expect("a valid override set");
     let mut app = App::with_registry(registry);
     let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
     app.update(refresh_completed(initial, Ok(seven_resources())));
 
-    handle_key(
-        &mut app,
-        KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE),
-    );
+    handle_key(&mut app, KeyEvent::new(KeyCode::F(5), KeyModifiers::NONE));
     assert!(
         render_to_text(app.state(), 100, 24).contains("Image: i5"),
         "the configured key jumps five ahead"
     );
 
-    handle_key(&mut app, KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE));
+    handle_key(&mut app, KeyEvent::new(KeyCode::F(6), KeyModifiers::NONE));
     assert!(
         render_to_text(app.state(), 100, 24).contains("Image: i0"),
         "the configured key jumps five back"

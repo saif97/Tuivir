@@ -5,8 +5,9 @@ use serde::Deserialize;
 use crate::{
     cli::{CliRunner, ProcessError, ProcessSpec},
     provider::{
-        ProviderDiscovery, ProviderId, ProviderWorkspace, Resource, ResourceCommand, ResourceId,
-        ResourcePanel, ResourceState, WorkspaceError, WorkspaceSnapshot,
+        DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderWorkspace, Resource,
+        ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourceState, WorkspaceError,
+        WorkspaceSnapshot,
     },
 };
 
@@ -122,6 +123,7 @@ impl ProviderWorkspace for IncusWorkspace {
             Ok(WorkspaceSnapshot {
                 panels: vec![ResourcePanel {
                     title: "Instances".to_owned(),
+                    detail_views: instance_detail_views(),
                     resources,
                 }],
             })
@@ -161,6 +163,55 @@ impl ProviderWorkspace for IncusWorkspace {
             Ok(())
         })
     }
+
+    fn load_details<'a>(
+        &'a self,
+        cli: &'a dyn CliRunner,
+        resource_id: &'a ResourceId,
+        view_id: &'a DetailViewId,
+    ) -> Pin<Box<dyn Future<Output = Result<ResourceDetails, WorkspaceError>> + Send + 'a>> {
+        Box::pin(async move {
+            let Some(args) = instance_detail_command(view_id, resource_id.0.as_str()) else {
+                return Err(WorkspaceError::new(format!(
+                    "Incus has no {view_id} view for instance {resource_id}"
+                )));
+            };
+            let output = cli
+                .run(ProcessSpec::new("incus", &args))
+                .await
+                .map_err(|error| {
+                    command_error(
+                        error,
+                        &format!("Incus could not load {view_id} for instance {resource_id}"),
+                    )
+                })?;
+            Ok(ResourceDetails::from_output(&output.stdout))
+        })
+    }
+}
+
+/// The Incus command behind each declared view, or `None` for a view this
+/// workspace never declared.
+fn instance_detail_command<'a>(
+    view_id: &DetailViewId,
+    resource_id: &'a str,
+) -> Option<Vec<&'a str>> {
+    match view_id.0.as_str() {
+        "info" => Some(vec!["info", resource_id]),
+        "config" => Some(vec!["config", "show", resource_id]),
+        "console-log" => Some(vec!["console", "--show-log", resource_id]),
+        _ => None,
+    }
+}
+
+/// The views Incus itself offers for an instance, in the order the user moves
+/// through them.
+fn instance_detail_views() -> Vec<DetailView> {
+    vec![
+        DetailView::new("info", "Info"),
+        DetailView::new("config", "Config"),
+        DetailView::new("console-log", "Console Log"),
+    ]
 }
 
 /// Maps an Incus instance status onto the shared vocabulary.
