@@ -14,7 +14,8 @@ Use the repository's five canonical triage roles. See `docs/agents/triage-labels
 
 This is a single-context repository with `CONTEXT.md` and system-wide ADRs under `docs/adr/`. See `docs/agents/domain.md`.
 
-follow /TDD
+- follow /TDD
+- Atomic commit. No big fat commit
 
 For referance you might find those projects useful 
 - /home/vibebox/projects/opensource/lazydocker/
