@@ -129,10 +129,50 @@ pub struct Resource {
     pub available_commands: Vec<ResourceCommand>,
 }
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+/// Identifies one detail view a Provider Workspace offers for its Resources.
+pub struct DetailViewId(pub String);
+
+impl DetailViewId {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+}
+
+impl fmt::Display for DetailViewId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+/// One provider-native way of inspecting a selected Resource.
+///
+/// Views belong to the Provider Workspace that declared them and keep their
+/// own names — Docker's Logs is not Incus's Console Log — so the shell can
+/// offer them without knowing what either Provider inspects.
+pub struct DetailView {
+    pub id: DetailViewId,
+    pub title: String,
+}
+
+impl DetailView {
+    pub fn new(id: impl Into<String>, title: impl Into<String>) -> Self {
+        Self {
+            id: DetailViewId::new(id),
+            title: title.into(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// A provider-defined group of resources, such as Docker Containers.
 pub struct ResourcePanel {
     pub title: String,
+    /// The detail views offered for every Resource in this panel, in the order
+    /// the user moves through them. The first is shown when a Resource is
+    /// selected.
+    pub detail_views: Vec<DetailView>,
     pub resources: Vec<Resource>,
 }
 
@@ -148,6 +188,17 @@ impl WorkspaceSnapshot {
     /// Iterates every resource across all panels, in panel order.
     pub fn resources(&self) -> impl Iterator<Item = &Resource> {
         self.panels.iter().flat_map(|panel| &panel.resources)
+    }
+
+    /// The panel `resource_id` belongs to, and so the detail views offered for
+    /// it.
+    pub fn panel_of(&self, resource_id: &ResourceId) -> Option<&ResourcePanel> {
+        self.panels.iter().find(|panel| {
+            panel
+                .resources
+                .iter()
+                .any(|resource| &resource.id == resource_id)
+        })
     }
 }
 

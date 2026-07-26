@@ -214,6 +214,35 @@ async fn deleting_an_instance_that_is_not_stopped_forces_removal() {
     }
 }
 
+/// The Instances panel advertises Incus's own views rather than borrowing
+/// Docker's names for them.
+#[tokio::test]
+async fn the_instances_panel_declares_incuss_native_detail_views() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("incus", &["list", "--format=json"]),
+        success(include_str!("fixtures/incus/instances.json")),
+    )]);
+
+    let snapshot = IncusWorkspace
+        .refresh(&cli)
+        .await
+        .expect("fixture lists instances");
+
+    let panel = snapshot.panels.first().expect("an Instances panel");
+    assert_eq!(
+        panel
+            .detail_views
+            .iter()
+            .map(|view| (view.id.0.as_str(), view.title.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("info", "Info"),
+            ("config", "Config"),
+            ("console-log", "Console Log")
+        ]
+    );
+}
+
 #[tokio::test]
 async fn incus_maps_every_instance_status_into_the_shared_vocabulary() {
     let cli = FixtureCli::new([(

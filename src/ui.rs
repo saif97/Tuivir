@@ -316,7 +316,7 @@ fn workspace_panel_title(resources_hint: Option<&str>, label: &str) -> String {
 }
 
 fn render_details_panel(provider: &ProviderState, frame: &mut Frame<'_>, area: Rect) {
-    let details = match &provider.workspace_state {
+    let summary = match &provider.workspace_state {
         WorkspaceState::Ready(snapshot) => snapshot
             .resources()
             .find(|resource| provider.selected_resource.as_ref() == Some(&resource.id))
@@ -336,12 +336,43 @@ fn render_details_panel(provider: &ProviderState, frame: &mut Frame<'_>, area: R
             .unwrap_or_else(|| vec![Line::from("Select a resource")]),
         _ => vec![Line::from("No details available")],
     };
+
+    let block = Block::default().title(" Details ").borders(Borders::ALL);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let views = provider.detail_views();
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(summary.len() as u16),
+            Constraint::Length(u16::from(!views.is_empty())),
+            Constraint::Min(0),
+        ])
+        .split(inner);
     frame.render_widget(
-        Paragraph::new(details)
-            .wrap(ratatui::widgets::Wrap { trim: true })
-            .block(Block::default().title(" Details ").borders(Borders::ALL)),
-        area,
+        Paragraph::new(summary).wrap(ratatui::widgets::Wrap { trim: true }),
+        rows[0],
     );
+
+    if views.is_empty() {
+        return;
+    }
+    let mut spans = Vec::new();
+    for view in views {
+        if !spans.is_empty() {
+            spans.push(Span::raw("  "));
+        }
+        if provider.selected_detail_view.as_ref() == Some(&view.id) {
+            spans.push(Span::styled(
+                format!("[ {} ]", view.title),
+                Style::default().add_modifier(Modifier::BOLD),
+            ));
+        } else {
+            spans.push(Span::raw(view.title.as_str()));
+        }
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)), rows[1]);
 }
 
 pub fn render_to_text(state: &AppState, width: u16, height: u16) -> String {

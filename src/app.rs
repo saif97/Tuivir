@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use crate::command::{Command, CommandRegistry, CommandScope};
 use crate::keys::Key;
 use crate::provider::{
-    ProviderDiscovery, ProviderId, ProviderRequest, ProviderRequestId, ResourceCommand, ResourceId,
-    ResourceState, WorkspaceError, WorkspaceSnapshot,
+    DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderRequest, ProviderRequestId,
+    ResourceCommand, ResourceId, ResourceState, WorkspaceError, WorkspaceSnapshot,
 };
 
 /// Facts the application receives: provider discovery, the refresh clock, and
@@ -57,6 +57,43 @@ pub struct ProviderState {
     pub target_environment: String,
     pub workspace_state: WorkspaceState,
     pub selected_resource: Option<ResourceId>,
+    /// Which of the selected Resource's provider-native views is visible.
+    ///
+    /// It survives moving between Resources of the same panel, so walking a
+    /// list while reading one kind of detail does not keep resetting the view.
+    /// `None` means no panel has declared any views yet.
+    pub selected_detail_view: Option<DetailViewId>,
+}
+
+impl ProviderState {
+    /// The detail views offered for the selected Resource, which are the ones
+    /// its panel declared.
+    pub fn detail_views(&self) -> &[DetailView] {
+        let WorkspaceState::Ready(snapshot) = &self.workspace_state else {
+            return &[];
+        };
+        self.selected_resource
+            .as_ref()
+            .and_then(|selected| snapshot.panel_of(selected))
+            .map_or(&[], |panel| panel.detail_views.as_slice())
+    }
+}
+
+/// Keeps the visible detail view among the ones currently offered, falling back
+/// to the first when the selected Resource's panel does not declare it.
+fn reconcile_detail_view(provider: &mut ProviderState) {
+    let offered = provider
+        .detail_views()
+        .iter()
+        .map(|view| view.id.clone())
+        .collect::<Vec<_>>();
+    let still_offered = provider
+        .selected_detail_view
+        .as_ref()
+        .is_some_and(|selected| offered.contains(selected));
+    if !still_offered {
+        provider.selected_detail_view = offered.into_iter().next();
+    }
 }
 
 #[derive(Default)]
@@ -335,6 +372,7 @@ impl App {
             target_environment: discovery.target_environment,
             workspace_state: initial_workspace_state,
             selected_resource: None,
+            selected_detail_view: None,
         });
         if activates_provider {
             self.state.active_provider = Some(self.state.providers.len() - 1);
@@ -380,6 +418,7 @@ impl App {
                         .map(|resource| resource.id.clone());
                 }
                 provider.workspace_state = WorkspaceState::Ready(snapshot);
+                reconcile_detail_view(provider);
             }
             Err(error) => provider.workspace_state = WorkspaceState::Error(error),
         }
@@ -619,12 +658,14 @@ impl App {
                 .position(|resource| &resource.id == selected)
         }) else {
             provider.selected_resource = resources.first().map(|resource| resource.id.clone());
+            reconcile_detail_view(provider);
             return;
         };
         let next = current
             .saturating_add_signed(delta)
             .min(resources.len().saturating_sub(1));
         provider.selected_resource = resources.get(next).map(|resource| resource.id.clone());
+        reconcile_detail_view(provider);
     }
 
     fn move_provider_selection(&mut self, delta: isize) -> Vec<ProviderRequest> {

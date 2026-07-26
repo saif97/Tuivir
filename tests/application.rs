@@ -13,8 +13,8 @@ use virtui::{
     command::{Command, CommandRegistry},
     docker::DockerWorkspace,
     provider::{
-        ProviderDiscovery, ProviderId, ProviderRequest, Resource, ResourceCommand, ResourceId,
-        ResourcePanel, ResourceState, WorkspaceError, WorkspaceSnapshot,
+        DetailView, ProviderDiscovery, ProviderId, ProviderRequest, Resource, ResourceCommand,
+        ResourceId, ResourcePanel, ResourceState, WorkspaceError, WorkspaceSnapshot,
     },
     runtime::{ProviderRuntime, RefreshTimer, ShellControl, handle_key},
     ui::{render_foreground_colours, render_to_text},
@@ -1406,6 +1406,11 @@ fn container_snapshot(
     WorkspaceSnapshot {
         panels: vec![ResourcePanel {
             title: "Containers".to_owned(),
+            detail_views: vec![
+                DetailView::new("logs", "Logs"),
+                DetailView::new("stats", "Stats"),
+                DetailView::new("inspect", "Inspect"),
+            ],
             resources: containers
                 .iter()
                 .map(|(id, name, image)| Resource {
@@ -1425,6 +1430,11 @@ fn incus_snapshot(instances: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
     WorkspaceSnapshot {
         panels: vec![ResourcePanel {
             title: "Instances".to_owned(),
+            detail_views: vec![
+                DetailView::new("info", "Info"),
+                DetailView::new("config", "Config"),
+                DetailView::new("console-log", "Console Log"),
+            ],
             resources: instances
                 .iter()
                 .map(|(id, name, status)| {
@@ -1501,6 +1511,50 @@ fn refresh_completed(
             result,
         },
         ProviderRequest::ExecuteResourceCommand { .. } => panic!("expected refresh request"),
+    }
+}
+
+/// The shell offers whatever views the Provider Workspace declared, under the
+/// Provider's own names, and shows the first of them.
+#[test]
+fn a_selected_container_offers_dockers_native_detail_views() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(
+        screen.contains("[ Logs ]  Stats  Inspect"),
+        "rendered:\n{screen}"
+    );
+}
+
+/// Incus details are Incus's own, so the shell must not dress them up as the
+/// Docker views it happens to render the same way.
+#[test]
+fn a_selected_instance_offers_incus_views_rather_than_docker_equivalents() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(incus_discovery())));
+
+    app.update(refresh_completed(
+        initial,
+        Ok(incus_snapshot(&[("instance-a", "gateway", "Running")])),
+    ));
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(
+        screen.contains("[ Info ]  Config  Console Log"),
+        "rendered:\n{screen}"
+    );
+    for docker_view in ["Logs", "Stats", "Inspect"] {
+        assert!(
+            !screen.contains(docker_view),
+            "Incus does not borrow Docker's {docker_view} view:\n{screen}"
+        );
     }
 }
 

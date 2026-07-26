@@ -311,6 +311,31 @@ async fn only_a_paused_container_offers_the_resume_command() {
     );
 }
 
+/// The Containers panel advertises Docker's own diagnostics, so the shell can
+/// offer them without knowing what a container is.
+#[tokio::test]
+async fn the_containers_panel_declares_dockers_native_detail_views() {
+    let cli = FixtureCli::new([(
+        container_ls(),
+        success(include_str!("fixtures/docker/containers.jsonl")),
+    )]);
+
+    let snapshot = DockerWorkspace
+        .refresh(&cli)
+        .await
+        .expect("fixture lists containers");
+
+    let panel = snapshot.panels.first().expect("a Containers panel");
+    assert_eq!(
+        panel
+            .detail_views
+            .iter()
+            .map(|view| (view.id.0.as_str(), view.title.as_str()))
+            .collect::<Vec<_>>(),
+        [("logs", "Logs"), ("stats", "Stats"), ("inspect", "Inspect")]
+    );
+}
+
 #[tokio::test]
 async fn a_silent_command_failure_names_the_operation_and_container() {
     let cli = FixtureCli::new([(

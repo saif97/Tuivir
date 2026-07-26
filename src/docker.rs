@@ -5,8 +5,8 @@ use serde::Deserialize;
 use crate::{
     cli::{CliRunner, ProcessError, ProcessSpec},
     provider::{
-        ProviderDiscovery, ProviderId, ProviderWorkspace, Resource, ResourceCommand, ResourceId,
-        ResourcePanel, ResourceState, WorkspaceError, WorkspaceSnapshot,
+        DetailView, ProviderDiscovery, ProviderId, ProviderWorkspace, Resource, ResourceCommand,
+        ResourceId, ResourcePanel, ResourceState, WorkspaceError, WorkspaceSnapshot,
     },
 };
 
@@ -118,6 +118,7 @@ impl ProviderWorkspace for DockerWorkspace {
             Ok(WorkspaceSnapshot {
                 panels: vec![ResourcePanel {
                     title: "Containers".to_owned(),
+                    detail_views: container_detail_views(),
                     resources,
                 }],
             })
@@ -158,6 +159,16 @@ impl ProviderWorkspace for DockerWorkspace {
             Ok(())
         })
     }
+}
+
+/// The diagnostics Docker itself offers for a container, in the order the user
+/// moves through them.
+fn container_detail_views() -> Vec<DetailView> {
+    vec![
+        DetailView::new("logs", "Logs"),
+        DetailView::new("stats", "Stats"),
+        DetailView::new("inspect", "Inspect"),
+    ]
 }
 
 /// Maps a Docker container's `State` onto the shared vocabulary.

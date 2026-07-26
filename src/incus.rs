@@ -5,8 +5,8 @@ use serde::Deserialize;
 use crate::{
     cli::{CliRunner, ProcessError, ProcessSpec},
     provider::{
-        ProviderDiscovery, ProviderId, ProviderWorkspace, Resource, ResourceCommand, ResourceId,
-        ResourcePanel, ResourceState, WorkspaceError, WorkspaceSnapshot,
+        DetailView, ProviderDiscovery, ProviderId, ProviderWorkspace, Resource, ResourceCommand,
+        ResourceId, ResourcePanel, ResourceState, WorkspaceError, WorkspaceSnapshot,
     },
 };
 
@@ -122,6 +122,7 @@ impl ProviderWorkspace for IncusWorkspace {
             Ok(WorkspaceSnapshot {
                 panels: vec![ResourcePanel {
                     title: "Instances".to_owned(),
+                    detail_views: instance_detail_views(),
                     resources,
                 }],
             })
@@ -161,6 +162,16 @@ impl ProviderWorkspace for IncusWorkspace {
             Ok(())
         })
     }
+}
+
+/// The views Incus itself offers for an instance, in the order the user moves
+/// through them.
+fn instance_detail_views() -> Vec<DetailView> {
+    vec![
+        DetailView::new("info", "Info"),
+        DetailView::new("config", "Config"),
+        DetailView::new("console-log", "Console Log"),
+    ]
 }
 
 /// Maps an Incus instance status onto the shared vocabulary.
