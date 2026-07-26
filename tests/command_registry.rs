@@ -26,6 +26,23 @@ fn effective(overrides: &[(&str, &[&str])]) -> CommandRegistry {
     })
 }
 
+/// Layers a `[keybindings]` table over the compiled defaults, expecting it to
+/// be refused.
+fn rejected(overrides: &[(&str, &[&str])]) -> Vec<ConfigError> {
+    let overrides = overrides
+        .iter()
+        .map(|(id, keys)| {
+            (
+                (*id).to_owned(),
+                keys.iter().map(|key| (*key).to_owned()).collect(),
+            )
+        })
+        .collect::<Vec<_>>();
+    CommandRegistry::effective(&overrides)
+        .err()
+        .unwrap_or_else(|| panic!("configuration should be refused: {overrides:?}"))
+}
+
 /// `ctrl+c` is always an emergency Quit, so the terminal can always be
 /// restored no matter what the file says.
 #[test]
@@ -74,6 +91,73 @@ fn no_other_command_may_claim_ctrl_c() {
             key: "ctrl+c".to_owned(),
         }]
     );
+}
+
+/// One key listed twice for one Command is a mistake with no meaning: the
+/// second mention can only be a typo or a misunderstanding.
+#[test]
+fn a_key_repeated_within_one_command_is_rejected() {
+    assert_eq!(
+        rejected(&[("resource.stop", &["x", "x"])]),
+        vec![ConfigError::DuplicateKey {
+            id: "resource.stop".to_owned(),
+            key: "x".to_owned(),
+        }]
+    );
+}
+
+/// Duplicates are compared as parsed keys rather than as the text the user
+/// wrote, so the two spellings of the spacebar cannot slip through as two
+/// separate bindings.
+#[test]
+fn two_spellings_of_one_key_are_still_a_duplicate() {
+    assert_eq!(
+        rejected(&[("app.help", &["space", " "])]),
+        vec![ConfigError::DuplicateKey {
+            id: "app.help".to_owned(),
+            key: "space".to_owned(),
+        }]
+    );
+}
+
+/// Two Commands reachable at once cannot share a key. Resolving by
+/// registration order would let one silently win while Help and the inline hint
+/// still advertised the loser, so the file is refused instead.
+#[test]
+fn one_key_bound_to_two_commands_in_one_scope_is_rejected() {
+    assert_eq!(
+        rejected(&[("resource.stop", &["j"])]),
+        vec![ConfigError::ConflictingKey {
+            key: "j".to_owned(),
+            first: "selection.next".to_owned(),
+            second: "resource.stop".to_owned(),
+        }],
+        "j already moves the selection in the resource view"
+    );
+}
+
+/// A modal replaces the workspace scope, so a modal key and a resource key are
+/// never offered at the same time and can share a spelling.
+#[test]
+fn one_key_may_serve_commands_whose_scopes_cannot_overlap() {
+    let registry = effective(&[("resource.stop", &["y"])]);
+
+    assert_eq!(
+        registry.resolve(CommandScope::ResourceView, key("y")),
+        Some(Command::Resource(ResourceCommand::Stop))
+    );
+    assert_eq!(
+        registry.resolve(CommandScope::Confirmation, key("y")),
+        Some(Command::Confirm),
+        "the same key still confirms the modal that replaced the workspace"
+    );
+}
+
+/// The compiled defaults are a configuration like any other, so they must pass
+/// the validation a user's file has to pass.
+#[test]
+fn the_compiled_defaults_contain_no_conflict() {
+    effective(&[]);
 }
 
 #[test]

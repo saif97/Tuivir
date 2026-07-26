@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::config::ConfigError;
 use crate::keys::Key;
 use crate::provider::ResourceCommand;
@@ -33,7 +35,7 @@ pub enum Command {
 ///
 /// Scope is structural only. Mutable Resource State never changes it; an
 /// unavailable Command is rejected when it is invoked, not hidden by scope.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum CommandScope {
     /// The provider selector has focus.
     ProviderSelector,
@@ -121,6 +123,7 @@ impl CommandRegistry {
                     }
                 })
                 .collect::<Vec<_>>();
+            errors.extend(duplicate_keys(id, &parsed));
             match registry
                 .commands
                 .iter_mut()
@@ -132,6 +135,7 @@ impl CommandRegistry {
         }
 
         errors.extend(registry.reserve_emergency_quit());
+        errors.extend(registry.conflicting_keys());
 
         if errors.is_empty() {
             Ok(registry)
@@ -166,6 +170,51 @@ impl CommandRegistry {
             quit.keys.push(emergency);
         }
         stolen
+    }
+
+    /// Reports every key claimed by two Commands that share a scope.
+    ///
+    /// Commands whose scopes cannot overlap are never reachable together, so
+    /// they may share a key freely; those that can overlap would otherwise be
+    /// resolved by registration order, which is a priority the user cannot see.
+    fn conflicting_keys(&self) -> Vec<ConfigError> {
+        // Every (scope, key) a Command has claimed, against the Command that
+        // claimed it first. Scopes come from the Commands themselves, so a new
+        // scope cannot be left out of the check by forgetting to list it.
+        let mut claimed: HashMap<(CommandScope, Key), &'static str> = HashMap::new();
+        let mut conflicts: Vec<ConfigError> = Vec::new();
+
+        for command in &self.commands {
+            for scope in command.scopes {
+                for key in &command.keys {
+                    // Taking the emergency Quit is already reported against the
+                    // Command that took it, which says more than a conflict
+                    // with the Quit it can never win against.
+                    if *key == Self::emergency_quit_key() {
+                        continue;
+                    }
+                    // The first claimant keeps the slot: it is the Command a
+                    // diagnostic names, and later claimants are the conflict.
+                    let first = *claimed.entry((*scope, *key)).or_insert(command.id);
+                    // Claiming a free key, and one Command listing a key twice,
+                    // both land here. The repeat is a duplicate rather than a
+                    // conflict, and is reported as one.
+                    if first == command.id {
+                        continue;
+                    }
+                    let conflict = ConfigError::ConflictingKey {
+                        key: key.to_string(),
+                        first: first.to_owned(),
+                        second: command.id.to_owned(),
+                    };
+                    // A pair sharing several scopes conflicts once.
+                    if !conflicts.contains(&conflict) {
+                        conflicts.push(conflict);
+                    }
+                }
+            }
+        }
+        conflicts
     }
 
     fn emergency_quit_key() -> Key {
@@ -203,6 +252,32 @@ impl CommandRegistry {
             .find(|registered| registered.command == command)
             .and_then(|registered| registered.keys.first().copied())
     }
+}
+
+/// Reports each key one Command lists more than once, naming it once however
+/// many times it was repeated.
+///
+/// Keys are compared after parsing, so two spellings of one key — `space` and a
+/// literal blank — are the duplicate they actually are.
+fn duplicate_keys(id: &str, keys: &[Key]) -> Vec<ConfigError> {
+    let mut seen = Vec::new();
+    let mut duplicated = Vec::new();
+    for key in keys {
+        if seen.contains(key) {
+            if !duplicated.contains(key) {
+                duplicated.push(*key);
+            }
+        } else {
+            seen.push(*key);
+        }
+    }
+    duplicated
+        .into_iter()
+        .map(|key| ConfigError::DuplicateKey {
+            id: id.to_owned(),
+            key: key.to_string(),
+        })
+        .collect()
 }
 
 struct CommandDefinition {
