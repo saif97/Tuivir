@@ -377,20 +377,42 @@ fn render_details_panel(provider: &ProviderState, frame: &mut Frame<'_>, area: R
 }
 
 /// Draws the loaded detail view, or what is happening to it.
+///
+/// An empty view and a failed one are told apart deliberately: a container that
+/// has logged nothing is not a broken one, and neither must read as the other.
 fn render_detail_content(provider: &ProviderState, frame: &mut Frame<'_>, area: Rect) {
     let Some(details) = &provider.details else {
         return;
     };
     let lines = match &details.content {
         DetailContent::Loading => vec![Line::from(format!("Loading {}…", details.title))],
+        DetailContent::Ready(loaded) if loaded.is_empty() => vec![Line::styled(
+            format!(
+                "{} returned no {} for {}",
+                provider.name, details.title, details.resource_name
+            ),
+            Style::default().fg(Color::DarkGray),
+        )],
         DetailContent::Ready(loaded) => loaded
             .lines
             .iter()
             .map(|line| Line::from(line.as_str()))
             .collect(),
-        DetailContent::Error(error) => vec![Line::from(error.message.as_str())],
+        DetailContent::Error(error) => vec![
+            Line::styled(
+                format!(
+                    "{} {} failed for {}:",
+                    provider.name, details.title, details.resource_name
+                ),
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+            Line::from(error.message.as_str()),
+        ],
     };
-    frame.render_widget(Paragraph::new(lines), area);
+    frame.render_widget(
+        Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: false }),
+        area,
+    );
 }
 
 pub fn render_to_text(state: &AppState, width: u16, height: u16) -> String {

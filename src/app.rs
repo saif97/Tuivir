@@ -4,7 +4,8 @@ use crate::command::{Command, CommandRegistry, CommandScope};
 use crate::keys::Key;
 use crate::provider::{
     DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderRequest, ProviderRequestId,
-    ResourceCommand, ResourceDetails, ResourceId, ResourceState, WorkspaceError, WorkspaceSnapshot,
+    Resource, ResourceCommand, ResourceDetails, ResourceId, ResourceState, WorkspaceError,
+    WorkspaceSnapshot,
 };
 
 /// Facts the application receives: provider discovery, the refresh clock, and
@@ -88,6 +89,9 @@ pub struct ProviderState {
 /// One detail view being loaded or displayed, and the target it describes.
 pub struct ResourceDetailsState {
     pub resource_id: ResourceId,
+    /// The Resource's own name, kept here so an empty or failed view can say
+    /// what it was loaded for without going back to the snapshot.
+    pub resource_name: String,
     pub view_id: DetailViewId,
     pub title: String,
     pub content: DetailContent,
@@ -115,14 +119,21 @@ impl ProviderState {
 
     /// What the detail panel should be describing right now: an existing
     /// Resource and one of the views its panel offers.
-    fn detail_target(&self) -> Option<(ResourceId, DetailView)> {
+    fn detail_target(&self) -> Option<(&Resource, DetailView)> {
         let selected = self.selected_resource.as_ref()?;
         let view_id = self.selected_detail_view.as_ref()?;
         let view = self
             .detail_views()
             .iter()
-            .find(|view| &view.id == view_id)?;
-        Some((selected.clone(), view.clone()))
+            .find(|view| &view.id == view_id)?
+            .clone();
+        let WorkspaceState::Ready(snapshot) = &self.workspace_state else {
+            return None;
+        };
+        let resource = snapshot
+            .resources()
+            .find(|resource| &resource.id == selected)?;
+        Some((resource, view))
     }
 }
 
@@ -535,11 +546,13 @@ impl App {
             return Vec::new();
         };
         let provider_id = provider.id.clone();
-        let Some((resource_id, view)) = provider.detail_target() else {
+        let Some((resource, view)) = provider.detail_target() else {
             provider.details = None;
             self.pending_details = None;
             return Vec::new();
         };
+        let resource_id = resource.id.clone();
+        let resource_name = resource.name.clone();
         let describes_target = provider.details.as_ref().is_some_and(|details| {
             details.resource_id == resource_id && details.view_id == view.id
         });
@@ -567,6 +580,7 @@ impl App {
 
         provider.details = Some(ResourceDetailsState {
             resource_id: resource_id.clone(),
+            resource_name,
             view_id: view.id.clone(),
             title: view.title,
             content: DetailContent::Loading,

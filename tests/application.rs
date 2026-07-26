@@ -1919,6 +1919,83 @@ fn a_refresh_that_removes_the_selected_resource_loads_the_new_selections_details
     assert!(!screen.contains("listening on port 80"));
 }
 
+/// A container that has logged nothing is not a broken one, so the panel says
+/// which view came back empty rather than leaving a blank area.
+#[test]
+fn a_detail_view_the_provider_answered_with_nothing_gets_its_own_empty_state() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let details = detail_request(app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    )));
+
+    app.update(details_completed(details, Ok(ResourceDetails::default())));
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(
+        screen.contains("Docker returned no Logs for api"),
+        "rendered:\n{screen}"
+    );
+}
+
+#[test]
+fn a_failed_detail_view_names_the_provider_resource_and_view() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let details = detail_request(app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    )));
+
+    app.update(details_completed(
+        details,
+        Err(WorkspaceError::new("Error: No such container")),
+    ));
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(
+        screen.contains("Docker Logs failed for api"),
+        "rendered:\n{screen}"
+    );
+    assert!(screen.contains("Error: No such container"));
+}
+
+/// A failed view is the Provider's own failure, so it stays inside the detail
+/// panel instead of taking over the screen the way a failed Command does.
+#[test]
+fn a_failed_detail_view_leaves_the_resource_list_and_its_commands_alone() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let details = detail_request(app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    )));
+
+    app.update(details_completed(
+        details,
+        Err(WorkspaceError::new("Error: No such container")),
+    ));
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(screen.contains("api"), "rendered:\n{screen}");
+    assert!(!screen.contains("Press Esc to dismiss."));
+    let (_, requests) = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE),
+    );
+    assert!(
+        requests.iter().any(|request| matches!(
+            request,
+            ProviderRequest::ExecuteResourceCommand {
+                command: ResourceCommand::Restart,
+                ..
+            }
+        )),
+        "workspace Commands still resolve: {requests:?}"
+    );
+}
+
 /// Incus details are Incus's own, so the shell must not dress them up as the
 /// Docker views it happens to render the same way.
 #[test]
