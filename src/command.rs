@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::config::ConfigError;
 use crate::keys::Key;
 use crate::provider::ResourceCommand;
@@ -33,7 +35,7 @@ pub enum Command {
 ///
 /// Scope is structural only. Mutable Resource State never changes it; an
 /// unavailable Command is rejected when it is invoked, not hidden by scope.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum CommandScope {
     /// The provider selector has focus.
     ProviderSelector,
@@ -45,34 +47,6 @@ pub enum CommandScope {
     CommandFailure,
     /// The contextual help overlay is open.
     HelpOverlay,
-}
-
-impl CommandScope {
-    /// Every structural scope.
-    ///
-    /// Conflict detection asks whether two Commands are ever reachable at once
-    /// rather than assuming it, so a scope missing here would hide a conflict.
-    /// [`Self::listed`] fails to compile until a new variant is added.
-    pub const ALL: &'static [Self] = &[
-        Self::ProviderSelector,
-        Self::ResourceView,
-        Self::Confirmation,
-        Self::CommandFailure,
-        Self::HelpOverlay,
-    ];
-
-    /// Exists only so that adding a variant forces [`Self::ALL`] to be revisited.
-    #[allow(dead_code)]
-    fn listed(self) -> bool {
-        let named = match self {
-            Self::ProviderSelector => Self::ProviderSelector,
-            Self::ResourceView => Self::ResourceView,
-            Self::Confirmation => Self::Confirmation,
-            Self::CommandFailure => Self::CommandFailure,
-            Self::HelpOverlay => Self::HelpOverlay,
-        };
-        Self::ALL.contains(&named)
-    }
 }
 
 /// One Command with the keys that are actually bound to it.
@@ -204,10 +178,14 @@ impl CommandRegistry {
     /// they may share a key freely; those that can overlap would otherwise be
     /// resolved by registration order, which is a priority the user cannot see.
     fn conflicting_keys(&self) -> Vec<ConfigError> {
+        // Every (scope, key) a Command has claimed, against the Command that
+        // claimed it first. Scopes come from the Commands themselves, so a new
+        // scope cannot be left out of the check by forgetting to list it.
+        let mut claimed: HashMap<(CommandScope, Key), &'static str> = HashMap::new();
         let mut conflicts: Vec<ConfigError> = Vec::new();
-        for scope in CommandScope::ALL {
-            let mut claimed: Vec<(Key, &str)> = Vec::new();
-            for command in self.in_scope(*scope) {
+
+        for command in &self.commands {
+            for scope in command.scopes {
                 for key in &command.keys {
                     // Taking the emergency Quit is already reported against the
                     // Command that took it, which says more than a conflict
@@ -215,19 +193,18 @@ impl CommandRegistry {
                     if *key == Self::emergency_quit_key() {
                         continue;
                     }
-                    let Some((_, first)) = claimed.iter().find(|(claimed, _)| claimed == key)
-                    else {
-                        claimed.push((*key, command.id));
-                        continue;
-                    };
-                    // One Command listing a key twice is a duplicate, not a
-                    // conflict, and is reported as such.
-                    if *first == command.id {
+                    // The first claimant keeps the slot: it is the Command a
+                    // diagnostic names, and later claimants are the conflict.
+                    let first = *claimed.entry((*scope, *key)).or_insert(command.id);
+                    // Claiming a free key, and one Command listing a key twice,
+                    // both land here. The repeat is a duplicate rather than a
+                    // conflict, and is reported as one.
+                    if first == command.id {
                         continue;
                     }
                     let conflict = ConfigError::ConflictingKey {
                         key: key.to_string(),
-                        first: (*first).to_owned(),
+                        first: first.to_owned(),
                         second: command.id.to_owned(),
                     };
                     // A pair sharing several scopes conflicts once.
