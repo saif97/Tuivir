@@ -64,7 +64,11 @@ fn terminal_input_is_normalised_to_the_configured_key() {
 /// Only a press is input; a repeat or release is not a second Command.
 #[test]
 fn a_key_release_is_not_input() {
-    let release = KeyEvent::new_with_kind(KeyCode::Char('q'), KeyModifiers::NONE, KeyEventKind::Release);
+    let release = KeyEvent::new_with_kind(
+        KeyCode::Char('q'),
+        KeyModifiers::NONE,
+        KeyEventKind::Release,
+    );
 
     assert_eq!(Key::from_event(release), None);
 }
@@ -84,7 +88,6 @@ fn a_printable_character_is_written_as_itself() {
 #[test]
 fn non_printable_keys_are_written_with_familiar_names() {
     for (text, named) in [
-        ("space", Named::Space),
         ("backspace", Named::Backspace),
         ("enter", Named::Enter),
         ("esc", Named::Esc),
@@ -156,4 +159,74 @@ fn an_unrecognised_key_name_is_rejected() {
             "{text:?} should not be a valid key"
         );
     }
+}
+
+/// Every key a user can write in configuration must equal the key their
+/// terminal actually produces. Testing `parse` and `from_event` only against
+/// themselves let a configurable `space` exist that no keypress could match.
+#[test]
+fn every_configurable_key_matches_the_press_that_produces_it() {
+    for (text, event) in [
+        (
+            "space",
+            KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE),
+        ),
+        (
+            "backspace",
+            KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+        ),
+        ("enter", KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        ("esc", KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        ("tab", KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)),
+        ("left", KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)),
+        ("right", KeyEvent::new(KeyCode::Right, KeyModifiers::NONE)),
+        ("up", KeyEvent::new(KeyCode::Up, KeyModifiers::NONE)),
+        ("down", KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
+        ("home", KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)),
+        ("end", KeyEvent::new(KeyCode::End, KeyModifiers::NONE)),
+        ("pageup", KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE)),
+        (
+            "pagedown",
+            KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE),
+        ),
+        ("insert", KeyEvent::new(KeyCode::Insert, KeyModifiers::NONE)),
+        ("delete", KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE)),
+        (
+            "shift+tab",
+            KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT),
+        ),
+        ("f5", KeyEvent::new(KeyCode::F(5), KeyModifiers::NONE)),
+        ("S", KeyEvent::new(KeyCode::Char('S'), KeyModifiers::SHIFT)),
+        (
+            "ctrl+r",
+            KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL),
+        ),
+    ] {
+        let configured = Key::parse(text).unwrap_or_else(|_| panic!("{text} is a key"));
+        assert_eq!(
+            Key::from_event(event),
+            Some(configured),
+            "configuring {text:?} must match the key its press produces"
+        );
+    }
+}
+
+/// Key and modifier names are lowercase literals. A mistyped name is reported
+/// rather than silently reinterpreted, so a binding never quietly does
+/// something other than what the file says.
+#[test]
+fn a_miscased_key_name_is_a_typo_rather_than_a_second_spelling() {
+    for text in ["Esc", "ESC", "Enter", "F5", "PageUp", "Shift+Tab", "Ctrl+r"] {
+        assert!(
+            Key::parse(text).is_err(),
+            "{text:?} is a typo, not a spelling of a key"
+        );
+    }
+    // Single printable characters are the exception: they are the character
+    // the terminal produces, so `S` is Start and `s` is Stop.
+    assert_ne!(
+        Key::parse("S").expect("S is a key"),
+        Key::parse("s").expect("s is a key"),
+        "a printable character keeps its case"
+    );
 }

@@ -23,9 +23,11 @@ enum KeyCode {
 
 /// A key with no printable character, written by a familiar name rather than
 /// in Vim notation.
+///
+/// The spacebar is deliberately absent: it produces a character, so it is a
+/// [`KeyCode::Character`] like any other and `space` is only a spelling for it.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Named {
-    Space,
     Backspace,
     Enter,
     Esc,
@@ -46,8 +48,7 @@ pub enum Named {
     Function(u8),
 }
 
-const NAMED_KEYS: [(&str, Named); 15] = [
-    ("space", Named::Space),
+const NAMED_KEYS: [(&str, Named); 14] = [
     ("backspace", Named::Backspace),
     ("enter", Named::Enter),
     ("esc", Named::Esc),
@@ -65,6 +66,7 @@ const NAMED_KEYS: [(&str, Named); 15] = [
 ];
 
 impl Named {
+    /// Parses an already-lowercased key name.
     fn parse(text: &str) -> Option<Self> {
         if let Some((_, named)) = NAMED_KEYS.iter().find(|(name, _)| *name == text) {
             return Some(*named);
@@ -107,9 +109,13 @@ impl Key {
         let mut remaining = text;
         let (mut ctrl, mut alt, mut shift) = (false, false, false);
         loop {
-            let modifier = [("ctrl+", &mut ctrl), ("alt+", &mut alt), ("shift+", &mut shift)]
-                .into_iter()
-                .find_map(|(prefix, flag)| remaining.strip_prefix(prefix).map(|rest| (rest, flag)));
+            let modifier = [
+                ("ctrl+", &mut ctrl),
+                ("alt+", &mut alt),
+                ("shift+", &mut shift),
+            ]
+            .into_iter()
+            .find_map(|(prefix, flag)| remaining.strip_prefix(prefix).map(|rest| (rest, flag)));
             let Some((rest, flag)) = modifier else { break };
             if *flag {
                 return Err(InvalidKey::new(text));
@@ -168,10 +174,19 @@ impl Key {
 
     fn parse_code(text: &str) -> Option<KeyCode> {
         // A single character is always itself, so a one-character name can
-        // never shadow a printable key.
+        // never shadow a printable key, and `S` stays distinct from `s`.
         let mut characters = text.chars();
         if let (Some(character), None) = (characters.next(), characters.next()) {
             return Some(KeyCode::Character(character));
+        }
+        // Key names are lowercase literals, so `Esc` is a typo rather than a
+        // second spelling: a mistyped binding is reported, never silently
+        // reinterpreted.
+        //
+        // `space` is only a spelling for the character the spacebar produces;
+        // writing it as a name must yield the very key that a press produces.
+        if text == "space" {
+            return Some(KeyCode::Character(' '));
         }
         Named::parse(text).map(KeyCode::Named)
     }
@@ -186,6 +201,9 @@ impl fmt::Display for Key {
             formatter.write_str("alt+")?;
         }
         match self.code {
+            // An inline hint showing a literal blank would be invisible, so the
+            // spacebar is spelled with the same name that configures it.
+            KeyCode::Character(' ') => formatter.write_str("space"),
             KeyCode::Character(character) => write!(formatter, "{character}"),
             KeyCode::Named(Named::BackTab) => formatter.write_str("shift+tab"),
             KeyCode::Named(Named::Function(number)) => write!(formatter, "f{number}"),
