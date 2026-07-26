@@ -1846,6 +1846,79 @@ fn returning_to_a_workspace_whose_detail_load_was_invalidated_asks_for_it_again(
     assert!(!screen.contains("abandoned output"));
 }
 
+/// Details are lazy, so the two-second clock must not keep re-running provider
+/// work for a view that is already on screen.
+#[test]
+fn an_ordinary_refresh_neither_reloads_nor_discards_the_loaded_details() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let details = detail_request(app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[
+            ("container-a", "api", "nginx:1.27"),
+            ("container-b", "worker", "alpine:3.21"),
+        ])),
+    )));
+    app.update(details_completed(
+        details,
+        Ok(ResourceDetails::from_lines(["listening on port 80"])),
+    ));
+
+    let refresh = refresh_request(app.update(AppEvent::RefreshTimerElapsed));
+    let requests = app.update(refresh_completed(
+        refresh,
+        Ok(snapshot(&[
+            ("container-b", "worker", "alpine:3.21"),
+            ("container-a", "api", "nginx:1.27"),
+        ])),
+    ));
+
+    assert!(
+        requests.is_empty(),
+        "a refresh that keeps the selection asks for nothing: {requests:?}"
+    );
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(
+        screen.contains("listening on port 80"),
+        "rendered:\n{screen}"
+    );
+}
+
+/// When the selected Resource is gone, the selection moves and the details have
+/// to follow it.
+#[test]
+fn a_refresh_that_removes_the_selected_resource_loads_the_new_selections_details() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let details = detail_request(app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    )));
+    app.update(details_completed(
+        details,
+        Ok(ResourceDetails::from_lines(["listening on port 80"])),
+    ));
+
+    let refresh = refresh_request(app.update(AppEvent::RefreshTimerElapsed));
+    let requests = app.update(refresh_completed(
+        refresh,
+        Ok(snapshot(&[("container-b", "worker", "alpine:3.21")])),
+    ));
+
+    let reloaded = detail_request(requests);
+    assert!(
+        matches!(
+            &reloaded,
+            ProviderRequest::LoadResourceDetails { resource_id, .. }
+                if resource_id == &ResourceId::new("container-b")
+        ),
+        "unexpected request: {reloaded:?}"
+    );
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(screen.contains("Loading Logs…"), "rendered:\n{screen}");
+    assert!(!screen.contains("listening on port 80"));
+}
+
 /// Incus details are Incus's own, so the shell must not dress them up as the
 /// Docker views it happens to render the same way.
 #[test]
