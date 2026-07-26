@@ -342,11 +342,13 @@ fn render_details_panel(provider: &ProviderState, frame: &mut Frame<'_>, area: R
     frame.render_widget(block, area);
 
     let views = provider.detail_views();
+    // The view strip is a control, not another summary field, so it gets a
+    // blank line to sit behind rather than running straight into the fields.
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(summary.len() as u16),
-            Constraint::Length(u16::from(!views.is_empty())),
+            Constraint::Length(u16::from(!views.is_empty()) * 2),
             Constraint::Min(0),
         ])
         .split(inner);
@@ -373,7 +375,10 @@ fn render_details_panel(provider: &ProviderState, frame: &mut Frame<'_>, area: R
             spans.push(Span::raw(view.title.as_str()));
         }
     }
-    frame.render_widget(Paragraph::new(Line::from(spans)), rows[1]);
+    frame.render_widget(
+        Paragraph::new(vec![Line::default(), Line::from(spans)]),
+        rows[1],
+    );
 }
 
 /// Draws the loaded detail view, or what is happening to it.
