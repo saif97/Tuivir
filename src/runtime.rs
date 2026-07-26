@@ -167,6 +167,36 @@ impl ProviderRuntime {
                     });
                 });
             }
+            ProviderRequest::LoadResourceDetails {
+                request_id,
+                provider_id,
+                resource_id,
+                view_id,
+            } => {
+                let Some(workspace) = self.workspace(&provider_id) else {
+                    return;
+                };
+                let cli = Arc::clone(&self.cli);
+                tokio::spawn(async move {
+                    let result = workspace
+                        .load_details(cli.as_ref(), &resource_id, &view_id)
+                        .await;
+                    let _ = events.send(AppEvent::ResourceDetailsCompleted {
+                        request_id,
+                        provider_id,
+                        resource_id,
+                        view_id,
+                        result,
+                    });
+                });
+            }
         }
+    }
+
+    fn workspace(&self, provider_id: &ProviderId) -> Option<Arc<dyn ProviderWorkspace>> {
+        self.workspaces
+            .iter()
+            .find(|(id, _)| id == provider_id)
+            .map(|(_, workspace)| Arc::clone(workspace))
     }
 }

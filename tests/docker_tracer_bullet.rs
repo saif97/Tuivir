@@ -5,8 +5,8 @@ use virtui::{
     cli::{CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec},
     docker::DockerWorkspace,
     provider::{
-        ProviderRequest, ProviderWorkspace, ResourceCommand, ResourceId, ResourceState,
-        WorkspaceError, WorkspaceSnapshot,
+        DetailViewId, ProviderRequest, ProviderWorkspace, ResourceCommand, ResourceId,
+        ResourceState, WorkspaceError, WorkspaceSnapshot,
     },
     ui::render_to_text,
 };
@@ -101,7 +101,7 @@ fn refresh_completed(
             provider_id,
             result,
         },
-        ProviderRequest::ExecuteResourceCommand { .. } => panic!("expected refresh request"),
+        other => panic!("expected refresh request, got {other:?}"),
     }
 }
 
@@ -334,6 +334,117 @@ async fn the_containers_panel_declares_dockers_native_detail_views() {
             .collect::<Vec<_>>(),
         [("logs", "Logs"), ("stats", "Stats"), ("inspect", "Inspect")]
     );
+}
+
+/// Each declared view runs exactly one Docker command. The fixture answers one
+/// request and panics on any other, so a view that loaded more than the one on
+/// screen would fail here.
+#[tokio::test]
+async fn each_detail_view_runs_its_own_docker_command() {
+    for (view, expected) in [
+        (
+            "logs",
+            ProcessSpec::new(
+                "docker",
+                &["container", "logs", "--tail", "200", "container-a"],
+            ),
+        ),
+        (
+            "stats",
+            ProcessSpec::new(
+                "docker",
+                &["container", "stats", "--no-stream", "container-a"],
+            ),
+        ),
+        (
+            "inspect",
+            ProcessSpec::new("docker", &["container", "inspect", "container-a"]),
+        ),
+    ] {
+        let cli = FixtureCli::new([(expected, success("first line\nsecond line\n"))]);
+
+        let details = DockerWorkspace
+            .load_details(
+                &cli,
+                &ResourceId::new("container-a"),
+                &DetailViewId::new(view),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("Docker {view} loads: {error:?}"));
+
+        assert_eq!(details.lines, ["first line", "second line"], "view {view}");
+    }
+}
+
+/// A container writes its log to whichever stream it chose, so Logs must show
+/// both rather than silently drop everything written to stderr.
+#[tokio::test]
+async fn container_logs_include_what_the_container_wrote_to_stderr() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new(
+            "docker",
+            &["container", "logs", "--tail", "200", "container-a"],
+        ),
+        Ok(ProcessOutput {
+            stdout: "listening on port 80\n".to_owned(),
+            stderr: "warning: cache is cold\n".to_owned(),
+        }),
+    )]);
+
+    let details = DockerWorkspace
+        .load_details(
+            &cli,
+            &ResourceId::new("container-a"),
+            &DetailViewId::new("logs"),
+        )
+        .await
+        .expect("Docker logs load");
+
+    assert_eq!(
+        details.lines,
+        ["listening on port 80", "warning: cache is cold"]
+    );
+}
+
+#[tokio::test]
+async fn a_container_that_has_logged_nothing_loads_empty_details() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new(
+            "docker",
+            &["container", "logs", "--tail", "200", "container-a"],
+        ),
+        success(""),
+    )]);
+
+    let details = DockerWorkspace
+        .load_details(
+            &cli,
+            &ResourceId::new("container-a"),
+            &DetailViewId::new("logs"),
+        )
+        .await
+        .expect("no output is not a failure");
+
+    assert!(details.is_empty());
+}
+
+#[tokio::test]
+async fn a_failed_detail_view_reports_what_docker_wrote_to_stderr() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("docker", &["container", "inspect", "container-a"]),
+        failure("Error: No such container: container-a"),
+    )]);
+
+    let error = DockerWorkspace
+        .load_details(
+            &cli,
+            &ResourceId::new("container-a"),
+            &DetailViewId::new("inspect"),
+        )
+        .await
+        .expect_err("a non-zero exit is never loaded details");
+
+    assert_eq!(error.message, "Error: No such container: container-a");
 }
 
 #[tokio::test]

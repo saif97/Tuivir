@@ -13,8 +13,9 @@ use virtui::{
     command::{Command, CommandRegistry},
     docker::DockerWorkspace,
     provider::{
-        DetailView, ProviderDiscovery, ProviderId, ProviderRequest, Resource, ResourceCommand,
-        ResourceId, ResourcePanel, ResourceState, WorkspaceError, WorkspaceSnapshot,
+        DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderRequest, Resource,
+        ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourceState, WorkspaceError,
+        WorkspaceSnapshot,
     },
     runtime::{ProviderRuntime, RefreshTimer, ShellControl, handle_key},
     ui::{render_foreground_colours, render_to_text},
@@ -351,7 +352,12 @@ fn keyboard_commands_drive_navigation_manual_refresh_and_quit() {
         KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
     );
     assert_eq!(control, ShellControl::Continue);
-    assert!(requests.is_empty());
+    // Moving the selection asks only for the newly selected Resource's details.
+    assert!(matches!(
+        requests.as_slice(),
+        [ProviderRequest::LoadResourceDetails { resource_id, .. }]
+            if resource_id == &ResourceId::new("container-b")
+    ));
     assert!(render_to_text(app.state(), 100, 24).contains("Image: alpine:3.21"));
 
     let (_, requests) = handle_key(
@@ -1493,7 +1499,7 @@ fn command_completed(request: ProviderRequest, result: Result<(), WorkspaceError
             command,
             result,
         },
-        ProviderRequest::RefreshWorkspace { .. } => panic!("expected Resource Command request"),
+        other => panic!("expected Resource Command request, got {other:?}"),
     }
 }
 
@@ -1510,7 +1516,36 @@ fn refresh_completed(
             provider_id,
             result,
         },
-        ProviderRequest::ExecuteResourceCommand { .. } => panic!("expected refresh request"),
+        other => panic!("expected refresh request, got {other:?}"),
+    }
+}
+
+/// The one detail load among the requests an event or Command produced.
+fn detail_request(requests: Vec<ProviderRequest>) -> ProviderRequest {
+    requests
+        .into_iter()
+        .find(|request| matches!(request, ProviderRequest::LoadResourceDetails { .. }))
+        .expect("detail load request")
+}
+
+fn details_completed(
+    request: ProviderRequest,
+    result: Result<ResourceDetails, WorkspaceError>,
+) -> AppEvent {
+    match request {
+        ProviderRequest::LoadResourceDetails {
+            request_id,
+            provider_id,
+            resource_id,
+            view_id,
+        } => AppEvent::ResourceDetailsCompleted {
+            request_id,
+            provider_id,
+            resource_id,
+            view_id,
+            result,
+        },
+        other => panic!("expected detail load request, got {other:?}"),
     }
 }
 
@@ -1531,6 +1566,63 @@ fn a_selected_container_offers_dockers_native_detail_views() {
         screen.contains("[ Logs ]  Stats  Inspect"),
         "rendered:\n{screen}"
     );
+}
+
+/// Detail data is lazy: settling on a Resource asks the Provider for the one
+/// view on screen and for nothing else.
+#[test]
+fn settling_on_a_resource_requests_only_the_visible_detail_view() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+
+    let requests = app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+
+    assert_eq!(requests.len(), 1, "one view is visible, so one is loaded");
+    assert!(
+        matches!(
+            &requests[0],
+            ProviderRequest::LoadResourceDetails {
+                provider_id,
+                resource_id,
+                view_id,
+                ..
+            } if provider_id == &ProviderId::new("docker")
+                && resource_id == &ResourceId::new("container-a")
+                && view_id == &DetailViewId::new("logs")
+        ),
+        "unexpected request: {:?}",
+        requests[0]
+    );
+}
+
+/// The panel says it is working before the Provider answers, then shows what
+/// the Provider returned.
+#[test]
+fn the_detail_panel_reports_loading_and_then_the_providers_own_output() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let request = detail_request(app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    )));
+
+    let loading = render_to_text(app.state(), 100, 24);
+    assert!(loading.contains("Loading Logs…"), "rendered:\n{loading}");
+
+    app.update(details_completed(
+        request,
+        Ok(ResourceDetails::from_lines(["listening on port 80"])),
+    ));
+
+    let loaded = render_to_text(app.state(), 100, 24);
+    assert!(
+        loaded.contains("listening on port 80"),
+        "rendered:\n{loaded}"
+    );
+    assert!(!loaded.contains("Loading Logs…"));
 }
 
 /// Incus details are Incus's own, so the shell must not dress them up as the

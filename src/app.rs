@@ -4,7 +4,7 @@ use crate::command::{Command, CommandRegistry, CommandScope};
 use crate::keys::Key;
 use crate::provider::{
     DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderRequest, ProviderRequestId,
-    ResourceCommand, ResourceId, ResourceState, WorkspaceError, WorkspaceSnapshot,
+    ResourceCommand, ResourceDetails, ResourceId, ResourceState, WorkspaceError, WorkspaceSnapshot,
 };
 
 /// Facts the application receives: provider discovery, the refresh clock, and
@@ -31,6 +31,18 @@ pub enum AppEvent {
         resource_name: String,
         command: ResourceCommand,
         result: Result<(), WorkspaceError>,
+    },
+    /// The result of an earlier [`ProviderRequest::LoadResourceDetails`].
+    ///
+    /// Accepted only while its request is still the pending one for the visible
+    /// Resource and view, so a result the user has navigated away from is
+    /// dropped rather than rendered.
+    ResourceDetailsCompleted {
+        request_id: ProviderRequestId,
+        provider_id: ProviderId,
+        resource_id: ResourceId,
+        view_id: DetailViewId,
+        result: Result<ResourceDetails, WorkspaceError>,
     },
 }
 
@@ -63,6 +75,29 @@ pub struct ProviderState {
     /// list while reading one kind of detail does not keep resetting the view.
     /// `None` means no panel has declared any views yet.
     pub selected_detail_view: Option<DetailViewId>,
+    /// The detail view this Provider Workspace last loaded or is loading, and
+    /// what it was loaded for.
+    ///
+    /// Carrying the Resource and view alongside the content is what lets the
+    /// shell tell "already loaded" from "needs loading" without a second copy
+    /// of the selection.
+    pub details: Option<ResourceDetailsState>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+/// One detail view being loaded or displayed, and the target it describes.
+pub struct ResourceDetailsState {
+    pub resource_id: ResourceId,
+    pub view_id: DetailViewId,
+    pub title: String,
+    pub content: DetailContent,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DetailContent {
+    Loading,
+    Ready(ResourceDetails),
+    Error(WorkspaceError),
 }
 
 impl ProviderState {
@@ -76,6 +111,18 @@ impl ProviderState {
             .as_ref()
             .and_then(|selected| snapshot.panel_of(selected))
             .map_or(&[], |panel| panel.detail_views.as_slice())
+    }
+
+    /// What the detail panel should be describing right now: an existing
+    /// Resource and one of the views its panel offers.
+    fn detail_target(&self) -> Option<(ResourceId, DetailView)> {
+        let selected = self.selected_resource.as_ref()?;
+        let view_id = self.selected_detail_view.as_ref()?;
+        let view = self
+            .detail_views()
+            .iter()
+            .find(|view| &view.id == view_id)?;
+        Some((selected.clone(), view.clone()))
     }
 }
 
@@ -191,6 +238,21 @@ pub struct App {
     /// away from a Provider Workspace drops its entries so a stale snapshot
     /// cannot overwrite newer application state.
     pending_refreshes: HashMap<ProviderRequestId, ProviderId>,
+    /// The single detail load whose result may still reach the screen.
+    ///
+    /// Only the visible Resource and view can have one, so replacing or
+    /// clearing this is what invalidates a request the user has navigated away
+    /// from — its completion no longer matches anything and is dropped.
+    pending_details: Option<PendingDetails>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+/// The target a pending detail load was issued for.
+struct PendingDetails {
+    request_id: ProviderRequestId,
+    provider_id: ProviderId,
+    resource_id: ResourceId,
+    view_id: DetailViewId,
 }
 
 impl Default for App {
@@ -217,6 +279,7 @@ impl App {
             commands,
             next_request_id: 1,
             pending_refreshes: HashMap::new(),
+            pending_details: None,
         }
     }
 
@@ -229,6 +292,12 @@ impl App {
     /// This method performs no I/O; the runtime executes returned requests and
     /// feeds their completions back as events.
     pub fn update(&mut self, event: AppEvent) -> Vec<ProviderRequest> {
+        let mut requests = self.apply(event);
+        requests.extend(self.sync_details());
+        requests
+    }
+
+    fn apply(&mut self, event: AppEvent) -> Vec<ProviderRequest> {
         match event {
             AppEvent::ProviderDiscovered(discovery) => self.handle_provider_discovered(discovery),
             AppEvent::RefreshTimerElapsed => self.refresh_active_provider(),
@@ -252,6 +321,16 @@ impl App {
                 command,
                 result,
             ),
+            AppEvent::ResourceDetailsCompleted {
+                request_id,
+                provider_id,
+                resource_id,
+                view_id,
+                result,
+            } => {
+                self.apply_details_completed(request_id, provider_id, resource_id, view_id, result);
+                Vec::new()
+            }
         }
     }
 
@@ -289,6 +368,12 @@ impl App {
 
     /// Carries out one resolved user intention and returns any provider work.
     pub fn invoke(&mut self, command: Command) -> Vec<ProviderRequest> {
+        let mut requests = self.dispatch(command);
+        requests.extend(self.sync_details());
+        requests
+    }
+
+    fn dispatch(&mut self, command: Command) -> Vec<ProviderRequest> {
         match command {
             Command::Quit => Vec::new(),
             Command::ToggleHelp => {
@@ -373,6 +458,7 @@ impl App {
             workspace_state: initial_workspace_state,
             selected_resource: None,
             selected_detail_view: None,
+            details: None,
         });
         if activates_provider {
             self.state.active_provider = Some(self.state.providers.len() - 1);
@@ -423,6 +509,101 @@ impl App {
             Err(error) => provider.workspace_state = WorkspaceState::Error(error),
         }
         Vec::new()
+    }
+
+    /// Brings the loaded detail view into line with what is on screen.
+    ///
+    /// Called after every event and Command, this is the single place a detail
+    /// load starts: a target that already matches asks for nothing, and a
+    /// target that changed replaces the pending request, which is what makes
+    /// the previous one's result unwelcome.
+    fn sync_details(&mut self) -> Vec<ProviderRequest> {
+        let Some(provider) = self
+            .state
+            .active_provider
+            .and_then(|active| self.state.providers.get_mut(active))
+        else {
+            self.pending_details = None;
+            return Vec::new();
+        };
+        let provider_id = provider.id.clone();
+        let Some((resource_id, view)) = provider.detail_target() else {
+            provider.details = None;
+            self.pending_details = None;
+            return Vec::new();
+        };
+        let describes_target = provider.details.as_ref().is_some_and(|details| {
+            details.resource_id == resource_id && details.view_id == view.id
+        });
+        if describes_target {
+            // A request still in flight for this very target stays welcome;
+            // anything else pending belongs to a target the user left.
+            let pending_for_target = self.pending_details.as_ref().is_some_and(|pending| {
+                pending.provider_id == provider_id
+                    && pending.resource_id == resource_id
+                    && pending.view_id == view.id
+            });
+            if !pending_for_target {
+                self.pending_details = None;
+            }
+            return Vec::new();
+        }
+
+        provider.details = Some(ResourceDetailsState {
+            resource_id: resource_id.clone(),
+            view_id: view.id.clone(),
+            title: view.title,
+            content: DetailContent::Loading,
+        });
+        let request_id = ProviderRequestId(self.next_request_id);
+        self.next_request_id += 1;
+        self.pending_details = Some(PendingDetails {
+            request_id,
+            provider_id: provider_id.clone(),
+            resource_id: resource_id.clone(),
+            view_id: view.id.clone(),
+        });
+        vec![ProviderRequest::LoadResourceDetails {
+            request_id,
+            provider_id,
+            resource_id,
+            view_id: view.id,
+        }]
+    }
+
+    fn apply_details_completed(
+        &mut self,
+        request_id: ProviderRequestId,
+        provider_id: ProviderId,
+        resource_id: ResourceId,
+        view_id: DetailViewId,
+        result: Result<ResourceDetails, WorkspaceError>,
+    ) {
+        let expected = PendingDetails {
+            request_id,
+            provider_id: provider_id.clone(),
+            resource_id,
+            view_id,
+        };
+        if self.pending_details.as_ref() != Some(&expected) {
+            return;
+        }
+        self.pending_details = None;
+        let Some(provider) = self
+            .state
+            .providers
+            .iter_mut()
+            .find(|provider| provider.id == provider_id)
+        else {
+            return;
+        };
+        let Some(details) = provider.details.as_mut() else {
+            return;
+        };
+        details.content = match result {
+            Ok(details) => DetailContent::Ready(details),
+            Err(error) => DetailContent::Error(error),
+        };
     }
 
     fn start_refresh(&mut self, provider_id: ProviderId) -> ProviderRequest {

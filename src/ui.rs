@@ -8,7 +8,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
 };
 
-use crate::app::{AppState, FocusedPanel, ProviderState, WorkspaceState};
+use crate::app::{AppState, DetailContent, FocusedPanel, ProviderState, WorkspaceState};
 use crate::provider::ResourceState;
 
 pub fn render(state: &AppState, frame: &mut Frame<'_>) {
@@ -358,6 +358,7 @@ fn render_details_panel(provider: &ProviderState, frame: &mut Frame<'_>, area: R
     if views.is_empty() {
         return;
     }
+    render_detail_content(provider, frame, rows[2]);
     let mut spans = Vec::new();
     for view in views {
         if !spans.is_empty() {
@@ -373,6 +374,23 @@ fn render_details_panel(provider: &ProviderState, frame: &mut Frame<'_>, area: R
         }
     }
     frame.render_widget(Paragraph::new(Line::from(spans)), rows[1]);
+}
+
+/// Draws the loaded detail view, or what is happening to it.
+fn render_detail_content(provider: &ProviderState, frame: &mut Frame<'_>, area: Rect) {
+    let Some(details) = &provider.details else {
+        return;
+    };
+    let lines = match &details.content {
+        DetailContent::Loading => vec![Line::from(format!("Loading {}…", details.title))],
+        DetailContent::Ready(loaded) => loaded
+            .lines
+            .iter()
+            .map(|line| Line::from(line.as_str()))
+            .collect(),
+        DetailContent::Error(error) => vec![Line::from(error.message.as_str())],
+    };
+    frame.render_widget(Paragraph::new(lines), area);
 }
 
 pub fn render_to_text(state: &AppState, width: u16, height: u16) -> String {

@@ -5,8 +5,9 @@ use serde::Deserialize;
 use crate::{
     cli::{CliRunner, ProcessError, ProcessSpec},
     provider::{
-        DetailView, ProviderDiscovery, ProviderId, ProviderWorkspace, Resource, ResourceCommand,
-        ResourceId, ResourcePanel, ResourceState, WorkspaceError, WorkspaceSnapshot,
+        DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderWorkspace, Resource,
+        ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourceState, WorkspaceError,
+        WorkspaceSnapshot,
     },
 };
 
@@ -158,6 +159,51 @@ impl ProviderWorkspace for DockerWorkspace {
                 })?;
             Ok(())
         })
+    }
+
+    fn load_details<'a>(
+        &'a self,
+        cli: &'a dyn CliRunner,
+        resource_id: &'a ResourceId,
+        view_id: &'a DetailViewId,
+    ) -> Pin<Box<dyn Future<Output = Result<ResourceDetails, WorkspaceError>> + Send + 'a>> {
+        Box::pin(async move {
+            let Some(args) = container_detail_command(view_id, resource_id.0.as_str()) else {
+                return Err(WorkspaceError::new(format!(
+                    "Docker has no {view_id} view for container {resource_id}"
+                )));
+            };
+            let output = cli
+                .run(ProcessSpec::new("docker", &args))
+                .await
+                .map_err(|error| {
+                    command_error(
+                        error,
+                        &format!("Docker could not load {view_id} for container {resource_id}"),
+                    )
+                })?;
+            // A container writes wherever it likes, so both streams are its
+            // output. Only a non-zero exit means Docker itself failed.
+            let mut details = ResourceDetails::from_output(&output.stdout);
+            details
+                .lines
+                .extend(ResourceDetails::from_output(&output.stderr).lines);
+            Ok(details)
+        })
+    }
+}
+
+/// The Docker command behind each declared view, or `None` for a view this
+/// workspace never declared.
+fn container_detail_command<'a>(
+    view_id: &DetailViewId,
+    resource_id: &'a str,
+) -> Option<Vec<&'a str>> {
+    match view_id.0.as_str() {
+        "logs" => Some(vec!["container", "logs", "--tail", "200", resource_id]),
+        "stats" => Some(vec!["container", "stats", "--no-stream", resource_id]),
+        "inspect" => Some(vec!["container", "inspect", resource_id]),
+        _ => None,
     }
 }
 

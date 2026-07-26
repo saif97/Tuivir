@@ -10,8 +10,8 @@ use virtui::{
     cli::{CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec},
     incus::IncusWorkspace,
     provider::{
-        ProviderRequest, ProviderWorkspace, ResourceCommand, ResourceId, ResourceState,
-        WorkspaceError, WorkspaceSnapshot,
+        DetailViewId, ProviderRequest, ProviderWorkspace, ResourceCommand, ResourceId,
+        ResourceState, WorkspaceError, WorkspaceSnapshot,
     },
     runtime::ProviderRuntime,
     ui::render_to_text,
@@ -93,7 +93,7 @@ fn refresh_completed(
             provider_id,
             result,
         },
-        ProviderRequest::ExecuteResourceCommand { .. } => panic!("expected refresh request"),
+        other => panic!("expected refresh request, got {other:?}"),
     }
 }
 
@@ -241,6 +241,71 @@ async fn the_instances_panel_declares_incuss_native_detail_views() {
             ("console-log", "Console Log")
         ]
     );
+}
+
+/// Each declared view runs exactly one Incus command. The fixture answers one
+/// request and panics on any other, so a view that loaded more than the one on
+/// screen would fail here.
+#[tokio::test]
+async fn each_detail_view_runs_its_own_incus_command() {
+    for (view, expected) in [
+        ("info", ProcessSpec::new("incus", &["info", "gateway"])),
+        (
+            "config",
+            ProcessSpec::new("incus", &["config", "show", "gateway"]),
+        ),
+        (
+            "console-log",
+            ProcessSpec::new("incus", &["console", "--show-log", "gateway"]),
+        ),
+    ] {
+        let cli = FixtureCli::new([(expected, success("first line\nsecond line\n"))]);
+
+        let details = IncusWorkspace
+            .load_details(&cli, &ResourceId::new("gateway"), &DetailViewId::new(view))
+            .await
+            .unwrap_or_else(|error| panic!("Incus {view} loads: {error:?}"));
+
+        assert_eq!(details.lines, ["first line", "second line"], "view {view}");
+    }
+}
+
+#[tokio::test]
+async fn an_instance_with_no_console_log_loads_empty_details() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("incus", &["console", "--show-log", "gateway"]),
+        success(""),
+    )]);
+
+    let details = IncusWorkspace
+        .load_details(
+            &cli,
+            &ResourceId::new("gateway"),
+            &DetailViewId::new("console-log"),
+        )
+        .await
+        .expect("no output is not a failure");
+
+    assert!(details.is_empty());
+}
+
+#[tokio::test]
+async fn a_failed_detail_view_reports_what_incus_wrote_to_stderr() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("incus", &["info", "gateway"]),
+        failure("Error: Instance not found"),
+    )]);
+
+    let error = IncusWorkspace
+        .load_details(
+            &cli,
+            &ResourceId::new("gateway"),
+            &DetailViewId::new("info"),
+        )
+        .await
+        .expect_err("a non-zero exit is never loaded details");
+
+    assert_eq!(error.message, "Error: Instance not found");
 }
 
 #[tokio::test]

@@ -96,6 +96,16 @@ pub enum ProviderRequest {
         /// the Provider Workspace never re-queries it while dispatching.
         state: ResourceState,
     },
+    /// Loads one detail view for one Resource.
+    ///
+    /// The application asks for exactly the view on screen, so a Provider never
+    /// runs work for a detail the user is not looking at.
+    LoadResourceDetails {
+        request_id: ProviderRequestId,
+        provider_id: ProviderId,
+        resource_id: ResourceId,
+        view_id: DetailViewId,
+    },
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -202,6 +212,39 @@ impl WorkspaceSnapshot {
     }
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+/// UI-neutral output of one detail view for one Resource.
+///
+/// Provider Workspaces decide what a line is — a log record, a formatted table
+/// row, a line of YAML — and the shell only ever displays and scrolls them.
+pub struct ResourceDetails {
+    pub lines: Vec<String>,
+}
+
+impl ResourceDetails {
+    pub fn from_lines<I, S>(lines: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        Self {
+            lines: lines.into_iter().map(Into::into).collect(),
+        }
+    }
+
+    /// Splits provider output into displayable lines, dropping the trailing
+    /// blank a CLI leaves behind so it cannot read as content.
+    pub fn from_output(output: &str) -> Self {
+        Self::from_lines(output.trim_end_matches('\n').lines())
+    }
+
+    /// A view the Provider answered with nothing at all, such as a container
+    /// that has not logged yet.
+    pub fn is_empty(&self) -> bool {
+        self.lines.iter().all(|line| line.trim().is_empty())
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// A user-facing failure from discovering or refreshing a Provider Workspace.
 pub struct WorkspaceError {
@@ -260,4 +303,15 @@ pub trait ProviderWorkspace: Send + Sync {
         command: ResourceCommand,
         state: ResourceState,
     ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>>;
+
+    /// Loads one of the detail views this workspace declared for a Resource.
+    ///
+    /// Only the view the user is looking at is ever asked for, so this runs
+    /// exactly one Provider CLI request per visible view.
+    fn load_details<'a>(
+        &'a self,
+        cli: &'a dyn CliRunner,
+        resource_id: &'a ResourceId,
+        view_id: &'a DetailViewId,
+    ) -> Pin<Box<dyn Future<Output = Result<ResourceDetails, WorkspaceError>> + Send + 'a>>;
 }
