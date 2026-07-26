@@ -1289,7 +1289,9 @@ fn bracket_keys_switch_the_active_workspace() {
         &mut app,
         KeyEvent::new(KeyCode::Char('['), KeyModifiers::NONE),
     );
-    assert_eq!(requests.len(), 1);
+    // Returning refreshes Docker and asks again for the detail view whose load
+    // was abandoned on the way out.
+    assert_eq!(requests.len(), 2, "unexpected requests: {requests:?}");
     assert!(
         render_to_text(app.state(), 100, 24).starts_with("[1] Providers  [ Docker ]   Fixture")
     );
@@ -1712,6 +1714,136 @@ fn the_chosen_detail_view_survives_moving_to_another_resource() {
         "unexpected requests: {requests:?}"
     );
     assert!(render_to_text(app.state(), 100, 24).contains("Logs  [ Stats ]  Inspect"));
+}
+
+/// A user who moves off a Resource before its details arrive must not have the
+/// panel filled in behind them.
+#[test]
+fn a_late_result_for_the_previous_resource_cannot_replace_current_details() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let stale = detail_request(app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[
+            ("container-a", "api", "nginx:1.27"),
+            ("container-b", "worker", "alpine:3.21"),
+        ])),
+    )));
+    let current = detail_request(app.invoke(Command::SelectNext));
+    app.update(details_completed(
+        current,
+        Ok(ResourceDetails::from_lines(["worker is up"])),
+    ));
+
+    app.update(details_completed(
+        stale,
+        Ok(ResourceDetails::from_lines(["api is up"])),
+    ));
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(screen.contains("worker is up"), "rendered:\n{screen}");
+    assert!(!screen.contains("api is up"));
+}
+
+/// The same holds for the view: Logs arriving late must not overwrite the Stats
+/// the user switched to.
+#[test]
+fn a_late_result_for_the_previous_detail_view_cannot_replace_current_details() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let stale = detail_request(app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    )));
+    let current = detail_request(app.invoke(Command::NextDetailView));
+    app.update(details_completed(
+        current,
+        Ok(ResourceDetails::from_lines(["CPU 2.40%"])),
+    ));
+
+    app.update(details_completed(
+        stale,
+        Ok(ResourceDetails::from_lines(["listening on port 80"])),
+    ));
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(screen.contains("CPU 2.40%"), "rendered:\n{screen}");
+    assert!(!screen.contains("listening on port 80"));
+}
+
+#[test]
+fn a_late_docker_detail_result_cannot_reach_the_active_incus_workspace() {
+    let mut app = App::new();
+    let docker_refresh =
+        refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let stale = detail_request(app.update(refresh_completed(
+        docker_refresh,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    )));
+    app.update(AppEvent::ProviderDiscovered(incus_discovery()));
+    app.invoke(Command::FocusProviders);
+    let incus_refresh = refresh_request(app.invoke(Command::NextWorkspace));
+    let incus_details = detail_request(app.update(refresh_completed(
+        incus_refresh,
+        Ok(incus_snapshot(&[("instance-a", "gateway", "Running")])),
+    )));
+    app.update(details_completed(
+        incus_details,
+        Ok(ResourceDetails::from_lines(["gateway is up"])),
+    ));
+    let current_screen = render_to_text(app.state(), 100, 24);
+
+    app.update(details_completed(
+        stale,
+        Ok(ResourceDetails::from_lines(["api is up"])),
+    ));
+
+    assert_eq!(render_to_text(app.state(), 100, 24), current_screen);
+    assert!(current_screen.contains("gateway is up"));
+}
+
+/// Invalidating a pending load leaves the workspace it belonged to without one,
+/// so coming back has to ask again rather than wait forever for a result that
+/// will now be refused.
+#[test]
+fn returning_to_a_workspace_whose_detail_load_was_invalidated_asks_for_it_again() {
+    let mut app = App::new();
+    let docker_refresh =
+        refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let abandoned = detail_request(app.update(refresh_completed(
+        docker_refresh,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    )));
+    app.update(AppEvent::ProviderDiscovered(incus_discovery()));
+    app.invoke(Command::FocusProviders);
+    app.invoke(Command::NextWorkspace);
+
+    let requests = app.invoke(Command::PreviousWorkspace);
+
+    let reloaded = detail_request(requests);
+    assert!(
+        matches!(
+            &reloaded,
+            ProviderRequest::LoadResourceDetails { view_id, .. }
+                if view_id == &DetailViewId::new("logs")
+        ),
+        "unexpected request: {reloaded:?}"
+    );
+    app.update(details_completed(
+        abandoned,
+        Ok(ResourceDetails::from_lines(["abandoned output"])),
+    ));
+    app.update(details_completed(
+        reloaded,
+        Ok(ResourceDetails::from_lines(["listening on port 80"])),
+    ));
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(
+        screen.contains("listening on port 80"),
+        "rendered:\n{screen}"
+    );
+    assert!(!screen.contains("abandoned output"));
 }
 
 /// Incus details are Incus's own, so the shell must not dress them up as the

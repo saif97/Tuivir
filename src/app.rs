@@ -543,17 +543,25 @@ impl App {
         let describes_target = provider.details.as_ref().is_some_and(|details| {
             details.resource_id == resource_id && details.view_id == view.id
         });
-        if describes_target {
-            // A request still in flight for this very target stays welcome;
-            // anything else pending belongs to a target the user left.
-            let pending_for_target = self.pending_details.as_ref().is_some_and(|pending| {
-                pending.provider_id == provider_id
-                    && pending.resource_id == resource_id
-                    && pending.view_id == view.id
-            });
-            if !pending_for_target {
-                self.pending_details = None;
-            }
+        // A request still in flight for this very target stays welcome; anything
+        // else pending belongs to a target the user left.
+        let pending_for_target = self.pending_details.as_ref().is_some_and(|pending| {
+            pending.provider_id == provider_id
+                && pending.resource_id == resource_id
+                && pending.view_id == view.id
+        });
+        if !pending_for_target {
+            self.pending_details = None;
+        }
+        // Details still loading with nothing pending were abandoned when the
+        // user navigated away, and their result will now be refused — so coming
+        // back has to ask again rather than wait for it.
+        let awaiting_a_refused_result = !pending_for_target
+            && provider
+                .details
+                .as_ref()
+                .is_some_and(|details| details.content == DetailContent::Loading);
+        if describes_target && !awaiting_a_refused_result {
             return Vec::new();
         }
 
