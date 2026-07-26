@@ -1352,6 +1352,20 @@ fn late_docker_result_cannot_replace_the_active_incus_workspace() {
     assert!(!current_screen.contains("nginx:1.27"));
 }
 
+/// A resource list long enough that a five-item jump lands inside it and a
+/// second one runs off the end.
+fn seven_resources() -> WorkspaceSnapshot {
+    snapshot(&[
+        ("c0", "r0", "i0"),
+        ("c1", "r1", "i1"),
+        ("c2", "r2", "i2"),
+        ("c3", "r3", "i3"),
+        ("c4", "r4", "i4"),
+        ("c5", "r5", "i5"),
+        ("c6", "r6", "i6"),
+    ])
+}
+
 fn snapshot(containers: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
     container_snapshot(containers, ResourceState::Running)
 }
@@ -1568,18 +1582,7 @@ fn automatic_and_manual_refreshes_do_not_overlap() {
 fn capital_j_moves_the_resource_selection_five_items_and_clamps_at_the_end() {
     let mut app = App::new();
     let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[
-            ("c0", "r0", "i0"),
-            ("c1", "r1", "i1"),
-            ("c2", "r2", "i2"),
-            ("c3", "r3", "i3"),
-            ("c4", "r4", "i4"),
-            ("c5", "r5", "i5"),
-            ("c6", "r6", "i6"),
-        ])),
-    ));
+    app.update(refresh_completed(initial, Ok(seven_resources())));
 
     // Five ahead from the first lands on the sixth resource.
     handle_key(
@@ -1600,18 +1603,7 @@ fn capital_j_moves_the_resource_selection_five_items_and_clamps_at_the_end() {
 fn capital_k_moves_the_resource_selection_five_items_back_and_clamps_at_the_start() {
     let mut app = App::new();
     let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[
-            ("c0", "r0", "i0"),
-            ("c1", "r1", "i1"),
-            ("c2", "r2", "i2"),
-            ("c3", "r3", "i3"),
-            ("c4", "r4", "i4"),
-            ("c5", "r5", "i5"),
-            ("c6", "r6", "i6"),
-        ])),
-    ));
+    app.update(refresh_completed(initial, Ok(seven_resources())));
     // Park the selection on the last resource.
     for _ in 0..6 {
         app.invoke(Command::SelectNext);
@@ -1629,6 +1621,169 @@ fn capital_k_moves_the_resource_selection_five_items_back_and_clamps_at_the_star
         KeyEvent::new(KeyCode::Char('K'), KeyModifiers::SHIFT),
     );
     assert!(render_to_text(app.state(), 100, 24).contains("Image: i0"));
+}
+
+/// Fast navigation is registered for resource lists only, so focusing the
+/// Provider selector leaves `J` bound to nothing rather than moving the
+/// resource selection out from under the user.
+#[test]
+fn fast_navigation_does_nothing_while_the_provider_selector_has_focus() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(initial, Ok(seven_resources())));
+    app.update(AppEvent::ProviderDiscovered(fixture_discovery()));
+    handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('1'), KeyModifiers::NONE),
+    );
+
+    for pressed in ['J', 'K'] {
+        let (control, requests) = handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char(pressed), KeyModifiers::SHIFT),
+        );
+
+        assert_eq!(control, ShellControl::Continue);
+        assert!(requests.is_empty(), "{pressed} asked for no provider work");
+        assert_eq!(
+            app.state().active_provider,
+            Some(0),
+            "{pressed} left the Active Workspace alone"
+        );
+        assert!(
+            render_to_text(app.state(), 100, 24).contains("Image: i0"),
+            "{pressed} left the resource selection on the first resource"
+        );
+    }
+}
+
+/// Help is generated from the effective registry, so a resource list advertises
+/// its five-item jumps under whichever keys are actually bound.
+#[test]
+fn help_lists_fast_navigation_under_its_effective_bindings() {
+    let mut default = App::new();
+    let initial = refresh_request(default.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    default.update(refresh_completed(initial, Ok(seven_resources())));
+
+    handle_key(
+        &mut default,
+        KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+    );
+    let help = render_to_text(default.state(), 100, 24);
+    assert!(help.contains("J  Select five ahead"), "rendered:\n{help}");
+    assert!(help.contains("K  Select five back"), "rendered:\n{help}");
+
+    let registry = CommandRegistry::effective(&[(
+        "selection.next.fast".to_owned(),
+        vec!["pagedown".to_owned()],
+    )])
+    .expect("a valid override");
+    let mut configured = App::with_registry(registry);
+    let initial =
+        refresh_request(configured.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    configured.update(refresh_completed(initial, Ok(seven_resources())));
+
+    handle_key(
+        &mut configured,
+        KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+    );
+    let help = render_to_text(configured.state(), 100, 24);
+    assert!(
+        help.contains("pagedown  Select five ahead"),
+        "help follows the override:\n{help}"
+    );
+    assert!(
+        !help.contains("J  Select five ahead"),
+        "the replaced default is gone from help:\n{help}"
+    );
+}
+
+/// Fast navigation is an ordinary configurable Command: rebinding it moves the
+/// jump onto the configured keys and takes the defaults away with it.
+#[test]
+fn configured_fast_navigation_keys_replace_the_capital_defaults() {
+    let registry = CommandRegistry::effective(&[
+        (
+            "selection.next.fast".to_owned(),
+            vec!["pagedown".to_owned()],
+        ),
+        (
+            "selection.previous.fast".to_owned(),
+            vec!["pageup".to_owned()],
+        ),
+    ])
+    .expect("a valid override set");
+    let mut app = App::with_registry(registry);
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(initial, Ok(seven_resources())));
+
+    handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE),
+    );
+    assert!(
+        render_to_text(app.state(), 100, 24).contains("Image: i5"),
+        "the configured key jumps five ahead"
+    );
+
+    handle_key(&mut app, KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE));
+    assert!(
+        render_to_text(app.state(), 100, 24).contains("Image: i0"),
+        "the configured key jumps five back"
+    );
+
+    for replaced in ['J', 'K'] {
+        handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char(replaced), KeyModifiers::SHIFT),
+        );
+        assert!(
+            render_to_text(app.state(), 100, 24).contains("Image: i0"),
+            "the replaced default {replaced} no longer moves the selection"
+        );
+    }
+}
+
+/// An empty key list is how a user turns a Command off, so the jump stops
+/// happening and stops being advertised.
+#[test]
+fn unbound_fast_navigation_neither_moves_the_selection_nor_appears_in_help() {
+    let registry = CommandRegistry::effective(&[
+        ("selection.next.fast".to_owned(), vec![]),
+        ("selection.previous.fast".to_owned(), vec![]),
+    ])
+    .expect("unbinding is valid");
+    let mut app = App::with_registry(registry);
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(initial, Ok(seven_resources())));
+
+    for unbound in ['J', 'K'] {
+        let (control, requests) = handle_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char(unbound), KeyModifiers::SHIFT),
+        );
+
+        assert_eq!(control, ShellControl::Continue);
+        assert!(requests.is_empty());
+        assert!(
+            render_to_text(app.state(), 100, 24).contains("Image: i0"),
+            "an unbound {unbound} leaves the selection where it was"
+        );
+    }
+
+    handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+    );
+    let help = render_to_text(app.state(), 100, 24);
+    assert!(
+        !help.contains("Select five ahead"),
+        "an unbound Command is not a control the user has:\n{help}"
+    );
+    assert!(
+        !help.contains("Select five back"),
+        "an unbound Command is not a control the user has:\n{help}"
+    );
 }
 
 /// `ctrl+c` is reserved by the registry, so it quits even from inside a modal
