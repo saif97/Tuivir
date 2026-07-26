@@ -1,78 +1,361 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-
+use crate::config::ConfigError;
+use crate::keys::Key;
 use crate::provider::ResourceCommand;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Keybinding {
-    pub key: char,
-    pub label: String,
+/// One registered user intention.
+///
+/// A Command is what the user meant, not what happened: facts and asynchronous
+/// completions stay in [`crate::app::AppEvent`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Command {
+    Quit,
+    ToggleHelp,
+    /// Refreshes the Active Workspace now rather than waiting for the clock.
+    Refresh,
+    FocusProviders,
+    FocusResources,
+    /// Moves the selection in whichever panel has focus.
+    SelectNext,
+    SelectPrevious,
+    /// Moves the resource selection by a five-item delta, clamped at the ends.
+    SelectNextFast,
+    SelectPreviousFast,
+    NextWorkspace,
+    PreviousWorkspace,
+    /// Accepts the open modal.
+    Confirm,
+    /// Cancels or returns from the open modal.
+    Cancel,
+    Resource(ResourceCommand),
 }
 
-impl Keybinding {
-    fn matches(&self, event: &KeyEvent) -> bool {
-        event.code == KeyCode::Char(self.key)
-            && matches!(event.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT)
-    }
+/// The structural part of the interface in which a Command may be invoked.
+///
+/// Scope is structural only. Mutable Resource State never changes it; an
+/// unavailable Command is rejected when it is invoked, not hidden by scope.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CommandScope {
+    /// The provider selector has focus.
+    ProviderSelector,
+    /// The Provider Workspace's resource view has focus.
+    ResourceView,
+    /// A Resource Command is waiting to be confirmed.
+    Confirmation,
+    /// A failed Resource Command is being reported.
+    CommandFailure,
+    /// The contextual help overlay is open.
+    HelpOverlay,
 }
 
+/// One Command with the keys that are actually bound to it.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RegisteredCommand {
+pub struct EffectiveCommand {
+    /// The stable, lowercase, dotted configuration identifier.
     pub id: &'static str,
     pub description: &'static str,
-    pub bindings: Vec<Keybinding>,
-    pub command: ResourceCommand,
+    pub command: Command,
+    pub scopes: &'static [CommandScope],
+    /// The effective keys, in order. The first is the preferred inline hint;
+    /// an empty list means the Command is unbound.
+    pub keys: Vec<Key>,
 }
 
+/// Every registered Command with its effective Keybindings.
+///
+/// One registry drives dispatch, contextual help, and inline hints, so none of
+/// the three can drift from the others.
 #[derive(Clone, Debug)]
 pub struct CommandRegistry {
-    resource_commands: Vec<RegisteredCommand>,
+    commands: Vec<EffectiveCommand>,
 }
 
 impl Default for CommandRegistry {
     fn default() -> Self {
-        Self {
-            resource_commands: vec![
-                resource_command("resource.start", "Start", 'S', ResourceCommand::Start),
-                resource_command("resource.stop", "Stop", 's', ResourceCommand::Stop),
-                resource_command("resource.restart", "Restart", 'r', ResourceCommand::Restart),
-                resource_command("resource.resume", "Resume", 'p', ResourceCommand::Resume),
-                resource_command("resource.delete", "Delete", 'd', ResourceCommand::Delete),
-            ],
-        }
+        Self::builtin()
     }
 }
 
 impl CommandRegistry {
-    pub fn resource_command_for_key(&self, event: &KeyEvent) -> Option<ResourceCommand> {
-        self.resource_commands
+    /// The compiled defaults, before any configuration is layered over them.
+    pub fn builtin() -> Self {
+        Self {
+            commands: BUILTIN_COMMANDS
+                .iter()
+                .map(|definition| EffectiveCommand {
+                    id: definition.id,
+                    description: definition.description,
+                    command: definition.command,
+                    scopes: definition.scopes,
+                    keys: definition
+                        .default_keys
+                        .iter()
+                        .map(|text| {
+                            Key::parse(text).expect("compiled default keys are representable")
+                        })
+                        .collect(),
+                })
+                .collect(),
+        }
+    }
+
+    /// Layers a `[keybindings]` table over the compiled defaults.
+    ///
+    /// The table is a partial override: mentioning a Command replaces its
+    /// complete key list, omitting it preserves the defaults, and an empty list
+    /// leaves it unbound. Nothing is applied unless everything validates.
+    pub fn effective(overrides: &[(String, Vec<String>)]) -> Result<Self, Vec<ConfigError>> {
+        let mut registry = Self::builtin();
+        let mut errors = Vec::new();
+
+        for (id, keys) in overrides {
+            let parsed = keys
+                .iter()
+                .filter_map(|text| match Key::parse(text) {
+                    Ok(key) => Some(key),
+                    Err(invalid) => {
+                        errors.push(ConfigError::InvalidKey {
+                            id: id.clone(),
+                            key: invalid.input,
+                        });
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+            match registry
+                .commands
+                .iter_mut()
+                .find(|command| command.id == id)
+            {
+                Some(command) => command.keys = parsed,
+                None => errors.push(ConfigError::UnknownCommand { id: id.clone() }),
+            }
+        }
+
+        errors.extend(registry.reserve_emergency_quit());
+
+        if errors.is_empty() {
+            Ok(registry)
+        } else {
+            Err(errors)
+        }
+    }
+
+    /// Keeps `ctrl+c` bound to Quit and to nothing else.
+    ///
+    /// A user who lists it explicitly keeps the position they chose; otherwise
+    /// it is appended, so it is an invariant rather than a preferred hint.
+    fn reserve_emergency_quit(&mut self) -> Vec<ConfigError> {
+        let emergency = Self::emergency_quit_key();
+        let stolen = self
+            .commands
             .iter()
-            .find(|command| {
-                command
-                    .bindings
-                    .iter()
-                    .any(|binding| binding.matches(event))
+            .filter(|command| command.command != Command::Quit)
+            .filter(|command| command.keys.contains(&emergency))
+            .map(|command| ConfigError::ReservedKey {
+                id: command.id.to_owned(),
+                key: emergency.to_string(),
             })
+            .collect();
+
+        if let Some(quit) = self
+            .commands
+            .iter_mut()
+            .find(|command| command.command == Command::Quit)
+            && !quit.keys.contains(&emergency)
+        {
+            quit.keys.push(emergency);
+        }
+        stolen
+    }
+
+    fn emergency_quit_key() -> Key {
+        Key::character('c').with_ctrl()
+    }
+
+    /// Resolves a key that is bound no matter the scope or the configuration.
+    ///
+    /// Only the emergency Quit is reserved, so the user can always restore
+    /// their terminal.
+    pub fn reserved(&self, key: Key) -> Option<Command> {
+        (key == Self::emergency_quit_key()).then_some(Command::Quit)
+    }
+
+    /// Resolves a pressed key to the Command registered for `scope`.
+    pub fn resolve(&self, scope: CommandScope, key: Key) -> Option<Command> {
+        self.in_scope(scope)
+            .find(|command| command.keys.contains(&key))
             .map(|command| command.command)
     }
 
-    pub fn resource_commands(&self) -> &[RegisteredCommand] {
-        &self.resource_commands
+    /// The bound Commands registered for `scope`, in registration order.
+    ///
+    /// Unbound Commands are omitted: they are not controls the user has.
+    pub fn in_scope(&self, scope: CommandScope) -> impl Iterator<Item = &EffectiveCommand> {
+        self.commands
+            .iter()
+            .filter(move |command| command.scopes.contains(&scope) && !command.keys.is_empty())
+    }
+
+    /// The preferred inline hint for `command`, or `None` when it is unbound.
+    pub fn first_key(&self, command: Command) -> Option<Key> {
+        self.commands
+            .iter()
+            .find(|registered| registered.command == command)
+            .and_then(|registered| registered.keys.first().copied())
     }
 }
 
-fn resource_command(
+struct CommandDefinition {
     id: &'static str,
     description: &'static str,
-    key: char,
-    command: ResourceCommand,
-) -> RegisteredCommand {
-    RegisteredCommand {
-        id,
-        description,
-        bindings: vec![Keybinding {
-            key,
-            label: key.to_string(),
-        }],
-        command,
-    }
+    command: Command,
+    scopes: &'static [CommandScope],
+    default_keys: &'static [&'static str],
 }
+
+/// Every scope in which the user is working inside a Provider Workspace rather
+/// than answering a modal.
+const WORKSPACE: &[CommandScope] = &[CommandScope::ProviderSelector, CommandScope::ResourceView];
+const RESOURCE_VIEW: &[CommandScope] = &[CommandScope::ResourceView];
+/// Every modal scope. A modal replaces the workspace scope while it is open.
+const MODAL: &[CommandScope] = &[
+    CommandScope::Confirmation,
+    CommandScope::CommandFailure,
+    CommandScope::HelpOverlay,
+];
+
+/// Defaults follow lazydocker wherever an equivalent Command exists.
+const BUILTIN_COMMANDS: &[CommandDefinition] = &[
+    CommandDefinition {
+        id: "app.quit",
+        description: "Quit",
+        command: Command::Quit,
+        scopes: WORKSPACE,
+        default_keys: &["q"],
+    },
+    CommandDefinition {
+        id: "app.help",
+        description: "Help",
+        command: Command::ToggleHelp,
+        scopes: &[
+            CommandScope::ProviderSelector,
+            CommandScope::ResourceView,
+            CommandScope::HelpOverlay,
+        ],
+        default_keys: &["?"],
+    },
+    CommandDefinition {
+        id: "app.refresh",
+        // Plain `r` stays lazydocker's Restart in a resource view.
+        description: "Refresh",
+        command: Command::Refresh,
+        scopes: WORKSPACE,
+        default_keys: &["ctrl+r"],
+    },
+    CommandDefinition {
+        id: "focus.providers",
+        description: "Focus providers",
+        command: Command::FocusProviders,
+        scopes: WORKSPACE,
+        default_keys: &["1"],
+    },
+    CommandDefinition {
+        id: "focus.resources",
+        description: "Focus resources",
+        command: Command::FocusResources,
+        scopes: WORKSPACE,
+        default_keys: &["2"],
+    },
+    CommandDefinition {
+        id: "selection.next",
+        description: "Select next",
+        command: Command::SelectNext,
+        scopes: WORKSPACE,
+        default_keys: &["j", "down"],
+    },
+    CommandDefinition {
+        id: "selection.previous",
+        description: "Select previous",
+        command: Command::SelectPrevious,
+        scopes: WORKSPACE,
+        default_keys: &["k", "up"],
+    },
+    CommandDefinition {
+        id: "selection.next.fast",
+        description: "Select five ahead",
+        command: Command::SelectNextFast,
+        scopes: RESOURCE_VIEW,
+        default_keys: &["J"],
+    },
+    CommandDefinition {
+        id: "selection.previous.fast",
+        description: "Select five back",
+        command: Command::SelectPreviousFast,
+        scopes: RESOURCE_VIEW,
+        default_keys: &["K"],
+    },
+    CommandDefinition {
+        id: "workspace.next",
+        description: "Next workspace",
+        command: Command::NextWorkspace,
+        scopes: WORKSPACE,
+        default_keys: &["]"],
+    },
+    CommandDefinition {
+        id: "workspace.previous",
+        description: "Previous workspace",
+        command: Command::PreviousWorkspace,
+        scopes: WORKSPACE,
+        default_keys: &["["],
+    },
+    CommandDefinition {
+        id: "modal.confirm",
+        description: "Confirm",
+        command: Command::Confirm,
+        scopes: MODAL,
+        default_keys: &["y", "enter"],
+    },
+    CommandDefinition {
+        id: "modal.cancel",
+        // `Esc` leads, so it is the hint a modal shows for backing out.
+        description: "Cancel",
+        command: Command::Cancel,
+        scopes: MODAL,
+        default_keys: &["esc", "n"],
+    },
+    CommandDefinition {
+        id: "resource.start",
+        description: "Start",
+        command: Command::Resource(ResourceCommand::Start),
+        scopes: &[CommandScope::ResourceView],
+        default_keys: &["S"],
+    },
+    CommandDefinition {
+        id: "resource.stop",
+        description: "Stop",
+        command: Command::Resource(ResourceCommand::Stop),
+        scopes: &[CommandScope::ResourceView],
+        default_keys: &["s"],
+    },
+    CommandDefinition {
+        id: "resource.restart",
+        description: "Restart",
+        command: Command::Resource(ResourceCommand::Restart),
+        scopes: &[CommandScope::ResourceView],
+        default_keys: &["r"],
+    },
+    CommandDefinition {
+        id: "resource.resume",
+        description: "Resume",
+        command: Command::Resource(ResourceCommand::Resume),
+        scopes: &[CommandScope::ResourceView],
+        default_keys: &["p"],
+    },
+    CommandDefinition {
+        id: "resource.delete",
+        description: "Delete",
+        command: Command::Resource(ResourceCommand::Delete),
+        scopes: &[CommandScope::ResourceView],
+        default_keys: &["d"],
+    },
+];

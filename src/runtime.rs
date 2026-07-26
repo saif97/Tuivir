@@ -1,13 +1,15 @@
 use std::{sync::Arc, time::Duration};
 
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::KeyEvent;
 use tokio::time::{Instant, Interval, MissedTickBehavior};
 
 use crate::{
-    app::{App, AppEvent, FocusedPanel},
+    app::{App, AppEvent},
     cli::CliRunner,
+    command::Command,
     docker::DockerWorkspace,
     incus::IncusWorkspace,
+    keys::Key,
     provider::{ProviderDiscovery, ProviderId, ProviderRequest, ProviderWorkspace},
 };
 
@@ -21,82 +23,20 @@ pub enum ShellControl {
 }
 
 pub fn handle_key(app: &mut App, key: KeyEvent) -> (ShellControl, Vec<ProviderRequest>) {
-    if key.kind != KeyEventKind::Press {
+    // Normalize the terminal event into the registry's vocabulary before any
+    // routing: the application never sees a crossterm event for a Command.
+    let Some(key) = Key::from_event(key) else {
         return (ShellControl::Continue, Vec::new());
+    };
+    // The emergency Quit is reserved by the registry and stays active in every
+    // scope, so a stuck modal can always restore the terminal.
+    if app.reserved(key) == Some(Command::Quit) {
+        return (ShellControl::Quit, Vec::new());
     }
-    if app.state().confirmation.is_some() {
-        return match key.code {
-            KeyCode::Char('y') | KeyCode::Enter => (
-                ShellControl::Continue,
-                app.update(AppEvent::ConfirmResourceCommand),
-            ),
-            KeyCode::Char('n') | KeyCode::Esc => (
-                ShellControl::Continue,
-                app.update(AppEvent::CancelConfirmation),
-            ),
-            _ => (ShellControl::Continue, Vec::new()),
-        };
-    }
-    if app.state().command_error.is_some() {
-        return match key.code {
-            KeyCode::Esc | KeyCode::Enter => (
-                ShellControl::Continue,
-                app.update(AppEvent::DismissCommandError),
-            ),
-            _ => (ShellControl::Continue, Vec::new()),
-        };
-    }
-    if app.state().help_overlay.is_some() {
-        return match key.code {
-            KeyCode::Char('?') | KeyCode::Char('q') | KeyCode::Esc => {
-                (ShellControl::Continue, app.update(AppEvent::ToggleHelp))
-            }
-            _ => (ShellControl::Continue, Vec::new()),
-        };
-    }
-    if key.code == KeyCode::Char('?') {
-        return (ShellControl::Continue, app.update(AppEvent::ToggleHelp));
-    }
-    if let Some(command) = app.resource_command_for_key(&key) {
-        return (
-            ShellControl::Continue,
-            app.update(AppEvent::ResourceCommandInvoked(command)),
-        );
-    }
-    match key.code {
-        KeyCode::Char('q') | KeyCode::Esc => (ShellControl::Quit, Vec::new()),
-        KeyCode::Char('1') => (ShellControl::Continue, app.update(AppEvent::FocusProviders)),
-        KeyCode::Char('2') => (ShellControl::Continue, app.update(AppEvent::FocusResources)),
-        KeyCode::Char('j') | KeyCode::Down => {
-            let event = match app.state().focused_panel {
-                FocusedPanel::Providers => AppEvent::SelectNextProvider,
-                FocusedPanel::Resources => AppEvent::SelectNextResource,
-            };
-            (ShellControl::Continue, app.update(event))
-        }
-        KeyCode::Char('k') | KeyCode::Up => {
-            let event = match app.state().focused_panel {
-                FocusedPanel::Providers => AppEvent::SelectPreviousProvider,
-                FocusedPanel::Resources => AppEvent::SelectPreviousResource,
-            };
-            (ShellControl::Continue, app.update(event))
-        }
-        KeyCode::Char('r')
-            if key
-                .modifiers
-                .contains(crossterm::event::KeyModifiers::CONTROL) =>
-        {
-            (ShellControl::Continue, app.update(AppEvent::ManualRefresh))
-        }
-        KeyCode::Char(']') => (
-            ShellControl::Continue,
-            app.update(AppEvent::SelectNextProvider),
-        ),
-        KeyCode::Char('[') => (
-            ShellControl::Continue,
-            app.update(AppEvent::SelectPreviousProvider),
-        ),
-        _ => (ShellControl::Continue, Vec::new()),
+    match app.resolve_command(key) {
+        Some(Command::Quit) => (ShellControl::Quit, Vec::new()),
+        Some(command) => (ShellControl::Continue, app.invoke(command)),
+        None => (ShellControl::Continue, Vec::new()),
     }
 }
 
