@@ -156,15 +156,59 @@ fn home_config_is_used_when_xdg_is_unset() {
     );
 }
 
-/// A relative `XDG_CONFIG_HOME` is ignored, falling back to `~/.config` rather
-/// than producing an unsafe path.
+/// A relative `XDG_CONFIG_HOME` names no single file, so Virtui refuses to
+/// guess which one the user meant rather than quietly reading a different one.
 #[test]
-fn a_relative_xdg_config_home_falls_back_to_home() {
-    let path = PathBuf::from("/home/me/.config/virtui/config.toml");
+fn a_relative_xdg_config_home_is_fatal() {
     let env = Env {
         xdg_config_home: Some(PathBuf::from("relative-xdg")),
         home: Some(PathBuf::from("/home/me")),
         ..Default::default()
+    };
+    let fs = MemoryFs::with(
+        "/home/me/.config/virtui/config.toml",
+        "[keybindings]\n\"resource.restart\" = [\"x\"]\n",
+    );
+
+    assert_eq!(
+        load(&env, &fs).unwrap_err(),
+        LoadError::XdgNotAbsolute {
+            path: PathBuf::from("relative-xdg")
+        },
+        "a relative XDG_CONFIG_HOME is reported rather than falling back to home"
+    );
+}
+
+/// An exported-but-empty variable is how a shell spells "unset", and the
+/// process environment cannot tell Virtui the difference. Treating it as a
+/// relative path would refuse to start over a variable that selects nothing.
+#[test]
+fn an_empty_xdg_config_home_means_unset_rather_than_relative() {
+    let path = PathBuf::from("/home/me/.config/virtui/config.toml");
+    let env = Env {
+        xdg_config_home: Some(PathBuf::new()),
+        home: Some(PathBuf::from("/home/me")),
+        ..Default::default()
+    };
+    let fs = MemoryFs::with(path, "[keybindings]\n\"resource.restart\" = [\"x\"]\n");
+
+    let registry = load(&env, &fs).expect("an empty XDG_CONFIG_HOME falls back to home");
+
+    assert_eq!(
+        registry.resolve(CommandScope::ResourceView, key("x")),
+        Some(Command::Resource(ResourceCommand::Restart))
+    );
+}
+
+/// `VIRTUI_CONFIG_FILE` selects one exact file, so discovery never runs and a
+/// broken `XDG_CONFIG_HOME` cannot stop a run that does not consult it.
+#[test]
+fn an_explicit_file_is_unaffected_by_a_relative_xdg_config_home() {
+    let path = PathBuf::from("/cfg/virtui.toml");
+    let env = Env {
+        config_file: Some(path.clone()),
+        xdg_config_home: Some(PathBuf::from("relative-xdg")),
+        home: Some(PathBuf::from("/home/me")),
     };
     let fs = MemoryFs::with(path, "[keybindings]\n\"resource.restart\" = [\"x\"]\n");
 
@@ -221,6 +265,31 @@ fn a_file_that_is_not_valid_toml_is_reported_with_its_path() {
         panic!("expected an unparsable file, got {error:?}");
     };
     assert_eq!(error_path, PathBuf::from("/cfg/virtui.toml"));
+}
+
+/// A field Virtui does not understand is a typo or a setting from a different
+/// tool. Ignoring it would leave the user believing it took effect.
+#[test]
+fn an_unknown_field_is_rejected_and_names_itself() {
+    let path = PathBuf::from("/cfg/virtui.toml");
+    let env = Env {
+        config_file: Some(path.clone()),
+        ..Default::default()
+    };
+    let fs = MemoryFs::with(
+        path,
+        "theme = \"dark\"\n\n[keybindings]\n\"app.quit\" = [\"q\"]\n",
+    );
+
+    let error = load(&env, &fs).unwrap_err();
+    let LoadError::Unparsable { path, message } = error else {
+        panic!("expected an unknown field to be rejected, got {error:?}");
+    };
+    assert_eq!(path, PathBuf::from("/cfg/virtui.toml"));
+    assert!(
+        message.contains("theme"),
+        "the diagnostic must name the field the user wrote, got {message:?}"
+    );
 }
 
 #[test]
@@ -283,6 +352,93 @@ fn claiming_ctrl_c_for_another_command_is_rejected() {
             }]
         }
     );
+}
+
+/// Validation is atomic: one run reports every problem it can find, so fixing
+/// the file is not a game of one diagnostic per restart.
+///
+/// Because the whole load fails, no registry ever exists to dispatch a key or
+/// to generate an inline hint from — a rejected file cannot half-apply.
+#[test]
+fn every_discoverable_failure_is_reported_together() {
+    let path = PathBuf::from("/cfg/virtui.toml");
+    let env = Env {
+        config_file: Some(path.clone()),
+        ..Default::default()
+    };
+    let fs = MemoryFs::with(
+        path,
+        "[keybindings]\n\
+         \"no.such.command\" = [\"x\"]\n\
+         \"resource.restart\" = [\"f13\"]\n\
+         \"resource.stop\" = [\"j\"]\n",
+    );
+
+    let error = load(&env, &fs).unwrap_err();
+    let LoadError::Invalid { errors, .. } = &error else {
+        panic!("expected an invalid configuration, got {error:?}");
+    };
+
+    for expected in [
+        ConfigError::UnknownCommand {
+            id: "no.such.command".to_owned(),
+        },
+        ConfigError::InvalidKey {
+            id: "resource.restart".to_owned(),
+            key: "f13".to_owned(),
+        },
+        ConfigError::ConflictingKey {
+            key: "j".to_owned(),
+            first: "selection.next".to_owned(),
+            second: "resource.stop".to_owned(),
+        },
+    ] {
+        assert!(
+            errors.contains(&expected),
+            "expected {expected:?} among {errors:?}"
+        );
+    }
+    assert_eq!(errors.len(), 3, "and nothing beyond them: {errors:?}");
+}
+
+/// An uppercase Command ID is a typo rather than a second spelling: IDs are
+/// lowercase and case-sensitive, so it names no Command Virtui registers.
+#[test]
+fn an_uppercase_command_id_is_rejected() {
+    let path = PathBuf::from("/cfg/virtui.toml");
+    let env = Env {
+        config_file: Some(path.clone()),
+        ..Default::default()
+    };
+    let fs = MemoryFs::with(path, "[keybindings]\n\"Resource.Delete\" = [\"x\"]\n");
+
+    assert_eq!(
+        load(&env, &fs).unwrap_err(),
+        LoadError::Invalid {
+            path: PathBuf::from("/cfg/virtui.toml"),
+            errors: vec![ConfigError::UnknownCommand {
+                id: "Resource.Delete".to_owned()
+            }]
+        }
+    );
+}
+
+/// An explicit override must name a readable regular file. A directory is
+/// absolute and exists, so only actually reading it tells the user why their
+/// selected configuration produced nothing.
+#[test]
+fn an_explicit_file_that_is_a_directory_is_fatal() {
+    let path = std::env::temp_dir().join("virtui-config-is-a-directory");
+    std::fs::create_dir_all(&path).expect("a directory to point the override at");
+    let env = Env {
+        config_file: Some(path.clone()),
+        ..Default::default()
+    };
+
+    let error = load(&env, &FileSystemReader);
+    let _ = std::fs::remove_dir(&path);
+
+    assert_eq!(error.unwrap_err(), LoadError::Unreadable { path });
 }
 
 /// The production filesystem adapter reads an actual file, so startup does not

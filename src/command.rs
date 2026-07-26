@@ -47,6 +47,34 @@ pub enum CommandScope {
     HelpOverlay,
 }
 
+impl CommandScope {
+    /// Every structural scope.
+    ///
+    /// Conflict detection asks whether two Commands are ever reachable at once
+    /// rather than assuming it, so a scope missing here would hide a conflict.
+    /// [`Self::listed`] fails to compile until a new variant is added.
+    pub const ALL: &'static [Self] = &[
+        Self::ProviderSelector,
+        Self::ResourceView,
+        Self::Confirmation,
+        Self::CommandFailure,
+        Self::HelpOverlay,
+    ];
+
+    /// Exists only so that adding a variant forces [`Self::ALL`] to be revisited.
+    #[allow(dead_code)]
+    fn listed(self) -> bool {
+        let named = match self {
+            Self::ProviderSelector => Self::ProviderSelector,
+            Self::ResourceView => Self::ResourceView,
+            Self::Confirmation => Self::Confirmation,
+            Self::CommandFailure => Self::CommandFailure,
+            Self::HelpOverlay => Self::HelpOverlay,
+        };
+        Self::ALL.contains(&named)
+    }
+}
+
 /// One Command with the keys that are actually bound to it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EffectiveCommand {
@@ -121,6 +149,7 @@ impl CommandRegistry {
                     }
                 })
                 .collect::<Vec<_>>();
+            errors.extend(duplicate_keys(id, &parsed));
             match registry
                 .commands
                 .iter_mut()
@@ -132,6 +161,7 @@ impl CommandRegistry {
         }
 
         errors.extend(registry.reserve_emergency_quit());
+        errors.extend(registry.conflicting_keys());
 
         if errors.is_empty() {
             Ok(registry)
@@ -166,6 +196,48 @@ impl CommandRegistry {
             quit.keys.push(emergency);
         }
         stolen
+    }
+
+    /// Reports every key claimed by two Commands that share a scope.
+    ///
+    /// Commands whose scopes cannot overlap are never reachable together, so
+    /// they may share a key freely; those that can overlap would otherwise be
+    /// resolved by registration order, which is a priority the user cannot see.
+    fn conflicting_keys(&self) -> Vec<ConfigError> {
+        let mut conflicts: Vec<ConfigError> = Vec::new();
+        for scope in CommandScope::ALL {
+            let mut claimed: Vec<(Key, &str)> = Vec::new();
+            for command in self.in_scope(*scope) {
+                for key in &command.keys {
+                    // Taking the emergency Quit is already reported against the
+                    // Command that took it, which says more than a conflict
+                    // with the Quit it can never win against.
+                    if *key == Self::emergency_quit_key() {
+                        continue;
+                    }
+                    let Some((_, first)) = claimed.iter().find(|(claimed, _)| claimed == key)
+                    else {
+                        claimed.push((*key, command.id));
+                        continue;
+                    };
+                    // One Command listing a key twice is a duplicate, not a
+                    // conflict, and is reported as such.
+                    if *first == command.id {
+                        continue;
+                    }
+                    let conflict = ConfigError::ConflictingKey {
+                        key: key.to_string(),
+                        first: (*first).to_owned(),
+                        second: command.id.to_owned(),
+                    };
+                    // A pair sharing several scopes conflicts once.
+                    if !conflicts.contains(&conflict) {
+                        conflicts.push(conflict);
+                    }
+                }
+            }
+        }
+        conflicts
     }
 
     fn emergency_quit_key() -> Key {
@@ -203,6 +275,32 @@ impl CommandRegistry {
             .find(|registered| registered.command == command)
             .and_then(|registered| registered.keys.first().copied())
     }
+}
+
+/// Reports each key one Command lists more than once, naming it once however
+/// many times it was repeated.
+///
+/// Keys are compared after parsing, so two spellings of one key — `space` and a
+/// literal blank — are the duplicate they actually are.
+fn duplicate_keys(id: &str, keys: &[Key]) -> Vec<ConfigError> {
+    let mut seen = Vec::new();
+    let mut duplicated = Vec::new();
+    for key in keys {
+        if seen.contains(key) {
+            if !duplicated.contains(key) {
+                duplicated.push(*key);
+            }
+        } else {
+            seen.push(*key);
+        }
+    }
+    duplicated
+        .into_iter()
+        .map(|key| ConfigError::DuplicateKey {
+            id: id.to_owned(),
+            key: key.to_string(),
+        })
+        .collect()
 }
 
 struct CommandDefinition {

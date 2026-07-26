@@ -18,6 +18,16 @@ pub enum ConfigError {
     UnknownCommand { id: String },
     /// A key string Virtui cannot represent.
     InvalidKey { id: String, key: String },
+    /// One Command lists the same key twice, however it was spelled.
+    DuplicateKey { id: String, key: String },
+    /// Two Commands that can be invoked at the same time claim one key.
+    ///
+    /// `first` is the Command registered earlier; neither is given priority.
+    ConflictingKey {
+        key: String,
+        first: String,
+        second: String,
+    },
     /// A Command other than Quit tried to claim the emergency `ctrl+c`.
     ReservedKey { id: String, key: String },
 }
@@ -31,6 +41,15 @@ impl fmt::Display for ConfigError {
             Self::InvalidKey { id, key } => write!(
                 formatter,
                 "[keybindings] \"{id}\" has an unrecognised key \"{key}\""
+            ),
+            Self::DuplicateKey { id, key } => write!(
+                formatter,
+                "[keybindings] \"{id}\" lists \"{key}\" more than once"
+            ),
+            Self::ConflictingKey { key, first, second } => write!(
+                formatter,
+                "[keybindings] \"{key}\" is bound to both \"{first}\" and \"{second}\", \
+                 which can be invoked at the same time"
             ),
             Self::ReservedKey { id, key } => write!(
                 formatter,
@@ -88,6 +107,8 @@ impl ReadFile for FileSystemReader {
 pub enum LoadError {
     /// `VIRTUI_CONFIG_FILE` names a path that is not absolute.
     ExplicitNotAbsolute { path: PathBuf },
+    /// `XDG_CONFIG_HOME` is set to a path that is not absolute.
+    XdgNotAbsolute { path: PathBuf },
     /// The explicitly selected file does not exist.
     ExplicitMissing { path: PathBuf },
     /// The selected file exists but could not be read.
@@ -107,6 +128,11 @@ impl fmt::Display for LoadError {
             Self::ExplicitNotAbsolute { path } => write!(
                 formatter,
                 "VIRTUI_CONFIG_FILE must be an absolute path, not {}",
+                path.display()
+            ),
+            Self::XdgNotAbsolute { path } => write!(
+                formatter,
+                "XDG_CONFIG_HOME must be an absolute path, not {}",
                 path.display()
             ),
             Self::ExplicitMissing { path } => {
@@ -150,7 +176,7 @@ pub fn load(env: &Env, reader: &dyn ReadFile) -> Result<CommandRegistry, LoadErr
             }
             (path, true)
         }
-        None => match discovered_path(env) {
+        None => match discovered_path(env)? {
             Some(path) => (path, false),
             None => return Ok(CommandRegistry::builtin()),
         },
@@ -185,18 +211,34 @@ pub fn load(env: &Env, reader: &dyn ReadFile) -> Result<CommandRegistry, LoadErr
 
 /// Selects exactly one discovered path, or `None` when neither `XDG_CONFIG_HOME`
 /// nor `HOME` names a directory.
-fn discovered_path(env: &Env) -> Option<PathBuf> {
-    if let Some(xdg) = &env.xdg_config_home
-        && xdg.is_absolute()
-    {
-        return Some(xdg.join("virtui").join("config.toml"));
-    }
-    env.home
+///
+/// A set-but-relative `XDG_CONFIG_HOME` is fatal rather than ignored: it names
+/// no single file, and silently reading a different one would apply bindings
+/// the user never selected.
+fn discovered_path(env: &Env) -> Result<Option<PathBuf>, LoadError> {
+    // An exported-but-empty variable is a shell's way of saying "unset", which
+    // the process environment cannot distinguish, so it selects nothing rather
+    // than naming a relative path.
+    if let Some(xdg) = env
+        .xdg_config_home
         .as_ref()
-        .map(|home| home.join(".config").join("virtui").join("config.toml"))
+        .filter(|xdg| !xdg.as_os_str().is_empty())
+    {
+        if !xdg.is_absolute() {
+            return Err(LoadError::XdgNotAbsolute { path: xdg.clone() });
+        }
+        return Ok(Some(xdg.join("virtui").join("config.toml")));
+    }
+    Ok(env
+        .home
+        .as_ref()
+        .map(|home| home.join(".config").join("virtui").join("config.toml")))
 }
 
+/// The file's shape. Unknown fields are refused so a typo or a setting meant
+/// for another tool is reported rather than silently ignored.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawConfig {
     keybindings: Option<BTreeMap<String, Vec<String>>>,
 }
