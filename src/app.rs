@@ -556,9 +556,7 @@ impl App {
                         .expect("a Command in scope is bound")
                         .to_string(),
                     description: match registered.command {
-                        Command::Resource(command)
-                            if !available_commands.contains(&command) =>
-                        {
+                        Command::Resource(command) if !available_commands.contains(&command) => {
                             format!("{} (unavailable)", registered.description)
                         }
                         _ => registered.description.to_owned(),

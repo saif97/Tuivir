@@ -1,7 +1,6 @@
 use std::{
     collections::BTreeMap,
-    fmt,
-    io,
+    fmt, io,
     path::{Path, PathBuf},
 };
 
@@ -96,7 +95,10 @@ pub enum LoadError {
     /// The file could not be parsed as the configuration format.
     Unparsable { path: PathBuf, message: String },
     /// The file parsed, but its keybindings were rejected.
-    Invalid { path: PathBuf, errors: Vec<ConfigError> },
+    Invalid {
+        path: PathBuf,
+        errors: Vec<ConfigError>,
+    },
 }
 
 impl fmt::Display for LoadError {
@@ -108,7 +110,11 @@ impl fmt::Display for LoadError {
                 path.display()
             ),
             Self::ExplicitMissing { path } => {
-                write!(formatter, "Configuration file does not exist: {}", path.display())
+                write!(
+                    formatter,
+                    "Configuration file does not exist: {}",
+                    path.display()
+                )
             }
             Self::Unreadable { path } => write!(
                 formatter,

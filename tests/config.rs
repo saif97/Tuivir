@@ -214,7 +214,10 @@ fn a_file_that_is_not_valid_toml_is_reported_with_its_path() {
     let fs = MemoryFs::with(path, "[keybindings\n");
 
     let error = load(&env, &fs).unwrap_err();
-    let LoadError::Unparsable { path: error_path, .. } = error else {
+    let LoadError::Unparsable {
+        path: error_path, ..
+    } = error
+    else {
         panic!("expected an unparsable file, got {error:?}");
     };
     assert_eq!(error_path, PathBuf::from("/cfg/virtui.toml"));

@@ -594,8 +594,7 @@ fn selecting_another_resource_keeps_an_in_flight_resource_command() {
             ("container-b", "worker", "alpine:3.21"),
         ])),
     ));
-    let restart =
-        command_request(app.invoke(Command::Resource(ResourceCommand::Restart)));
+    let restart = command_request(app.invoke(Command::Resource(ResourceCommand::Restart)));
 
     app.invoke(Command::SelectNext);
     let follow_up = app.update(command_completed(restart, Ok(())));
@@ -615,8 +614,7 @@ fn switching_provider_workspaces_keeps_an_in_flight_resource_command() {
         initial,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
     ));
-    let restart =
-        command_request(app.invoke(Command::Resource(ResourceCommand::Restart)));
+    let restart = command_request(app.invoke(Command::Resource(ResourceCommand::Restart)));
     app.update(AppEvent::ProviderDiscovered(incus_discovery()));
     let incus_refresh = refresh_request(app.invoke(Command::NextWorkspace));
     app.update(refresh_completed(
@@ -662,8 +660,7 @@ fn a_successful_resource_command_refreshes_only_its_own_provider_workspace() {
         initial,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
     ));
-    let restart =
-        command_request(app.invoke(Command::Resource(ResourceCommand::Restart)));
+    let restart = command_request(app.invoke(Command::Resource(ResourceCommand::Restart)));
     app.update(AppEvent::ProviderDiscovered(incus_discovery()));
     let incus_refresh = refresh_request(app.invoke(Command::NextWorkspace));
     app.update(refresh_completed(
@@ -687,8 +684,7 @@ fn a_failed_resource_command_opens_an_error_popup_over_another_active_workspace(
         initial,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
     ));
-    let restart =
-        command_request(app.invoke(Command::Resource(ResourceCommand::Restart)));
+    let restart = command_request(app.invoke(Command::Resource(ResourceCommand::Restart)));
     app.update(AppEvent::ProviderDiscovered(incus_discovery()));
     let incus_refresh = refresh_request(app.invoke(Command::NextWorkspace));
     app.update(refresh_completed(
@@ -720,8 +716,7 @@ fn escape_dismisses_the_command_failure_popup_without_quitting() {
         initial,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
     ));
-    let restart =
-        command_request(app.invoke(Command::Resource(ResourceCommand::Restart)));
+    let restart = command_request(app.invoke(Command::Resource(ResourceCommand::Restart)));
     app.update(command_completed(
         restart,
         Err(WorkspaceError::new("permission denied")),
@@ -750,8 +745,7 @@ fn the_command_failure_popup_keeps_the_whole_message_on_a_narrow_terminal() {
         initial,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
     ));
-    let restart =
-        command_request(app.invoke(Command::Resource(ResourceCommand::Restart)));
+    let restart = command_request(app.invoke(Command::Resource(ResourceCommand::Restart)));
 
     app.update(command_completed(
         restart,
@@ -773,8 +767,7 @@ fn a_successful_resource_command_clears_its_status_without_opening_a_popup() {
         initial,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
     ));
-    let restart =
-        command_request(app.invoke(Command::Resource(ResourceCommand::Restart)));
+    let restart = command_request(app.invoke(Command::Resource(ResourceCommand::Restart)));
     assert!(
         render_to_text(app.state(), 160, 24).contains("Running Docker restart for api"),
         "the dispatched Resource Command is visible while it runs"
@@ -809,8 +802,7 @@ fn switching_providers_invalidates_a_refresh_but_not_a_running_resource_command(
         initial,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
     ));
-    let restart =
-        command_request(app.invoke(Command::Resource(ResourceCommand::Restart)));
+    let restart = command_request(app.invoke(Command::Resource(ResourceCommand::Restart)));
     let stale_docker = refresh_request(app.invoke(Command::Refresh));
     app.update(AppEvent::ProviderDiscovered(incus_discovery()));
     let incus_refresh = refresh_request(app.invoke(Command::NextWorkspace));
@@ -1712,11 +1704,9 @@ fn escape_does_not_quit_when_no_modal_is_open() {
 
 #[test]
 fn an_overridden_focus_key_renders_its_effective_hint() {
-    let registry = CommandRegistry::effective(&[(
-        "focus.providers".to_owned(),
-        vec!["9".to_owned()],
-    )])
-    .expect("a valid override");
+    let registry =
+        CommandRegistry::effective(&[("focus.providers".to_owned(), vec!["9".to_owned()])])
+            .expect("a valid override");
     let mut app = App::with_registry(registry);
     let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
     app.update(refresh_completed(

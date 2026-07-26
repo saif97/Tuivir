@@ -63,16 +63,17 @@ fn ctrl_c_is_appended_to_quit_when_it_is_not_configured() {
 
 #[test]
 fn no_other_command_may_claim_ctrl_c() {
-    let errors = CommandRegistry::effective(&[(
-        "resource.delete".to_owned(),
-        vec!["ctrl+c".to_owned()],
-    )])
-    .expect_err("ctrl+c is reserved");
+    let errors =
+        CommandRegistry::effective(&[("resource.delete".to_owned(), vec!["ctrl+c".to_owned()])])
+            .expect_err("ctrl+c is reserved");
 
-    assert_eq!(errors, vec![ConfigError::ReservedKey {
-        id: "resource.delete".to_owned(),
-        key: "ctrl+c".to_owned(),
-    }]);
+    assert_eq!(
+        errors,
+        vec![ConfigError::ReservedKey {
+            id: "resource.delete".to_owned(),
+            key: "ctrl+c".to_owned(),
+        }]
+    );
 }
 
 #[test]
@@ -198,7 +199,10 @@ fn plain_r_restarts_a_resource_rather_than_refreshing() {
         registry.resolve(CommandScope::ResourceView, key("r")),
         Some(Command::Resource(ResourceCommand::Restart))
     );
-    assert_eq!(registry.resolve(CommandScope::ResourceView, key("ctrl+r")), Some(Command::Refresh));
+    assert_eq!(
+        registry.resolve(CommandScope::ResourceView, key("ctrl+r")),
+        Some(Command::Refresh)
+    );
 }
 
 /// A modal scope replaces the ordinary workspace scope, so isolation comes from
