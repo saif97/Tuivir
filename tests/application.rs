@@ -1996,6 +1996,81 @@ fn a_failed_detail_view_leaves_the_resource_list_and_its_commands_alone() {
     );
 }
 
+/// More output than fits has to be reachable, and neither end may be
+/// overshot.
+#[test]
+fn scrolling_moves_through_a_long_detail_view_and_clamps_at_both_ends() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let details = detail_request(app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    )));
+    app.update(details_completed(
+        details,
+        Ok(ResourceDetails::from_lines(
+            (0..30).map(|line| format!("line-{line}")),
+        )),
+    ));
+    assert!(render_to_text(app.state(), 100, 24).contains("line-0"));
+
+    handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE),
+    );
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(!screen.contains("line-0"), "rendered:\n{screen}");
+    assert!(screen.contains("line-10"));
+
+    // Far past the end lands on the last line rather than scrolling into blank
+    // space below it.
+    for _ in 0..10 {
+        app.invoke(Command::ScrollDetailsDown);
+    }
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(screen.contains("line-29"), "rendered:\n{screen}");
+
+    for _ in 0..10 {
+        app.invoke(Command::ScrollDetailsUp);
+    }
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(screen.contains("line-0"), "rendered:\n{screen}");
+}
+
+/// Every view starts at its own top: a scrolled position belongs to the output
+/// it was scrolled through, not to the panel.
+#[test]
+fn moving_to_another_resource_starts_its_detail_view_at_the_top() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let details = detail_request(app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[
+            ("container-a", "api", "nginx:1.27"),
+            ("container-b", "worker", "alpine:3.21"),
+        ])),
+    )));
+    app.update(details_completed(
+        details,
+        Ok(ResourceDetails::from_lines(
+            (0..30).map(|line| format!("api-{line}")),
+        )),
+    ));
+    app.invoke(Command::ScrollDetailsDown);
+
+    let worker = detail_request(app.invoke(Command::SelectNext));
+    app.update(details_completed(
+        worker,
+        Ok(ResourceDetails::from_lines(
+            (0..30).map(|line| format!("worker-{line}")),
+        )),
+    ));
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(screen.contains("worker-0"), "rendered:\n{screen}");
+}
+
 /// Incus details are Incus's own, so the shell must not dress them up as the
 /// Docker views it happens to render the same way.
 #[test]
@@ -2190,11 +2265,9 @@ fn help_lists_fast_navigation_under_its_effective_bindings() {
     assert!(help.contains("J  Select five ahead"), "rendered:\n{help}");
     assert!(help.contains("K  Select five back"), "rendered:\n{help}");
 
-    let registry = CommandRegistry::effective(&[(
-        "selection.next.fast".to_owned(),
-        vec!["pagedown".to_owned()],
-    )])
-    .expect("a valid override");
+    let registry =
+        CommandRegistry::effective(&[("selection.next.fast".to_owned(), vec!["f5".to_owned()])])
+            .expect("a valid override");
     let mut configured = App::with_registry(registry);
     let initial =
         refresh_request(configured.update(AppEvent::ProviderDiscovered(docker_discovery())));
@@ -2206,7 +2279,7 @@ fn help_lists_fast_navigation_under_its_effective_bindings() {
     );
     let help = render_to_text(configured.state(), 100, 24);
     assert!(
-        help.contains("pagedown  Select five ahead"),
+        help.contains("f5  Select five ahead"),
         "help follows the override:\n{help}"
     );
     assert!(
@@ -2220,30 +2293,21 @@ fn help_lists_fast_navigation_under_its_effective_bindings() {
 #[test]
 fn configured_fast_navigation_keys_replace_the_capital_defaults() {
     let registry = CommandRegistry::effective(&[
-        (
-            "selection.next.fast".to_owned(),
-            vec!["pagedown".to_owned()],
-        ),
-        (
-            "selection.previous.fast".to_owned(),
-            vec!["pageup".to_owned()],
-        ),
+        ("selection.next.fast".to_owned(), vec!["f5".to_owned()]),
+        ("selection.previous.fast".to_owned(), vec!["f6".to_owned()]),
     ])
     .expect("a valid override set");
     let mut app = App::with_registry(registry);
     let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
     app.update(refresh_completed(initial, Ok(seven_resources())));
 
-    handle_key(
-        &mut app,
-        KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE),
-    );
+    handle_key(&mut app, KeyEvent::new(KeyCode::F(5), KeyModifiers::NONE));
     assert!(
         render_to_text(app.state(), 100, 24).contains("Image: i5"),
         "the configured key jumps five ahead"
     );
 
-    handle_key(&mut app, KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE));
+    handle_key(&mut app, KeyEvent::new(KeyCode::F(6), KeyModifiers::NONE));
     assert!(
         render_to_text(app.state(), 100, 24).contains("Image: i0"),
         "the configured key jumps five back"

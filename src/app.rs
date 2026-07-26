@@ -95,6 +95,9 @@ pub struct ResourceDetailsState {
     pub view_id: DetailViewId,
     pub title: String,
     pub content: DetailContent,
+    /// The first line of output on screen. Every load starts at the top: a
+    /// scrolled position belongs to the output it was scrolled through.
+    pub scroll: u16,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -136,6 +139,11 @@ impl ProviderState {
         Some((resource, view))
     }
 }
+
+/// How far one scroll Command moves through a detail view. Rendering owns the
+/// layout, so a fixed step is the honest one: the application has no viewport
+/// height to take a page from.
+const DETAIL_SCROLL_LINES: isize = 10;
 
 /// Keeps the visible detail view among the ones currently offered, falling back
 /// to the first when the selected Resource's panel does not declare it.
@@ -420,6 +428,14 @@ impl App {
                 self.move_detail_view(-1);
                 Vec::new()
             }
+            Command::ScrollDetailsDown => {
+                self.scroll_details(DETAIL_SCROLL_LINES);
+                Vec::new()
+            }
+            Command::ScrollDetailsUp => {
+                self.scroll_details(-DETAIL_SCROLL_LINES);
+                Vec::new()
+            }
             Command::Confirm => self.confirm_or_dismiss(),
             Command::Cancel => {
                 self.cancel_or_dismiss();
@@ -584,6 +600,7 @@ impl App {
             view_id: view.id.clone(),
             title: view.title,
             content: DetailContent::Loading,
+            scroll: 0,
         });
         let request_id = ProviderRequestId(self.next_request_id);
         self.next_request_id += 1;
@@ -877,6 +894,30 @@ impl App {
             .min(resources.len().saturating_sub(1));
         provider.selected_resource = resources.get(next).map(|resource| resource.id.clone());
         reconcile_detail_view(provider);
+    }
+
+    /// Moves the detail view's first visible line, keeping at least the last
+    /// line on screen.
+    ///
+    /// Rendering owns the layout, so the application cannot know how tall the
+    /// panel is; clamping to the last line is the strongest promise it can keep
+    /// without one, and it is enough that scrolling never runs into blank space.
+    fn scroll_details(&mut self, delta: isize) {
+        let Some(details) = self
+            .state
+            .active_provider
+            .and_then(|active| self.state.providers.get_mut(active))
+            .and_then(|provider| provider.details.as_mut())
+        else {
+            return;
+        };
+        let last_line = match &details.content {
+            DetailContent::Ready(loaded) => loaded.lines.len().saturating_sub(1),
+            DetailContent::Loading | DetailContent::Error(_) => 0,
+        };
+        details.scroll = (details.scroll as usize)
+            .saturating_add_signed(delta)
+            .min(last_line) as u16;
     }
 
     /// Moves through the views the selected Resource's panel offers.

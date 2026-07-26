@@ -410,7 +410,9 @@ fn render_detail_content(provider: &ProviderState, frame: &mut Frame<'_>, area: 
         ],
     };
     frame.render_widget(
-        Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: false }),
+        Paragraph::new(lines)
+            .wrap(ratatui::widgets::Wrap { trim: false })
+            .scroll((details.scroll, 0)),
         area,
     );
 }

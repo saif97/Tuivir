@@ -27,6 +27,9 @@ pub enum Command {
     /// Moves through the provider-native detail views of the selected Resource.
     NextDetailView,
     PreviousDetailView,
+    /// Moves through the output of the visible detail view.
+    ScrollDetailsDown,
+    ScrollDetailsUp,
     /// Accepts the open modal.
     Confirm,
     /// Cancels or returns from the open modal.
@@ -401,6 +404,20 @@ const BUILTIN_COMMANDS: &[CommandDefinition] = &[
         command: Command::PreviousDetailView,
         scopes: RESOURCE_VIEW,
         default_keys: &["h", "left"],
+    },
+    CommandDefinition {
+        id: "detail.scroll.down",
+        description: "Scroll details down",
+        command: Command::ScrollDetailsDown,
+        scopes: RESOURCE_VIEW,
+        default_keys: &["ctrl+d", "pagedown"],
+    },
+    CommandDefinition {
+        id: "detail.scroll.up",
+        description: "Scroll details up",
+        command: Command::ScrollDetailsUp,
+        scopes: RESOURCE_VIEW,
+        default_keys: &["ctrl+u", "pageup"],
     },
     CommandDefinition {
         id: "modal.confirm",
