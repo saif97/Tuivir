@@ -2071,6 +2071,48 @@ fn moving_to_another_resource_starts_its_detail_view_at_the_top() {
     assert!(screen.contains("worker-0"), "rendered:\n{screen}");
 }
 
+/// Detail navigation is registered like every other Command, so one override
+/// moves dispatch and the help it is advertised in together.
+#[test]
+fn configured_detail_view_keys_change_dispatch_and_help_together() {
+    let registry =
+        CommandRegistry::effective(&[("detail.view.next".to_owned(), vec!["tab".to_owned()])])
+            .expect("a valid override");
+    let mut app = App::with_registry(registry);
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+
+    handle_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    assert!(render_to_text(app.state(), 100, 24).contains("Logs  [ Stats ]  Inspect"));
+
+    handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE),
+    );
+    assert!(
+        render_to_text(app.state(), 100, 24).contains("Logs  [ Stats ]  Inspect"),
+        "the replaced default no longer moves the view"
+    );
+
+    handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+    );
+    let help = render_to_text(app.state(), 100, 30);
+    assert!(
+        help.contains("tab  Next detail view"),
+        "help follows the override:\n{help}"
+    );
+    assert!(
+        help.contains("h  Previous detail view"),
+        "rendered:\n{help}"
+    );
+    assert!(help.contains("Scroll details down"), "rendered:\n{help}");
+}
+
 /// Incus details are Incus's own, so the shell must not dress them up as the
 /// Docker views it happens to render the same way.
 #[test]
