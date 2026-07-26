@@ -447,6 +447,104 @@ async fn a_failed_detail_view_reports_what_docker_wrote_to_stderr() {
     assert_eq!(error.message, "Error: No such container: container-a");
 }
 
+/// Provider output is displayed, not reformatted, so structure the Provider
+/// laid out — indentation included — survives into the panel.
+#[tokio::test]
+async fn inspect_output_reaches_the_panel_line_for_line() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("docker", &["container", "inspect", "container-a"]),
+        success(include_str!("fixtures/docker/container-inspect.json")),
+    )]);
+
+    let details = DockerWorkspace
+        .load_details(
+            &cli,
+            &ResourceId::new("container-a"),
+            &DetailViewId::new("inspect"),
+        )
+        .await
+        .expect("fixture inspects the container");
+
+    assert_eq!(details.lines.len(), 26);
+    assert_eq!(details.lines.first().map(String::as_str), Some("["));
+    assert_eq!(details.lines.last().map(String::as_str), Some("]"));
+    assert!(
+        details
+            .lines
+            .contains(&"            \"Status\": \"running\",".to_owned()),
+        "indentation is preserved: {:?}",
+        details.lines
+    );
+}
+
+#[tokio::test]
+async fn a_detail_view_docker_never_declared_is_refused_without_running_anything() {
+    // The fixture panics on any CLI request, so a view resolved to a command
+    // would fail here rather than return.
+    let cli = FixtureCli::new([]);
+
+    let error = DockerWorkspace
+        .load_details(
+            &cli,
+            &ResourceId::new("container-a"),
+            &DetailViewId::new("processes"),
+        )
+        .await
+        .expect_err("Docker declares no processes view");
+
+    assert_eq!(
+        error.message,
+        "Docker has no processes view for container container-a"
+    );
+}
+
+#[tokio::test]
+async fn a_detail_view_loaded_without_the_docker_cli_names_docker() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new(
+            "docker",
+            &["container", "logs", "--tail", "200", "container-a"],
+        ),
+        Err(ProcessError::ExecutableNotFound),
+    )]);
+
+    let error = DockerWorkspace
+        .load_details(
+            &cli,
+            &ResourceId::new("container-a"),
+            &DetailViewId::new("logs"),
+        )
+        .await
+        .expect_err("a missing CLI is never loaded details");
+
+    assert_eq!(error.message, "Docker CLI is no longer available");
+}
+
+#[tokio::test]
+async fn a_silent_detail_failure_names_the_view_and_container() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new(
+            "docker",
+            &["container", "stats", "--no-stream", "container-a"],
+        ),
+        silent_failure(),
+    )]);
+
+    let error = DockerWorkspace
+        .load_details(
+            &cli,
+            &ResourceId::new("container-a"),
+            &DetailViewId::new("stats"),
+        )
+        .await
+        .expect_err("a non-zero exit is never loaded details");
+
+    assert_eq!(
+        error.message,
+        "Docker could not load stats for container container-a"
+    );
+}
+
 #[tokio::test]
 async fn a_silent_command_failure_names_the_operation_and_container() {
     let cli = FixtureCli::new([(

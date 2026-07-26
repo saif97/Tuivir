@@ -1,0 +1,20 @@
+Name: gateway
+Status: RUNNING
+Type: container
+Architecture: x86_64
+PID: 4821
+Created: 2026/07/18 11:02 UTC
+Last Used: 2026/07/24 08:31 UTC
+
+Resources:
+  Processes: 17
+  CPU usage:
+    CPU usage (in seconds): 412
+  Memory usage:
+    Memory (current): 184.02MiB
+  Network usage:
+    eth0:
+      Type: broadcast
+      State: UP
+      IP addresses:
+        inet: 10.62.14.31/24 (global)

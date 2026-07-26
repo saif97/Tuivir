@@ -308,6 +308,83 @@ async fn a_failed_detail_view_reports_what_incus_wrote_to_stderr() {
     assert_eq!(error.message, "Error: Instance not found");
 }
 
+/// Provider output is displayed, not reformatted, so the nesting Incus laid
+/// out survives into the panel.
+#[tokio::test]
+async fn info_output_reaches_the_panel_line_for_line() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("incus", &["info", "gateway"]),
+        success(include_str!("fixtures/incus/instance-info.txt")),
+    )]);
+
+    let details = IncusWorkspace
+        .load_details(
+            &cli,
+            &ResourceId::new("gateway"),
+            &DetailViewId::new("info"),
+        )
+        .await
+        .expect("fixture describes the instance");
+
+    assert_eq!(details.lines.len(), 20);
+    assert_eq!(
+        details.lines.first().map(String::as_str),
+        Some("Name: gateway")
+    );
+    assert!(
+        details
+            .lines
+            .contains(&"        inet: 10.62.14.31/24 (global)".to_owned()),
+        "indentation is preserved: {:?}",
+        details.lines
+    );
+    // A blank separator line is part of what Incus laid out.
+    assert!(details.lines.contains(&String::new()));
+}
+
+#[tokio::test]
+async fn a_detail_view_incus_never_declared_is_refused_without_running_anything() {
+    // The fixture panics on any CLI request, so a view resolved to a command
+    // would fail here rather than return.
+    let cli = FixtureCli::new([]);
+
+    let error = IncusWorkspace
+        .load_details(
+            &cli,
+            &ResourceId::new("gateway"),
+            &DetailViewId::new("stats"),
+        )
+        .await
+        .expect_err("Incus declares no stats view");
+
+    assert_eq!(
+        error.message,
+        "Incus has no stats view for instance gateway"
+    );
+}
+
+#[tokio::test]
+async fn a_silent_detail_failure_names_the_view_and_instance() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("incus", &["config", "show", "gateway"]),
+        silent_failure(),
+    )]);
+
+    let error = IncusWorkspace
+        .load_details(
+            &cli,
+            &ResourceId::new("gateway"),
+            &DetailViewId::new("config"),
+        )
+        .await
+        .expect_err("a non-zero exit is never loaded details");
+
+    assert_eq!(
+        error.message,
+        "Incus could not load config for instance gateway"
+    );
+}
+
 #[tokio::test]
 async fn incus_maps_every_instance_status_into_the_shared_vocabulary() {
     let cli = FixtureCli::new([(
