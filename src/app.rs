@@ -401,6 +401,14 @@ impl App {
             }
             Command::NextWorkspace => self.move_provider_selection(1),
             Command::PreviousWorkspace => self.move_provider_selection(-1),
+            Command::NextDetailView => {
+                self.move_detail_view(1);
+                Vec::new()
+            }
+            Command::PreviousDetailView => {
+                self.move_detail_view(-1);
+                Vec::new()
+            }
             Command::Confirm => self.confirm_or_dismiss(),
             Command::Cancel => {
                 self.cancel_or_dismiss();
@@ -847,6 +855,35 @@ impl App {
             .min(resources.len().saturating_sub(1));
         provider.selected_resource = resources.get(next).map(|resource| resource.id.clone());
         reconcile_detail_view(provider);
+    }
+
+    /// Moves through the views the selected Resource's panel offers.
+    ///
+    /// The views are a ring: three tabs are few enough that walking off one end
+    /// is a request for the other, not a mistake to clamp.
+    fn move_detail_view(&mut self, delta: isize) {
+        let Some(provider) = self
+            .state
+            .active_provider
+            .and_then(|active| self.state.providers.get_mut(active))
+        else {
+            return;
+        };
+        let offered = provider
+            .detail_views()
+            .iter()
+            .map(|view| view.id.clone())
+            .collect::<Vec<_>>();
+        if offered.is_empty() {
+            return;
+        }
+        let current = provider
+            .selected_detail_view
+            .as_ref()
+            .and_then(|selected| offered.iter().position(|view| view == selected))
+            .unwrap_or(0);
+        let next = (current as isize + delta).rem_euclid(offered.len() as isize) as usize;
+        provider.selected_detail_view = offered.into_iter().nth(next);
     }
 
     fn move_provider_selection(&mut self, delta: isize) -> Vec<ProviderRequest> {

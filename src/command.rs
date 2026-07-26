@@ -24,6 +24,9 @@ pub enum Command {
     SelectPreviousFast,
     NextWorkspace,
     PreviousWorkspace,
+    /// Moves through the provider-native detail views of the selected Resource.
+    NextDetailView,
+    PreviousDetailView,
     /// Accepts the open modal.
     Confirm,
     /// Cancels or returns from the open modal.
@@ -382,6 +385,22 @@ const BUILTIN_COMMANDS: &[CommandDefinition] = &[
         command: Command::PreviousWorkspace,
         scopes: WORKSPACE,
         default_keys: &["["],
+    },
+    // lazydocker's own `[`/`]` already move the Active Workspace here, so the
+    // detail views take the horizontal keys next to them instead.
+    CommandDefinition {
+        id: "detail.view.next",
+        description: "Next detail view",
+        command: Command::NextDetailView,
+        scopes: RESOURCE_VIEW,
+        default_keys: &["l", "right"],
+    },
+    CommandDefinition {
+        id: "detail.view.previous",
+        description: "Previous detail view",
+        command: Command::PreviousDetailView,
+        scopes: RESOURCE_VIEW,
+        default_keys: &["h", "left"],
     },
     CommandDefinition {
         id: "modal.confirm",

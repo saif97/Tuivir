@@ -1625,6 +1625,95 @@ fn the_detail_panel_reports_loading_and_then_the_providers_own_output() {
     assert!(!loaded.contains("Loading Logs…"));
 }
 
+/// Moving between views loads the one that became visible, and only that one.
+#[test]
+fn moving_through_the_detail_views_loads_only_the_newly_visible_one() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+
+    let (_, requests) = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE),
+    );
+
+    assert!(
+        matches!(
+            requests.as_slice(),
+            [ProviderRequest::LoadResourceDetails { view_id, .. }]
+                if view_id == &DetailViewId::new("stats")
+        ),
+        "unexpected requests: {requests:?}"
+    );
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(
+        screen.contains("Logs  [ Stats ]  Inspect"),
+        "rendered:\n{screen}"
+    );
+
+    let (_, requests) = handle_key(&mut app, KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+
+    assert!(
+        matches!(
+            requests.as_slice(),
+            [ProviderRequest::LoadResourceDetails { view_id, .. }]
+                if view_id == &DetailViewId::new("logs")
+        ),
+        "unexpected requests: {requests:?}"
+    );
+    assert!(render_to_text(app.state(), 100, 24).contains("[ Logs ]  Stats  Inspect"));
+}
+
+/// The views are a ring, so moving past either end lands on the other rather
+/// than sticking.
+#[test]
+fn detail_views_wrap_around_at_both_ends() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+
+    app.invoke(Command::PreviousDetailView);
+    assert!(render_to_text(app.state(), 100, 24).contains("Logs  Stats  [ Inspect ]"));
+
+    app.invoke(Command::NextDetailView);
+    assert!(render_to_text(app.state(), 100, 24).contains("[ Logs ]  Stats  Inspect"));
+}
+
+/// The view survives moving between Resources, so reading one kind of detail
+/// down a list does not keep resetting to the first view.
+#[test]
+fn the_chosen_detail_view_survives_moving_to_another_resource() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[
+            ("container-a", "api", "nginx:1.27"),
+            ("container-b", "worker", "alpine:3.21"),
+        ])),
+    ));
+    app.invoke(Command::NextDetailView);
+
+    let requests = app.invoke(Command::SelectNext);
+
+    assert!(
+        matches!(
+            requests.as_slice(),
+            [ProviderRequest::LoadResourceDetails { resource_id, view_id, .. }]
+                if resource_id == &ResourceId::new("container-b")
+                    && view_id == &DetailViewId::new("stats")
+        ),
+        "unexpected requests: {requests:?}"
+    );
+    assert!(render_to_text(app.state(), 100, 24).contains("Logs  [ Stats ]  Inspect"));
+}
+
 /// Incus details are Incus's own, so the shell must not dress them up as the
 /// Docker views it happens to render the same way.
 #[test]
