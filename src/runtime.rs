@@ -74,8 +74,13 @@ pub trait ShellTerminal {
 ///
 /// Resuming does not depend on how the shell ended: a Provider CLI that never
 /// started, or one that exited badly, must not be able to leave the user
-/// without their terminal. Only then is the outcome reported, which is what
-/// puts any error on a screen the user can actually read.
+/// without their terminal.
+///
+/// Nor does reporting depend on resuming. The application is told how the shell
+/// ended even when the screen refused to come back, so a host on its way out
+/// carries that outcome with it instead of losing it alongside the screen that
+/// would have shown it; the screen's own failure is passed on afterwards, once
+/// there is nothing left to lose by returning early.
 ///
 /// The returned requests are ordinary background work — a refresh of the
 /// Active Workspace, and nothing else.
@@ -89,12 +94,26 @@ pub fn open_pending_shell(
     };
     terminal.suspend()?;
     let result = runner.run_interactive(&shell.process);
+    let resumed = take_the_terminal_back(terminal);
+    // The application is told how the shell ended whether or not the screen came
+    // back. A host whose terminal is beyond saving is on its way out, and what
+    // happened inside the shell is the one fact that would otherwise leave with
+    // it unrecorded.
+    let requests = app.update(AppEvent::ShellClosed { shell, result });
+    resumed?;
+    Ok(requests)
+}
+
+/// Takes the screen back and lets Virtui read keys into it again.
+///
+/// Discarding before reading, not after: a reader started first is already
+/// competing for the keys the discard is meant to remove. A screen that never
+/// came back has nothing to read into, so neither step is attempted.
+fn take_the_terminal_back(terminal: &mut dyn ShellTerminal) -> io::Result<()> {
     terminal.resume()?;
-    // Discarding before reading, not after: a reader started first is already
-    // competing for the keys the discard is meant to remove.
     terminal.discard_keys();
     terminal.resume_reading();
-    Ok(app.update(AppEvent::ShellClosed { shell, result }))
+    Ok(())
 }
 
 /// A refresh clock that skips missed ticks instead of queuing a backlog.

@@ -95,7 +95,16 @@ async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::R
                     });
                     match handover {
                         Ok(requests) => dispatch_all(&runtime, &completion_tx, requests),
-                        Err(error) => break Err(error),
+                        // The screen never came back, so the modal that would
+                        // have carried the shell's own failure will never be
+                        // drawn. This exit line is the last place left to say
+                        // it, and it is printed once the terminal is restored.
+                        Err(error) => break Err(match app.state().command_error.as_deref() {
+                            Some(shell) => {
+                                io::Error::new(error.kind(), format!("{error}; {shell}"))
+                            }
+                            None => error,
+                        }),
                     }
                 }
             }

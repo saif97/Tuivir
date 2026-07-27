@@ -37,25 +37,50 @@ impl Handover {
     }
 }
 
-struct FakeTerminal(Handover);
+struct FakeTerminal {
+    handover: Handover,
+    /// Whether the screen can be taken back, so a host that comes back can be
+    /// told apart from one whose terminal is beyond saving.
+    screen_comes_back: bool,
+}
+
+impl FakeTerminal {
+    fn new(handover: Handover) -> Self {
+        Self {
+            handover,
+            screen_comes_back: true,
+        }
+    }
+
+    fn whose_screen_never_comes_back(handover: Handover) -> Self {
+        Self {
+            handover,
+            screen_comes_back: false,
+        }
+    }
+}
 
 impl ShellTerminal for FakeTerminal {
     fn suspend(&mut self) -> io::Result<()> {
-        self.0.record("suspend");
+        self.handover.record("suspend");
         Ok(())
     }
 
     fn resume(&mut self) -> io::Result<()> {
-        self.0.record("resume");
-        Ok(())
+        self.handover.record("resume");
+        if self.screen_comes_back {
+            Ok(())
+        } else {
+            Err(io::Error::other("the screen is beyond saving"))
+        }
     }
 
     fn discard_keys(&mut self) {
-        self.0.record("discard keys");
+        self.handover.record("discard keys");
     }
 
     fn resume_reading(&mut self) {
-        self.0.record("resume reading");
+        self.handover.record("resume reading");
     }
 }
 
@@ -141,7 +166,7 @@ fn app_awaiting_the_terminal() -> App {
 fn the_terminal_is_suspended_for_the_provider_cli_and_taken_back_after() {
     let mut app = app_awaiting_the_terminal();
     let handover = Handover::default();
-    let mut terminal = FakeTerminal(handover.clone());
+    let mut terminal = FakeTerminal::new(handover.clone());
     let shell = FakeShell {
         handover: handover.clone(),
         outcome: Ok(()),
@@ -180,7 +205,7 @@ fn the_terminal_is_suspended_for_the_provider_cli_and_taken_back_after() {
 fn a_shell_that_never_starts_still_gives_the_terminal_back_and_names_what_failed() {
     let mut app = app_awaiting_the_terminal();
     let handover = Handover::default();
-    let mut terminal = FakeTerminal(handover.clone());
+    let mut terminal = FakeTerminal::new(handover.clone());
     let shell = FakeShell {
         handover: handover.clone(),
         outcome: Err(ProcessError::ExecutableNotFound),
@@ -215,7 +240,7 @@ fn a_shell_that_never_starts_still_gives_the_terminal_back_and_names_what_failed
 fn a_shell_that_ran_is_never_a_failure_whatever_status_it_left() {
     let mut app = app_awaiting_the_terminal();
     let handover = Handover::default();
-    let mut terminal = FakeTerminal(handover.clone());
+    let mut terminal = FakeTerminal::new(handover.clone());
     let shell = FakeShell {
         handover: handover.clone(),
         outcome: Err(ProcessError::Exited(ProcessFailure {
@@ -249,7 +274,7 @@ fn a_shell_that_ran_is_never_a_failure_whatever_status_it_left() {
 fn a_shell_that_could_not_be_started_names_what_the_cli_said() {
     let mut app = app_awaiting_the_terminal();
     let handover = Handover::default();
-    let mut terminal = FakeTerminal(handover.clone());
+    let mut terminal = FakeTerminal::new(handover.clone());
     let shell = FakeShell {
         handover: handover.clone(),
         outcome: Err(ProcessError::SpawnFailed("permission denied".to_owned())),
@@ -276,7 +301,7 @@ fn a_shell_that_could_not_be_started_names_what_the_cli_said() {
 fn keys_typed_at_the_shell_are_discarded_before_virtui_reads_again() {
     let mut app = app_awaiting_the_terminal();
     let handover = Handover::default();
-    let mut terminal = FakeTerminal(handover.clone());
+    let mut terminal = FakeTerminal::new(handover.clone());
     let shell = FakeShell {
         handover: handover.clone(),
         outcome: Ok(()),
@@ -299,13 +324,44 @@ fn keys_typed_at_the_shell_are_discarded_before_virtui_reads_again() {
     );
 }
 
+/// A screen that will not come back is the end of the session, and the shell's
+/// outcome is the one fact that would otherwise leave with it.
+///
+/// So the application is told how the shell ended before the screen's failure
+/// is passed on, rather than the two racing to be the news: the host still
+/// learns its terminal is beyond saving, and the state it is carrying out is
+/// no longer missing what happened inside the shell.
+#[test]
+fn a_screen_that_never_comes_back_still_carries_the_shells_outcome_out_with_it() {
+    let mut app = app_awaiting_the_terminal();
+    let handover = Handover::default();
+    let mut terminal = FakeTerminal::whose_screen_never_comes_back(handover.clone());
+    let shell = FakeShell {
+        handover: handover.clone(),
+        outcome: Err(ProcessError::ExecutableNotFound),
+    };
+
+    let error = open_pending_shell(&mut app, &mut terminal, &shell)
+        .expect_err("a screen that will not come back is still reported");
+
+    assert!(
+        error.to_string().contains("the screen is beyond saving"),
+        "the host learns why its terminal is gone, got {error}"
+    );
+    assert_eq!(
+        app.state().command_error.as_deref(),
+        Some("Docker shell failed for api (container-a): the CLI is no longer available"),
+        "what the shell did survives the screen that could not report it"
+    );
+}
+
 /// Nothing to hand over means nothing is disturbed: the host calls this every
 /// time round the loop, so an untouched terminal must stay untouched.
 #[test]
 fn a_loop_with_no_shell_waiting_leaves_the_terminal_alone() {
     let mut app = App::new();
     let handover = Handover::default();
-    let mut terminal = FakeTerminal(handover.clone());
+    let mut terminal = FakeTerminal::new(handover.clone());
     let shell = FakeShell {
         handover: handover.clone(),
         outcome: Ok(()),
