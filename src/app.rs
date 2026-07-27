@@ -172,7 +172,7 @@ pub struct AppState {
     /// `None` represents startup before any installed provider is discovered.
     pub active_provider: Option<usize>,
     pub help_overlay: Option<HelpOverlay>,
-    pub confirmation: Option<ResourceCommandConfirmation>,
+    pub confirmation: Option<ResourceCommandInvocation>,
     pub command_error: Option<String>,
     /// Dispatched Resource Commands that have not completed yet, in dispatch
     /// order.
@@ -233,7 +233,7 @@ pub struct HelpOverlay {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ResourceCommandConfirmation {
+pub struct ResourceCommandInvocation {
     pub provider_id: ProviderId,
     pub provider_name: String,
     pub panel_id: ResourcePanelId,
@@ -755,7 +755,7 @@ impl App {
         };
         let panel_id = target.panel_id;
         let resource_id = target.resource_id;
-        let target = ResourceCommandConfirmation {
+        let target = ResourceCommandInvocation {
             provider_id,
             provider_name,
             panel_id,
@@ -780,7 +780,7 @@ impl App {
 
     fn dispatch_resource_command(
         &mut self,
-        target: ResourceCommandConfirmation,
+        target: ResourceCommandInvocation,
     ) -> Vec<ProviderRequest> {
         self.state.command_error = None;
         let request_id = ProviderRequestId(self.next_request_id);
