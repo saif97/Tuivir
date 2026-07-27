@@ -8,6 +8,7 @@ use std::{
 use virtui::{
     app::{App, AppEvent},
     cli::{CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec},
+    command::Command,
     docker_sandbox::DockerSandboxWorkspace,
     provider::{
         DetailViewId, ProviderId, ProviderRequest, ProviderWorkspace, ResourceCommand, ResourceId,
@@ -478,6 +479,108 @@ async fn runtime_with_builtin_providers_discovers_installed_docker_sandbox() {
     assert_eq!(discovered[0].id, ProviderId::new("docker-sandbox"));
     assert_eq!(discovered[0].name, "Docker Sandbox");
     assert_eq!(discovered[0].target_environment, "v0.37.0");
+}
+
+/// Closes the loop #29 asks for: an invoked Command, through the confirmation
+/// the shell already imposes, out to the exact sbx arguments — rather than
+/// calling the workspace directly and assuming the shell would agree.
+#[tokio::test]
+async fn deleting_a_sandbox_confirms_first_and_then_runs_the_expected_cli_request() {
+    let cli = FixtureCli::new([
+        (
+            ProcessSpec::new("sbx", &["version"]),
+            success("sbx version: v0.37.0 8b65b864b0d49c29f05a55170d6b5eea4c0d11e7\n"),
+        ),
+        (
+            ProcessSpec::new("sbx", &["ls", "--json"]),
+            success(include_str!("fixtures/docker-sandbox/sandboxes.json")),
+        ),
+        (
+            ProcessSpec::new("sbx", &["ls", "--json"]),
+            success(include_str!("fixtures/docker-sandbox/sandboxes.json")),
+        ),
+    ]);
+    let sandboxes = DockerSandboxWorkspace;
+    let discovered = sandboxes.discover(&cli).await.expect("sbx is installed");
+    let mut app = App::new();
+    let request = app
+        .update(AppEvent::ProviderDiscovered(discovered))
+        .into_iter()
+        .next()
+        .expect("initial refresh");
+    app.update(refresh_completed(request, sandboxes.refresh(&cli).await));
+
+    // Deleting asks first, and issues nothing until the user agrees.
+    let pending = app.invoke(Command::Resource(ResourceCommand::Delete));
+    assert!(pending.is_empty(), "deletion waits for confirmation");
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(screen.contains("Docker Sandbox"), "{screen}");
+    assert!(screen.contains("claude-virtui"), "{screen}");
+
+    let ProviderRequest::ExecuteResourceCommand {
+        provider_id,
+        resource_id,
+        command,
+        state,
+        ..
+    } = app
+        .invoke(Command::Confirm)
+        .into_iter()
+        .next()
+        .expect("confirming dispatches the deletion")
+    else {
+        panic!("confirming a deletion executes a Resource Command");
+    };
+    assert_eq!(provider_id, ProviderId::new("docker-sandbox"));
+    assert_eq!(resource_id, ResourceId::new("claude-virtui"));
+    assert_eq!(command, ResourceCommand::Delete);
+
+    // The request the shell produced reaches sbx as the arguments #29 names.
+    let executing = FixtureCli::new([(
+        ProcessSpec::new("sbx", &["rm", "--force", "claude-virtui"]),
+        success(""),
+    )]);
+    sandboxes
+        .execute_command(&executing, &resource_id, command, state)
+        .await
+        .expect("the confirmed deletion succeeds");
+}
+
+/// Availability is enforced by the shell, not merely advertised: a Command the
+/// Resource never offered issues nothing at all.
+#[tokio::test]
+async fn starting_an_already_running_sandbox_is_not_offered_and_issues_nothing() {
+    let cli = FixtureCli::new([
+        (
+            ProcessSpec::new("sbx", &["version"]),
+            success("sbx version: v0.37.0 8b65b864b0d49c29f05a55170d6b5eea4c0d11e7\n"),
+        ),
+        (
+            ProcessSpec::new("sbx", &["ls", "--json"]),
+            success(include_str!("fixtures/docker-sandbox/sandboxes.json")),
+        ),
+        (
+            ProcessSpec::new("sbx", &["ls", "--json"]),
+            success(include_str!("fixtures/docker-sandbox/sandboxes.json")),
+        ),
+    ]);
+    let sandboxes = DockerSandboxWorkspace;
+    let discovered = sandboxes.discover(&cli).await.expect("sbx is installed");
+    let mut app = App::new();
+    let request = app
+        .update(AppEvent::ProviderDiscovered(discovered))
+        .into_iter()
+        .next()
+        .expect("initial refresh");
+    app.update(refresh_completed(request, sandboxes.refresh(&cli).await));
+
+    // claude-virtui is running, so Start was never among its Commands.
+    let requests = app.invoke(Command::Resource(ResourceCommand::Start));
+
+    assert!(
+        requests.is_empty(),
+        "a Command the Resource never offered issues nothing"
+    );
 }
 
 fn failure(stderr: &str) -> Result<ProcessOutput, ProcessError> {
