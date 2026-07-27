@@ -1,2 +1,3 @@
 [build]
 target-dir = "/tmp/virtui-target"
+build-dir = "/tmp/virtui-build/{workspace-path-hash}"
