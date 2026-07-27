@@ -51,6 +51,14 @@ impl ProcessFailure {
         }
         fallback.to_owned()
     }
+
+    /// How the process ended, for one that left no output to quote.
+    fn exit_description(&self) -> String {
+        match self.exit_code {
+            Some(code) => format!("exit status {code}"),
+            None => "ended by a signal".to_owned(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -62,6 +70,23 @@ pub enum ProcessError {
     SpawnFailed(String),
     /// The process started and exited with a non-zero status.
     Exited(ProcessFailure),
+}
+
+impl ProcessError {
+    /// Why the process produced no successful result, in words that name no
+    /// Provider.
+    ///
+    /// The caller already knows which Provider and Resource it asked about, so
+    /// this supplies only the part it cannot: what the process itself did. A
+    /// process whose streams were captured is quoted; one that owned the
+    /// terminal has nothing left to quote, so its status stands in.
+    pub fn summary(&self) -> String {
+        match self {
+            Self::ExecutableNotFound => "the CLI is no longer available".to_owned(),
+            Self::SpawnFailed(reason) => format!("the CLI could not be started: {reason}"),
+            Self::Exited(failure) => failure.message_or(&failure.exit_description()),
+        }
+    }
 }
 
 /// System-boundary abstraction for running short-lived provider CLI processes.

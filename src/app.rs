@@ -752,7 +752,13 @@ impl App {
     ) -> Vec<ProviderRequest> {
         self.state.command_error = match result {
             Ok(()) => None,
-            Err(_) => Some("shell failed".to_owned()),
+            Err(error) => Some(format!(
+                "{} shell failed for {} ({}): {}",
+                shell.provider_name,
+                shell.resource_name,
+                shell.resource_id,
+                error.summary()
+            )),
         };
         // A shell opened in a Provider Workspace the user has since left has
         // nothing to say about the one they are looking at now.

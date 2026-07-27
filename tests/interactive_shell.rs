@@ -14,12 +14,13 @@ use std::{
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use virtui::{
     app::{App, AppEvent},
-    cli::{InteractiveRunner, ProcessError, ProcessSpec},
+    cli::{InteractiveRunner, ProcessError, ProcessFailure, ProcessSpec},
     provider::{
         DetailView, ProviderDiscovery, ProviderId, ProviderRequest, Resource, ResourceCommand,
         ResourceId, ResourcePanel, ResourceState, WorkspaceSnapshot,
     },
     runtime::{ShellTerminal, handle_key, open_pending_shell},
+    ui::render_to_text,
 };
 
 /// Everything the host was asked to do, in the order it was asked.
@@ -159,6 +160,75 @@ fn the_terminal_is_suspended_for_the_provider_cli_and_taken_back_after() {
     );
     assert!(app.state().pending_shell.is_none());
     assert!(app.state().command_error.is_none());
+}
+
+/// A Provider CLI that was there at discovery and is gone by the time the user
+/// asks for a shell must not take the terminal with it. The complaint waits
+/// until Virtui is back on screen, which is the only place the user can read
+/// it.
+#[test]
+fn a_shell_that_never_starts_still_gives_the_terminal_back_and_names_what_failed() {
+    let mut app = app_awaiting_the_terminal();
+    let handover = Handover::default();
+    let mut terminal = FakeTerminal(handover.clone());
+    let shell = FakeShell {
+        handover: handover.clone(),
+        outcome: Err(ProcessError::ExecutableNotFound),
+    };
+
+    open_pending_shell(&mut app, &mut terminal, &shell).expect("the terminal to come back");
+
+    assert_eq!(
+        handover.steps(),
+        [
+            "suspend",
+            "run docker exec -it container-a /bin/sh",
+            "resume",
+        ]
+    );
+    assert_eq!(
+        app.state().command_error.as_deref(),
+        Some("Docker shell failed for api (container-a): the CLI is no longer available")
+    );
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(
+        screen.contains("Docker shell failed for api"),
+        "rendered screen:\n{screen}"
+    );
+}
+
+/// An interactive process writes to the user's own terminal rather than to
+/// captured streams, so nothing it printed survives the handover. The exit
+/// status is the whole of what is left to report.
+#[test]
+fn a_shell_that_exits_unsuccessfully_reports_the_status_it_left() {
+    let mut app = app_awaiting_the_terminal();
+    let handover = Handover::default();
+    let mut terminal = FakeTerminal(handover.clone());
+    let shell = FakeShell {
+        handover: handover.clone(),
+        outcome: Err(ProcessError::Exited(ProcessFailure {
+            exit_code: Some(126),
+            stdout: String::new(),
+            stderr: String::new(),
+        })),
+    };
+
+    let requests =
+        open_pending_shell(&mut app, &mut terminal, &shell).expect("the terminal to come back");
+
+    assert_eq!(handover.steps().last().map(String::as_str), Some("resume"));
+    assert_eq!(
+        app.state().command_error.as_deref(),
+        Some("Docker shell failed for api (container-a): exit status 126")
+    );
+    assert!(
+        matches!(
+            requests.as_slice(),
+            [ProviderRequest::RefreshWorkspace { .. }]
+        ),
+        "a shell that ran still leaves the workspace worth refreshing, got {requests:?}"
+    );
 }
 
 /// Nothing to hand over means nothing is disturbed: the host calls this every
