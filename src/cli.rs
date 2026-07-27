@@ -51,14 +51,6 @@ impl ProcessFailure {
         }
         fallback.to_owned()
     }
-
-    /// How the process ended, for one that left no output to quote.
-    fn exit_description(&self) -> String {
-        match self.exit_code {
-            Some(code) => format!("exit status {code}"),
-            None => "ended by a signal".to_owned(),
-        }
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -73,23 +65,24 @@ pub enum ProcessError {
 }
 
 impl ProcessError {
-    /// Why the process produced no successful result, in words that name no
-    /// Provider.
+    /// Why the process never ran at all, or `None` for one that ran.
+    ///
+    /// Only a process that never started failed at anything the caller
+    /// promised. One that ran and exited non-zero reported a status about its
+    /// own work, which for an Interactive Shell is the status of the last
+    /// command the user typed into it — theirs to read, not Virtui's to
+    /// complain about.
     ///
     /// The caller already knows which Provider and Resource it asked about, so
-    /// this supplies only the part it cannot: what the process itself did. A
-    /// process whose streams were captured is quoted; one that owned the
-    /// terminal has nothing left to quote, so its status stands in.
-    ///
-    /// This is the clause form. `provider_cli_error` words the same three
-    /// failures as a whole sentence that names the Provider itself, for callers
-    /// with no sentence of their own to put this inside — change one and read
-    /// the other.
-    pub fn summary(&self) -> String {
+    /// this supplies only the part it cannot: what stopped the process from
+    /// starting. `provider_cli_error` words the same two failures as a whole
+    /// sentence that names the Provider itself, for callers with no sentence of
+    /// their own to put this inside — change one and read the other.
+    pub fn start_failure(&self) -> Option<String> {
         match self {
-            Self::ExecutableNotFound => "the CLI is no longer available".to_owned(),
-            Self::SpawnFailed(reason) => format!("the CLI could not be started: {reason}"),
-            Self::Exited(failure) => failure.message_or(&failure.exit_description()),
+            Self::ExecutableNotFound => Some("the CLI is no longer available".to_owned()),
+            Self::SpawnFailed(reason) => Some(format!("the CLI could not be started: {reason}")),
+            Self::Exited(_) => None,
         }
     }
 }

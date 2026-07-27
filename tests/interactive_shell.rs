@@ -204,18 +204,22 @@ fn a_shell_that_never_starts_still_gives_the_terminal_back_and_names_what_failed
     );
 }
 
-/// An interactive process writes to the user's own terminal rather than to
-/// captured streams, so nothing it printed survives the handover. The exit
-/// status is the whole of what is left to report.
+/// A shell exits with the status of the last command typed into it, so a
+/// non-zero status is the user's own — a `grep` that matched nothing, then
+/// Ctrl-D — and not Virtui failing to give them a shell. Reporting it would put
+/// a modal in front of a user who did nothing wrong, every time they left a
+/// shell on a failed command.
+///
+/// Virtui gave them the shell they asked for. What they did inside it is theirs.
 #[test]
-fn a_shell_that_exits_unsuccessfully_reports_the_status_it_left() {
+fn a_shell_that_ran_is_never_a_failure_whatever_status_it_left() {
     let mut app = app_awaiting_the_terminal();
     let handover = Handover::default();
     let mut terminal = FakeTerminal(handover.clone());
     let shell = FakeShell {
         handover: handover.clone(),
         outcome: Err(ProcessError::Exited(ProcessFailure {
-            exit_code: Some(126),
+            exit_code: Some(1),
             stdout: String::new(),
             stderr: String::new(),
         })),
@@ -225,12 +229,9 @@ fn a_shell_that_exits_unsuccessfully_reports_the_status_it_left() {
         open_pending_shell(&mut app, &mut terminal, &shell).expect("the terminal to come back");
 
     assert_eq!(
-        handover.steps().last().map(String::as_str),
-        Some("resume reading")
-    );
-    assert_eq!(
-        app.state().command_error.as_deref(),
-        Some("Docker shell failed for api (container-a): exit status 126")
+        app.state().command_error,
+        None,
+        "a shell that ran leaves nothing to report"
     );
     assert!(
         matches!(
@@ -238,6 +239,29 @@ fn a_shell_that_exits_unsuccessfully_reports_the_status_it_left() {
             [ProviderRequest::RefreshWorkspace { .. }]
         ),
         "a shell that ran still leaves the workspace worth refreshing, got {requests:?}"
+    );
+}
+
+/// The other half of the same rule: a shell Virtui could not start is a promise
+/// it failed to keep, and says so. The CLI's own words are kept, because the
+/// user needs the part Virtui cannot supply.
+#[test]
+fn a_shell_that_could_not_be_started_names_what_the_cli_said() {
+    let mut app = app_awaiting_the_terminal();
+    let handover = Handover::default();
+    let mut terminal = FakeTerminal(handover.clone());
+    let shell = FakeShell {
+        handover: handover.clone(),
+        outcome: Err(ProcessError::SpawnFailed("permission denied".to_owned())),
+    };
+
+    open_pending_shell(&mut app, &mut terminal, &shell).expect("the terminal to come back");
+
+    assert_eq!(
+        app.state().command_error.as_deref(),
+        Some(
+            "Docker shell failed for api (container-a): the CLI could not be started: permission denied"
+        )
     );
 }
 

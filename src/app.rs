@@ -774,15 +774,16 @@ impl App {
         shell: PendingShell,
         result: Result<(), ProcessError>,
     ) -> Vec<ProviderRequest> {
-        // Only a failure is reported. A shell that ran has nothing to say, and
-        // clearing here would dismiss a failure the user has not read yet.
-        if let Err(error) = result {
+        // Only a shell that never started is reported. One that ran did what
+        // was asked of it whatever status it left, and clearing here would
+        // dismiss a failure the user has not read yet.
+        if let Some(reason) = result.err().as_ref().and_then(ProcessError::start_failure) {
             self.state.command_error = Some(operation_failure(
                 &shell.provider_name,
                 "shell",
                 &shell.resource_name,
                 &shell.resource_id,
-                &error.summary(),
+                &reason,
             ));
         }
         self.refresh_active_provider()
