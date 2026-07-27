@@ -5,9 +5,9 @@ use serde::Deserialize;
 use crate::{
     cli::{CliRunner, ProcessError, ProcessSpec},
     provider::{
-        DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderWorkspace, Resource,
-        ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourceState, WorkspaceError,
-        WorkspaceSnapshot,
+        DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderVoice, ProviderWorkspace,
+        Resource, ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourceState,
+        WorkspaceError, WorkspaceSnapshot,
     },
 };
 
@@ -18,6 +18,9 @@ const PROVIDER_NAME: &str = "Docker Sandbox";
 const LIST_SANDBOXES: [&str; 2] = ["ls", "--json"];
 /// The only Detail View Docker Sandbox declares.
 const INFO_VIEW: &str = "info";
+const VOICE: ProviderVoice = ProviderVoice::new(PROVIDER_NAME);
+/// What a user can run to check the Target Environment a refresh could not read.
+const REFRESH_REMEDY: &str = "Run `sbx ls` to verify access to the current Target Environment.";
 
 pub struct DockerSandboxWorkspace;
 
@@ -145,10 +148,7 @@ fn sandbox_commands(state: ResourceState) -> Vec<ResourceCommand> {
 }
 
 fn refresh_error(message: impl AsRef<str>) -> WorkspaceError {
-    WorkspaceError::new(format!(
-        "{}. Run `sbx ls` to verify access to the current Target Environment.",
-        message.as_ref()
-    ))
+    VOICE.with_remedy(message, REFRESH_REMEDY)
 }
 
 fn discovery_error(message: impl AsRef<str>) -> ProviderDiscovery {
@@ -156,23 +156,17 @@ fn discovery_error(message: impl AsRef<str>) -> ProviderDiscovery {
         id: ProviderId::new(PROVIDER_ID),
         name: PROVIDER_NAME.to_owned(),
         target_environment: "unavailable".to_owned(),
-        error: Some(WorkspaceError::new(format!(
-            "{}. Run `sbx ls` to verify sandboxd is running and you are signed in to Docker.",
-            message.as_ref(),
-        ))),
+        error: Some(VOICE.with_remedy(
+            message,
+            "Run `sbx ls` to verify sandboxd is running and you are signed in to Docker.",
+        )),
     }
 }
 
 /// What `sbx ls` left behind when it could not list sandboxes, with no remedy
 /// attached.
 fn listing_message(error: &ProcessError) -> String {
-    match error {
-        ProcessError::ExecutableNotFound => "Docker Sandbox CLI is no longer available".to_owned(),
-        ProcessError::SpawnFailed(message) => not_started(message),
-        ProcessError::Exited(failure) => {
-            failure.message_or("Docker Sandbox could not list sandboxes")
-        }
-    }
+    VOICE.message_for(error, "Docker Sandbox could not list sandboxes")
 }
 
 /// A failed listing, carrying a remedy only where one applies.
@@ -213,19 +207,6 @@ fn sandbox_command(command: ResourceCommand, resource_id: &str) -> Option<Vec<&s
     }
 }
 
-fn command_error(error: ProcessError, fallback: &str) -> WorkspaceError {
-    let message = match error {
-        ProcessError::ExecutableNotFound => "Docker Sandbox CLI is no longer available".to_owned(),
-        ProcessError::SpawnFailed(message) => not_started(&message),
-        ProcessError::Exited(failure) => failure.message_or(fallback),
-    };
-    WorkspaceError::new(message)
-}
-
-fn not_started(reason: &str) -> String {
-    format!("Docker Sandbox CLI could not be started: {reason}")
-}
-
 /// The version out of `sbx version: v0.37.0 <commit>`.
 ///
 /// The build commit identifies nothing the user is targeting, so only the
@@ -259,7 +240,7 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
             let version = match cli.run(ProcessSpec::new("sbx", &["version"])).await {
                 Err(ProcessError::ExecutableNotFound) => return None,
                 Err(ProcessError::SpawnFailed(message)) => {
-                    return Some(discovery_error(not_started(&message)));
+                    return Some(discovery_error(VOICE.not_started(&message)));
                 }
                 Err(ProcessError::Exited(failure)) => {
                     return Some(discovery_error(
@@ -333,7 +314,7 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
             cli.run(ProcessSpec::new("sbx", &args))
                 .await
                 .map_err(|error| {
-                    command_error(
+                    VOICE.command_error(
                         error,
                         &format!("Docker Sandbox could not {command} sandbox {resource_id}"),
                     )
