@@ -6,7 +6,7 @@ use std::{
 };
 
 use virtui::{
-    cli::{CliRunner, ProcessError, ProcessOutput, ProcessSpec},
+    cli::{CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec},
     docker_sandbox::DockerSandboxWorkspace,
     provider::{ProviderId, ProviderWorkspace},
 };
@@ -74,6 +74,43 @@ async fn an_installed_docker_sandbox_reports_the_sbx_version_as_its_target_envir
     assert_eq!(discovered.name, "Docker Sandbox");
     assert_eq!(discovered.target_environment, "v0.37.0");
     assert_eq!(discovered.error, None);
+}
+
+fn failure(stderr: &str) -> Result<ProcessOutput, ProcessError> {
+    Err(ProcessError::Exited(ProcessFailure {
+        exit_code: Some(1),
+        stdout: String::new(),
+        stderr: stderr.to_owned(),
+    }))
+}
+
+/// An installed sbx whose daemon is down or whose Docker login has lapsed is a
+/// Provider the user can act on, so it stays on screen instead of vanishing
+/// the way an uninstalled one does.
+#[tokio::test]
+async fn installed_docker_sandbox_that_cannot_list_stays_visible_with_an_actionable_error() {
+    let cli = FixtureCli::new([
+        (
+            ProcessSpec::new("sbx", &["version"]),
+            success("sbx version: v0.37.0 8b65b864b0d49c29f05a55170d6b5eea4c0d11e7\n"),
+        ),
+        (
+            ProcessSpec::new("sbx", &["ls", "--json"]),
+            failure("Error: not signed in to Docker"),
+        ),
+    ]);
+
+    let discovered = DockerSandboxWorkspace
+        .discover(&cli)
+        .await
+        .expect("an installed sbx is never omitted");
+
+    assert_eq!(discovered.name, "Docker Sandbox");
+    assert_eq!(discovered.target_environment, "unavailable");
+    assert_eq!(
+        discovered.error.expect("an unusable provider explains itself").message,
+        "Error: not signed in to Docker. Run `sbx ls` to verify sandboxd is running and you are signed in to Docker."
+    );
 }
 
 #[tokio::test]

@@ -13,6 +13,33 @@ const PROVIDER_NAME: &str = "Docker Sandbox";
 
 pub struct DockerSandboxWorkspace;
 
+fn discovery_error(message: impl AsRef<str>) -> ProviderDiscovery {
+    ProviderDiscovery {
+        id: ProviderId::new(PROVIDER_ID),
+        name: PROVIDER_NAME.to_owned(),
+        target_environment: "unavailable".to_owned(),
+        error: Some(WorkspaceError::new(format!(
+            "{}. Run `sbx ls` to verify sandboxd is running and you are signed in to Docker.",
+            message.as_ref(),
+        ))),
+    }
+}
+
+/// What `sbx ls` left behind when it could not list sandboxes.
+fn listing_failure(error: ProcessError) -> String {
+    match error {
+        ProcessError::ExecutableNotFound => "Docker Sandbox CLI is no longer available".to_owned(),
+        ProcessError::SpawnFailed(message) => not_started(&message),
+        ProcessError::Exited(failure) => {
+            failure.message_or("Docker Sandbox could not list sandboxes")
+        }
+    }
+}
+
+fn not_started(reason: &str) -> String {
+    format!("Docker Sandbox CLI could not be started: {reason}")
+}
+
 /// The version out of `sbx version: v0.37.0 <commit>`.
 ///
 /// The build commit identifies nothing the user is targeting, so only the
@@ -44,9 +71,12 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
                 Ok(output) => sbx_version(&output.stdout),
                 Err(_) => return None,
             };
-            cli.run(ProcessSpec::new("sbx", &["ls", "--json"]))
-                .await
-                .ok()?;
+            // Listing is what proves sbx is usable, and it fails for the two
+            // reasons the user can act on: sandboxd is down, or the Docker
+            // login has lapsed.
+            if let Err(error) = cli.run(ProcessSpec::new("sbx", &["ls", "--json"])).await {
+                return Some(discovery_error(listing_failure(error)));
+            }
 
             Some(ProviderDiscovery {
                 id: self.id(),
