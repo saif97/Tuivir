@@ -221,6 +221,62 @@ async fn stopping_a_sandbox_generates_the_expected_cli_request() {
         .expect("Docker Sandbox stop succeeds");
 }
 
+/// Unlike Docker and Incus, the force here is not about a running Resource.
+/// `sbx rm` prompts for a confirmation it reads from a terminal Virtui never
+/// gives it, so every deletion needs `--force` to proceed at all — including
+/// one from a settled, stopped sandbox.
+#[tokio::test]
+async fn deleting_a_sandbox_always_forces_regardless_of_state() {
+    for state in [
+        ResourceState::Running,
+        ResourceState::Stopped,
+        ResourceState::Paused,
+        ResourceState::Transitioning,
+        ResourceState::Broken,
+        ResourceState::Unknown,
+    ] {
+        let cli = FixtureCli::new([(
+            ProcessSpec::new("sbx", &["rm", "--force", "claude-virtui"]),
+            success(""),
+        )]);
+
+        DockerSandboxWorkspace
+            .execute_command(
+                &cli,
+                &ResourceId::new("claude-virtui"),
+                ResourceCommand::Delete,
+                state,
+            )
+            .await
+            .unwrap_or_else(|error| panic!("delete from {state:?} succeeds: {error:?}"));
+    }
+}
+
+/// sbx has no restart, and no pause to resume from. Neither Command is ever
+/// offered, and the fixture panics on any CLI request, so reaching sbx with
+/// one would fail here rather than return.
+#[tokio::test]
+async fn a_command_sbx_cannot_perform_is_refused_without_running_anything() {
+    for command in [ResourceCommand::Restart, ResourceCommand::Resume] {
+        let cli = FixtureCli::new([]);
+
+        let error = DockerSandboxWorkspace
+            .execute_command(
+                &cli,
+                &ResourceId::new("claude-virtui"),
+                command,
+                ResourceState::Running,
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            error.message,
+            format!("Docker Sandbox cannot {command} sandbox claude-virtui")
+        );
+    }
+}
+
 fn failure(stderr: &str) -> Result<ProcessOutput, ProcessError> {
     Err(ProcessError::Exited(ProcessFailure {
         exit_code: Some(1),
