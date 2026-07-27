@@ -16,16 +16,12 @@ _Avoid_: Provider tab, unified resource view
 The single provider workspace currently visible and being refreshed. Inactive workspaces remain idle.
 _Avoid_: Selected backend, current tab
 
-**Pane**:
-A focusable region of the application shell, such as the Provider selector, a Resource Panel, or the Details pane. Use _Panel_ only for a provider-defined Resource Panel.
-_Avoid_: Area, section, focus region
-
 **Resource**:
 One selectable native thing managed by a Provider, such as a container, image, volume, network, or instance. A Resource has a Resource State only when its kind has a lifecycle state.
 _Avoid_: Item, entity, provider object
 
 **Resource Panel**:
-A provider-defined Pane containing one kind of Resource, such as Docker Containers or Images.
+A provider-defined group containing one kind of Resource, such as Docker Containers or Images.
 _Avoid_: Resource pane, resource list
 
 **Target Environment**:
