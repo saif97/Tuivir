@@ -108,6 +108,22 @@ fn sandbox_resource_state(status: &str) -> ResourceState {
     }
 }
 
+/// The Commands a sandbox in this state can be asked to perform.
+///
+/// sbx offers no restart and no pause, so Running and Stopped are the only
+/// states with a lifecycle Command beyond deletion. Anything not settled and
+/// stopped keeps only Delete, which always applies.
+fn sandbox_commands(state: ResourceState) -> Vec<ResourceCommand> {
+    match state {
+        ResourceState::Running => vec![ResourceCommand::Stop, ResourceCommand::Delete],
+        ResourceState::Stopped => vec![ResourceCommand::Start, ResourceCommand::Delete],
+        ResourceState::Paused
+        | ResourceState::Transitioning
+        | ResourceState::Broken
+        | ResourceState::Unknown => vec![ResourceCommand::Delete],
+    }
+}
+
 fn refresh_error(message: impl AsRef<str>) -> WorkspaceError {
     WorkspaceError::new(format!(
         "{}. Run `sbx ls` to verify access to the current Target Environment.",
@@ -253,7 +269,7 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
                             ("ID".to_owned(), row.id),
                             ("Workspaces".to_owned(), row.workspaces.join(", ")),
                         ],
-                        available_commands: Vec::new(),
+                        available_commands: sandbox_commands(state),
                     }
                 })
                 .collect();

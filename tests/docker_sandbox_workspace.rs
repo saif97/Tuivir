@@ -277,6 +277,49 @@ async fn a_command_sbx_cannot_perform_is_refused_without_running_anything() {
     }
 }
 
+/// Availability comes from the state the last refresh already reported, so
+/// offering the Commands costs no extra sbx query. The fixture answers one
+/// listing and panics on anything else, which is what proves it.
+#[tokio::test]
+async fn command_availability_follows_the_last_refreshed_state() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("sbx", &["ls", "--json"]),
+        success(include_str!(
+            "fixtures/docker-sandbox/mixed-state-sandboxes.json"
+        )),
+    )]);
+
+    let snapshot = DockerSandboxWorkspace
+        .refresh(&cli)
+        .await
+        .expect("the fixture lists sandboxes");
+
+    assert_eq!(
+        snapshot
+            .resources()
+            .map(|resource| (resource.name.as_str(), resource.available_commands.clone()))
+            .collect::<Vec<_>>(),
+        [
+            (
+                "running-sandbox",
+                vec![ResourceCommand::Stop, ResourceCommand::Delete]
+            ),
+            (
+                "stopped-sandbox",
+                vec![ResourceCommand::Start, ResourceCommand::Delete]
+            ),
+            (
+                "shouting-sandbox",
+                vec![ResourceCommand::Stop, ResourceCommand::Delete]
+            ),
+            // Not settled and stopped, so neither starting nor stopping
+            // reliably applies. Deleting always does.
+            ("starting-sandbox", vec![ResourceCommand::Delete]),
+            ("unrecognised-sandbox", vec![ResourceCommand::Delete]),
+        ]
+    );
+}
+
 fn failure(stderr: &str) -> Result<ProcessOutput, ProcessError> {
     Err(ProcessError::Exited(ProcessFailure {
         exit_code: Some(1),
