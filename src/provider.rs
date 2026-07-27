@@ -89,6 +89,7 @@ pub enum ProviderRequest {
     ExecuteResourceCommand {
         request_id: ProviderRequestId,
         provider_id: ProviderId,
+        panel_id: ResourcePanelId,
         resource_id: ResourceId,
         resource_name: String,
         command: ResourceCommand,
@@ -103,9 +104,26 @@ pub enum ProviderRequest {
     LoadResourceDetails {
         request_id: ProviderRequestId,
         provider_id: ProviderId,
+        panel_id: ResourcePanelId,
         resource_id: ResourceId,
         view_id: DetailViewId,
     },
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+/// Stable provider-defined identity for one Resource Panel.
+pub struct ResourcePanelId(pub String);
+
+impl ResourcePanelId {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+}
+
+impl fmt::Display for ResourcePanelId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -123,6 +141,22 @@ impl fmt::Display for ResourceId {
     }
 }
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+/// Identifies one Resource within its provider-defined Resource Panel.
+pub struct ResourceTarget {
+    pub panel_id: ResourcePanelId,
+    pub resource_id: ResourceId,
+}
+
+impl ResourceTarget {
+    pub fn new(panel_id: ResourcePanelId, resource_id: ResourceId) -> Self {
+        Self {
+            panel_id,
+            resource_id,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// One selectable native resource in a Provider Workspace.
 pub struct Resource {
@@ -132,7 +166,8 @@ pub struct Resource {
     /// such as a Docker container's running/exited state.
     pub status: Option<String>,
     /// The provider-neutral reading of `status` that the shell can act on.
-    pub state: ResourceState,
+    /// Stateless Resources, such as Docker images, have no Resource State.
+    pub state: Option<ResourceState>,
     /// Provider-defined label/value fields for the selected-resource details panel.
     pub fields: Vec<(String, String)>,
     /// Lifecycle Commands currently available for this provider Resource.
@@ -178,7 +213,13 @@ impl DetailView {
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// A provider-defined group of resources, such as Docker Containers.
 pub struct ResourcePanel {
+    pub id: ResourcePanelId,
     pub title: String,
+    /// Provider-defined labels rendered as columns by the shared shell.
+    ///
+    /// Each label names a value in [`Resource::fields`]. Their order is stable
+    /// even when the panel has no Resources.
+    pub columns: Vec<String>,
     /// The detail views offered for every Resource in this panel, in the order
     /// the user moves through them. The first is shown when a Resource is
     /// selected.
@@ -200,15 +241,32 @@ impl WorkspaceSnapshot {
         self.panels.iter().flat_map(|panel| &panel.resources)
     }
 
+    pub fn targets(&self) -> impl Iterator<Item = (ResourceTarget, &Resource)> {
+        self.panels.iter().flat_map(|panel| {
+            panel.resources.iter().map(|resource| {
+                (
+                    ResourceTarget::new(panel.id.clone(), resource.id.clone()),
+                    resource,
+                )
+            })
+        })
+    }
+
     /// The panel `resource_id` belongs to, and so the detail views offered for
     /// it.
-    pub fn panel_of(&self, resource_id: &ResourceId) -> Option<&ResourcePanel> {
-        self.panels.iter().find(|panel| {
-            panel
-                .resources
-                .iter()
-                .any(|resource| &resource.id == resource_id)
-        })
+    pub fn panel(&self, panel_id: &ResourcePanelId) -> Option<&ResourcePanel> {
+        self.panels.iter().find(|panel| &panel.id == panel_id)
+    }
+
+    pub fn resource(
+        &self,
+        panel_id: &ResourcePanelId,
+        resource_id: &ResourceId,
+    ) -> Option<&Resource> {
+        self.panel(panel_id)?
+            .resources
+            .iter()
+            .find(|resource| &resource.id == resource_id)
     }
 }
 
@@ -320,6 +378,7 @@ pub trait ProviderWorkspace: Send + Sync {
     fn execute_command<'a>(
         &'a self,
         cli: &'a dyn CliRunner,
+        panel_id: &'a ResourcePanelId,
         resource_id: &'a ResourceId,
         command: ResourceCommand,
         state: ResourceState,
@@ -332,6 +391,7 @@ pub trait ProviderWorkspace: Send + Sync {
     fn load_details<'a>(
         &'a self,
         cli: &'a dyn CliRunner,
+        panel_id: &'a ResourcePanelId,
         resource_id: &'a ResourceId,
         view_id: &'a DetailViewId,
     ) -> Pin<Box<dyn Future<Output = Result<ResourceDetails, WorkspaceError>> + Send + 'a>>;

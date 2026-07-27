@@ -14,8 +14,8 @@ use virtui::{
     docker::DockerWorkspace,
     provider::{
         DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderRequest, Resource,
-        ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourceState, WorkspaceError,
-        WorkspaceSnapshot,
+        ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourcePanelId,
+        ResourceState, WorkspaceError, WorkspaceSnapshot,
     },
     runtime::{ProviderRuntime, RefreshTimer, ShellControl, handle_key},
     ui::{render_foreground_colours, render_to_text},
@@ -144,6 +144,17 @@ impl CliRunner for DelayedCli {
         command: ProcessSpec,
     ) -> Pin<Box<dyn Future<Output = Result<ProcessOutput, ProcessError>> + Send + 'a>> {
         Box::pin(async move {
+            if command
+                == ProcessSpec::new(
+                    "docker",
+                    &["image", "ls", "--no-trunc", "--format", "{{json .}}"],
+                )
+            {
+                return Ok(ProcessOutput {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                });
+            }
             assert_eq!(
                 command,
                 ProcessSpec::new(
@@ -1413,7 +1424,9 @@ fn container_snapshot(
     };
     WorkspaceSnapshot {
         panels: vec![ResourcePanel {
+            id: ResourcePanelId::new("containers"),
             title: "Containers".to_owned(),
+            columns: vec!["Image".to_owned()],
             detail_views: vec![
                 DetailView::new("logs", "Logs"),
                 DetailView::new("stats", "Stats"),
@@ -1425,7 +1438,7 @@ fn container_snapshot(
                     id: ResourceId((*id).to_owned()),
                     name: (*name).to_owned(),
                     status: Some(status.to_owned()),
-                    state,
+                    state: Some(state),
                     fields: vec![("Image".to_owned(), (*image).to_owned())],
                     available_commands: available_commands.clone(),
                 })
@@ -1437,7 +1450,9 @@ fn container_snapshot(
 fn incus_snapshot(instances: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
     WorkspaceSnapshot {
         panels: vec![ResourcePanel {
+            id: ResourcePanelId::new("instances"),
             title: "Instances".to_owned(),
+            columns: vec!["Type".to_owned()],
             detail_views: vec![
                 DetailView::new("info", "Info"),
                 DetailView::new("config", "Config"),
@@ -1451,11 +1466,11 @@ fn incus_snapshot(instances: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
                         id: ResourceId((*id).to_owned()),
                         name: (*name).to_owned(),
                         status: Some((*status).to_owned()),
-                        state: if running {
+                        state: Some(if running {
                             ResourceState::Running
                         } else {
                             ResourceState::Stopped
-                        },
+                        }),
                         fields: vec![("Type".to_owned(), "container".to_owned())],
                         available_commands: if running {
                             vec![
@@ -1470,6 +1485,62 @@ fn incus_snapshot(instances: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
                 })
                 .collect(),
         }],
+    }
+}
+
+fn docker_multi_panel_snapshot() -> WorkspaceSnapshot {
+    WorkspaceSnapshot {
+        panels: vec![
+            ResourcePanel {
+                id: ResourcePanelId::new("containers"),
+                title: "Containers".to_owned(),
+                columns: vec!["Image".to_owned()],
+                detail_views: vec![
+                    DetailView::new("logs", "Logs"),
+                    DetailView::new("stats", "Stats"),
+                    DetailView::new("inspect", "Inspect"),
+                ],
+                resources: vec![Resource {
+                    id: ResourceId::new("shared-id"),
+                    name: "api".to_owned(),
+                    status: Some("running".to_owned()),
+                    state: Some(ResourceState::Running),
+                    fields: vec![
+                        ("Image".to_owned(), "nginx:1.27".to_owned()),
+                        ("Status".to_owned(), "Up 3 hours".to_owned()),
+                    ],
+                    available_commands: vec![
+                        ResourceCommand::Stop,
+                        ResourceCommand::Restart,
+                        ResourceCommand::Delete,
+                    ],
+                }],
+            },
+            ResourcePanel {
+                id: ResourcePanelId::new("images"),
+                title: "Images".to_owned(),
+                columns: vec![
+                    "Repository".to_owned(),
+                    "Tag".to_owned(),
+                    "Identity".to_owned(),
+                    "Size".to_owned(),
+                ],
+                detail_views: vec![DetailView::new("inspect", "Inspect")],
+                resources: vec![Resource {
+                    id: ResourceId::new("shared-id"),
+                    name: "nginx:1.27".to_owned(),
+                    status: None,
+                    state: None,
+                    fields: vec![
+                        ("Repository".to_owned(), "nginx".to_owned()),
+                        ("Tag".to_owned(), "1.27".to_owned()),
+                        ("Identity".to_owned(), "sha256:shared-id".to_owned()),
+                        ("Size".to_owned(), "192MB".to_owned()),
+                    ],
+                    available_commands: Vec::new(),
+                }],
+            },
+        ],
     }
 }
 
@@ -1538,11 +1609,13 @@ fn details_completed(
         ProviderRequest::LoadResourceDetails {
             request_id,
             provider_id,
+            panel_id,
             resource_id,
             view_id,
         } => AppEvent::ResourceDetailsCompleted {
             request_id,
             provider_id,
+            panel_id,
             resource_id,
             view_id,
             result,
@@ -1598,6 +1671,82 @@ fn settling_on_a_resource_requests_only_the_visible_detail_view() {
         "unexpected request: {:?}",
         requests[0]
     );
+}
+
+#[test]
+fn docker_renders_provider_defined_resource_panels_and_image_columns() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+
+    app.update(refresh_completed(
+        initial,
+        Ok(docker_multi_panel_snapshot()),
+    ));
+
+    let screen = render_to_text(app.state(), 220, 30);
+    assert!(screen.contains("Containers"), "rendered:\n{screen}");
+    assert!(screen.contains("Images"), "rendered:\n{screen}");
+    assert!(
+        screen.contains("Repository  Tag  Identity  Size"),
+        "rendered:\n{screen}"
+    );
+    assert!(screen.contains("nginx:1.27"), "rendered:\n{screen}");
+    assert!(screen.contains("192MB"), "rendered:\n{screen}");
+}
+
+#[test]
+fn selecting_an_image_routes_details_by_panel_and_resource() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(docker_multi_panel_snapshot()),
+    ));
+
+    let requests = app.invoke(Command::SelectNext);
+
+    assert!(
+        matches!(
+            requests.as_slice(),
+            [ProviderRequest::LoadResourceDetails {
+                panel_id,
+                resource_id,
+                view_id,
+                ..
+            }] if panel_id == &ResourcePanelId::new("images")
+                && resource_id == &ResourceId::new("shared-id")
+                && view_id == &DetailViewId::new("inspect")
+        ),
+        "unexpected requests: {requests:?}"
+    );
+    let screen = render_to_text(app.state(), 160, 30);
+    assert!(screen.contains("Repository: nginx"), "rendered:\n{screen}");
+    assert!(screen.contains("Identity: sha256:shared-id"));
+    assert!(screen.contains("[ Inspect ]"));
+}
+
+#[test]
+fn stale_container_details_cannot_replace_selected_image_details() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let stale_container = detail_request(app.update(refresh_completed(
+        initial,
+        Ok(docker_multi_panel_snapshot()),
+    )));
+    let image_request = detail_request(app.invoke(Command::SelectNext));
+    app.update(details_completed(
+        image_request,
+        Ok(ResourceDetails::from_lines(["selected image details"])),
+    ));
+
+    app.update(details_completed(
+        stale_container,
+        Ok(ResourceDetails::from_lines(["stale container details"])),
+    ));
+
+    let screen = render_to_text(app.state(), 160, 30);
+    assert!(screen.contains("selected image details"));
+    assert!(!screen.contains("stale container details"));
 }
 
 /// The panel says it is working before the Provider answers, then shows what

@@ -235,48 +235,95 @@ fn render_workspace_panel(
             workspace_rows[1],
         ),
         WorkspaceState::Ready(snapshot) => {
-            // Providers currently populate exactly one panel; only the first is
-            // shown here. Selection/navigation elsewhere already walks every
-            // panel via `WorkspaceSnapshot::resources`, so a future
-            // multi-panel provider would need this to do the same.
-            let panel = snapshot.panels.first();
-            let title = panel.map_or("Resources", |panel| panel.title.as_str());
-            let items = panel
-                .into_iter()
-                .flat_map(|panel| &panel.resources)
-                .map(|resource| {
-                    let status = resource.status.as_deref().unwrap_or("");
-                    let marker = if provider.selected_resource.as_ref() == Some(&resource.id) {
-                        ">"
-                    } else {
-                        " "
-                    };
-                    ListItem::new(Line::from(vec![
-                        Span::raw(format!("{marker} {}  ", resource.name)),
-                        Span::styled(status.to_owned(), resource_state_style(resource.state)),
-                    ]))
-                })
-                .collect::<Vec<_>>();
-            let items = if items.is_empty() {
-                vec![ListItem::new(format!(
-                    "No {} {} found",
-                    provider.name,
-                    title.to_lowercase()
-                ))]
-            } else {
-                items
-            };
-            frame.render_widget(
-                List::new(items).block(
-                    Block::default()
-                        .title(workspace_panel_title(resources_hint, title))
-                        .title_style(title_style)
-                        .borders(Borders::ALL),
-                ),
-                workspace_rows[1],
-            );
+            if snapshot.panels.is_empty() {
+                frame.render_widget(
+                    Paragraph::new("No Resource Panels available").block(
+                        Block::default()
+                            .title(workspace_panel_title(resources_hint, "Resources"))
+                            .title_style(title_style)
+                            .borders(Borders::ALL),
+                    ),
+                    workspace_rows[1],
+                );
+                return;
+            }
+            let panel_areas = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints(vec![
+                    Constraint::Ratio(1, snapshot.panels.len() as u32);
+                    snapshot.panels.len()
+                ])
+                .split(workspace_rows[1]);
+            for (panel, area) in snapshot.panels.iter().zip(panel_areas.iter().copied()) {
+                render_resource_panel(provider, panel, resources_hint, title_style, frame, area);
+            }
         }
     }
+}
+
+fn render_resource_panel(
+    provider: &ProviderState,
+    panel: &crate::provider::ResourcePanel,
+    resources_hint: Option<&str>,
+    title_style: Style,
+    frame: &mut Frame<'_>,
+    area: Rect,
+) {
+    let mut items = Vec::new();
+    if !panel.columns.is_empty() {
+        items.push(ListItem::new(Line::styled(
+            format!("  Name  {}", panel.columns.join("  ")),
+            Style::default().add_modifier(Modifier::BOLD),
+        )));
+    }
+    items.extend(panel.resources.iter().map(|resource| {
+        let marker = if provider.selected_resource.as_ref().is_some_and(|selected| {
+            selected.panel_id == panel.id && selected.resource_id == resource.id
+        }) {
+            ">"
+        } else {
+            " "
+        };
+        let values = panel
+            .columns
+            .iter()
+            .map(|column| {
+                resource
+                    .fields
+                    .iter()
+                    .find_map(|(label, value)| (label == column).then_some(value.as_str()))
+                    .unwrap_or("")
+            })
+            .collect::<Vec<_>>()
+            .join("  ");
+        let mut spans = vec![Span::raw(format!("{marker} {}  {values}", resource.name))];
+        if let Some(status) = &resource.status {
+            spans.push(Span::raw("  "));
+            spans.push(Span::styled(
+                status.clone(),
+                resource
+                    .state
+                    .map_or_else(Style::default, resource_state_style),
+            ));
+        }
+        ListItem::new(Line::from(spans))
+    }));
+    if panel.resources.is_empty() {
+        items.push(ListItem::new(format!(
+            "No {} {} found",
+            provider.name,
+            panel.title.to_lowercase()
+        )));
+    }
+    frame.render_widget(
+        List::new(items).block(
+            Block::default()
+                .title(workspace_panel_title(resources_hint, &panel.title))
+                .title_style(title_style)
+                .borders(Borders::ALL),
+        ),
+        area,
+    );
 }
 
 /// Colours a Resource's status by its Resource State, so a paused or broken
@@ -317,9 +364,10 @@ fn workspace_panel_title(resources_hint: Option<&str>, label: &str) -> String {
 
 fn render_details_panel(provider: &ProviderState, frame: &mut Frame<'_>, area: Rect) {
     let summary = match &provider.workspace_state {
-        WorkspaceState::Ready(snapshot) => snapshot
-            .resources()
-            .find(|resource| provider.selected_resource.as_ref() == Some(&resource.id))
+        WorkspaceState::Ready(snapshot) => provider
+            .selected_resource
+            .as_ref()
+            .and_then(|selected| snapshot.resource(&selected.panel_id, &selected.resource_id))
             .map(|resource| {
                 let mut lines = vec![Line::styled(
                     resource.name.clone(),

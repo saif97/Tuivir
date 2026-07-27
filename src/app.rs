@@ -4,8 +4,8 @@ use crate::command::{Command, CommandRegistry, CommandScope};
 use crate::keys::Key;
 use crate::provider::{
     DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderRequest, ProviderRequestId,
-    Resource, ResourceCommand, ResourceDetails, ResourceId, ResourceState, WorkspaceError,
-    WorkspaceSnapshot,
+    Resource, ResourceCommand, ResourceDetails, ResourceId, ResourcePanelId, ResourceState,
+    ResourceTarget, WorkspaceError, WorkspaceSnapshot,
 };
 
 /// Facts the application receives: provider discovery, the refresh clock, and
@@ -41,6 +41,7 @@ pub enum AppEvent {
     ResourceDetailsCompleted {
         request_id: ProviderRequestId,
         provider_id: ProviderId,
+        panel_id: ResourcePanelId,
         resource_id: ResourceId,
         view_id: DetailViewId,
         result: Result<ResourceDetails, WorkspaceError>,
@@ -69,7 +70,7 @@ pub struct ProviderState {
     pub name: String,
     pub target_environment: String,
     pub workspace_state: WorkspaceState,
-    pub selected_resource: Option<ResourceId>,
+    pub selected_resource: Option<ResourceTarget>,
     /// Which of the selected Resource's provider-native views is visible.
     ///
     /// It survives moving between Resources of the same panel, so walking a
@@ -88,6 +89,7 @@ pub struct ProviderState {
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// One detail view being loaded or displayed, and the target it describes.
 pub struct ResourceDetailsState {
+    pub panel_id: ResourcePanelId,
     pub resource_id: ResourceId,
     /// The Resource's own name, kept here so an empty or failed view can say
     /// what it was loaded for without going back to the snapshot.
@@ -116,7 +118,7 @@ impl ProviderState {
         };
         self.selected_resource
             .as_ref()
-            .and_then(|selected| snapshot.panel_of(selected))
+            .and_then(|selected| snapshot.panel(&selected.panel_id))
             .map_or(&[], |panel| panel.detail_views.as_slice())
     }
 
@@ -133,9 +135,7 @@ impl ProviderState {
         let WorkspaceState::Ready(snapshot) = &self.workspace_state else {
             return None;
         };
-        let resource = snapshot
-            .resources()
-            .find(|resource| &resource.id == selected)?;
+        let resource = snapshot.resource(&selected.panel_id, &selected.resource_id)?;
         Some((resource, view))
     }
 }
@@ -236,6 +236,7 @@ pub struct HelpOverlay {
 pub struct ResourceCommandConfirmation {
     pub provider_id: ProviderId,
     pub provider_name: String,
+    pub panel_id: ResourcePanelId,
     pub resource_id: ResourceId,
     pub resource_name: String,
     pub command: ResourceCommand,
@@ -270,6 +271,7 @@ pub struct App {
 struct PendingDetails {
     request_id: ProviderRequestId,
     provider_id: ProviderId,
+    panel_id: ResourcePanelId,
     resource_id: ResourceId,
     view_id: DetailViewId,
 }
@@ -343,11 +345,19 @@ impl App {
             AppEvent::ResourceDetailsCompleted {
                 request_id,
                 provider_id,
+                panel_id,
                 resource_id,
                 view_id,
                 result,
             } => {
-                self.apply_details_completed(request_id, provider_id, resource_id, view_id, result);
+                self.apply_details_completed(
+                    request_id,
+                    provider_id,
+                    panel_id,
+                    resource_id,
+                    view_id,
+                    result,
+                );
                 Vec::new()
             }
         }
@@ -528,15 +538,12 @@ impl App {
                 let selected_still_exists =
                     provider.selected_resource.as_ref().is_some_and(|selected| {
                         snapshot
-                            .resources()
-                            .any(|resource| &resource.id == selected)
+                            .resource(&selected.panel_id, &selected.resource_id)
+                            .is_some()
                     });
                 if !selected_still_exists {
-                    provider.selected_resource = snapshot
-                        .panels
-                        .first()
-                        .and_then(|panel| panel.resources.first())
-                        .map(|resource| resource.id.clone());
+                    provider.selected_resource =
+                        snapshot.targets().next().map(|(target, _)| target);
                 }
                 provider.workspace_state = WorkspaceState::Ready(snapshot);
                 reconcile_detail_view(provider);
@@ -568,14 +575,23 @@ impl App {
             return Vec::new();
         };
         let resource_id = resource.id.clone();
+        let panel_id = provider
+            .selected_resource
+            .as_ref()
+            .expect("detail target has a selected Resource")
+            .panel_id
+            .clone();
         let resource_name = resource.name.clone();
         let describes_target = provider.details.as_ref().is_some_and(|details| {
-            details.resource_id == resource_id && details.view_id == view.id
+            details.panel_id == panel_id
+                && details.resource_id == resource_id
+                && details.view_id == view.id
         });
         // A request still in flight for this very target stays welcome; anything
         // else pending belongs to a target the user left.
         let pending_for_target = self.pending_details.as_ref().is_some_and(|pending| {
             pending.provider_id == provider_id
+                && pending.panel_id == panel_id
                 && pending.resource_id == resource_id
                 && pending.view_id == view.id
         });
@@ -595,6 +611,7 @@ impl App {
         }
 
         provider.details = Some(ResourceDetailsState {
+            panel_id: panel_id.clone(),
             resource_id: resource_id.clone(),
             resource_name,
             view_id: view.id.clone(),
@@ -607,12 +624,14 @@ impl App {
         self.pending_details = Some(PendingDetails {
             request_id,
             provider_id: provider_id.clone(),
+            panel_id: panel_id.clone(),
             resource_id: resource_id.clone(),
             view_id: view.id.clone(),
         });
         vec![ProviderRequest::LoadResourceDetails {
             request_id,
             provider_id,
+            panel_id,
             resource_id,
             view_id: view.id,
         }]
@@ -622,6 +641,7 @@ impl App {
         &mut self,
         request_id: ProviderRequestId,
         provider_id: ProviderId,
+        panel_id: ResourcePanelId,
         resource_id: ResourceId,
         view_id: DetailViewId,
         result: Result<ResourceDetails, WorkspaceError>,
@@ -629,6 +649,7 @@ impl App {
         let expected = PendingDetails {
             request_id,
             provider_id: provider_id.clone(),
+            panel_id,
             resource_id,
             view_id,
         };
@@ -714,16 +735,13 @@ impl App {
         else {
             return Vec::new();
         };
-        let Some(resource_id) = provider.selected_resource.clone() else {
+        let Some(target) = provider.selected_resource.clone() else {
             return Vec::new();
         };
         let WorkspaceState::Ready(snapshot) = &provider.workspace_state else {
             return Vec::new();
         };
-        let Some(resource) = snapshot
-            .resources()
-            .find(|resource| resource.id == resource_id)
-        else {
+        let Some(resource) = snapshot.resource(&target.panel_id, &target.resource_id) else {
             return Vec::new();
         };
         if !resource.available_commands.contains(&command) {
@@ -732,70 +750,58 @@ impl App {
         let provider_id = provider.id.clone();
         let provider_name = provider.name.clone();
         let resource_name = resource.name.clone();
-        let state = resource.state;
-        if command == ResourceCommand::Delete {
-            self.state.confirmation = Some(ResourceCommandConfirmation {
-                provider_id,
-                provider_name,
-                resource_id,
-                resource_name,
-                command,
-                state,
-            });
+        let Some(state) = resource.state else {
             return Vec::new();
-        }
-        self.dispatch_resource_command(
+        };
+        let panel_id = target.panel_id;
+        let resource_id = target.resource_id;
+        let target = ResourceCommandConfirmation {
             provider_id,
             provider_name,
+            panel_id,
             resource_id,
             resource_name,
             command,
             state,
-        )
+        };
+        if command == ResourceCommand::Delete {
+            self.state.confirmation = Some(target);
+            return Vec::new();
+        }
+        self.dispatch_resource_command(target)
     }
 
     fn confirm_resource_command(&mut self) -> Vec<ProviderRequest> {
         let Some(confirmation) = self.state.confirmation.take() else {
             return Vec::new();
         };
-        self.dispatch_resource_command(
-            confirmation.provider_id,
-            confirmation.provider_name,
-            confirmation.resource_id,
-            confirmation.resource_name,
-            confirmation.command,
-            confirmation.state,
-        )
+        self.dispatch_resource_command(confirmation)
     }
 
     fn dispatch_resource_command(
         &mut self,
-        provider_id: ProviderId,
-        provider_name: String,
-        resource_id: ResourceId,
-        resource_name: String,
-        command: ResourceCommand,
-        state: ResourceState,
+        target: ResourceCommandConfirmation,
     ) -> Vec<ProviderRequest> {
         self.state.command_error = None;
         let request_id = ProviderRequestId(self.next_request_id);
         self.next_request_id += 1;
         self.state.running_commands.push(RunningResourceCommand {
             request_id,
-            provider_id: provider_id.clone(),
-            provider_name,
-            resource_id: resource_id.clone(),
-            resource_name: resource_name.clone(),
-            command,
+            provider_id: target.provider_id.clone(),
+            provider_name: target.provider_name,
+            resource_id: target.resource_id.clone(),
+            resource_name: target.resource_name.clone(),
+            command: target.command,
         });
 
         vec![ProviderRequest::ExecuteResourceCommand {
             request_id,
-            provider_id,
-            resource_id,
-            resource_name,
-            command,
-            state,
+            provider_id: target.provider_id,
+            panel_id: target.panel_id,
+            resource_id: target.resource_id,
+            resource_name: target.resource_name,
+            command: target.command,
+            state: target.state,
         }]
     }
 
@@ -842,9 +848,7 @@ impl App {
         let WorkspaceState::Ready(snapshot) = &provider.workspace_state else {
             return None;
         };
-        snapshot
-            .resources()
-            .find(|resource| &resource.id == selected)
+        snapshot.resource(&selected.panel_id, &selected.resource_id)
     }
 
     fn refresh_active_provider(&mut self) -> Vec<ProviderRequest> {
@@ -879,20 +883,20 @@ impl App {
         let WorkspaceState::Ready(snapshot) = &provider.workspace_state else {
             return;
         };
-        let resources = snapshot.resources().collect::<Vec<_>>();
-        let Some(current) = provider.selected_resource.as_ref().and_then(|selected| {
-            resources
-                .iter()
-                .position(|resource| &resource.id == selected)
-        }) else {
-            provider.selected_resource = resources.first().map(|resource| resource.id.clone());
+        let resources = snapshot.targets().collect::<Vec<_>>();
+        let Some(current) = provider
+            .selected_resource
+            .as_ref()
+            .and_then(|selected| resources.iter().position(|(target, _)| target == selected))
+        else {
+            provider.selected_resource = resources.first().map(|(target, _)| target.clone());
             reconcile_detail_view(provider);
             return;
         };
         let next = current
             .saturating_add_signed(delta)
             .min(resources.len().saturating_sub(1));
-        provider.selected_resource = resources.get(next).map(|resource| resource.id.clone());
+        provider.selected_resource = resources.get(next).map(|(target, _)| target.clone());
         reconcile_detail_view(provider);
     }
 

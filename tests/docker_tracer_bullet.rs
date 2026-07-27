@@ -4,7 +4,7 @@ use virtui::{
     docker::DockerWorkspace,
     provider::{
         DetailViewId, ProviderRequest, ProviderWorkspace, ResourceCommand, ResourceId,
-        ResourceState, WorkspaceError, WorkspaceSnapshot,
+        ResourcePanelId, ResourceState, WorkspaceError, WorkspaceSnapshot,
     },
     ui::render_to_text,
 };
@@ -27,6 +27,13 @@ fn container_ls() -> ProcessSpec {
             "--format",
             "{{json .}}",
         ],
+    )
+}
+
+fn image_ls() -> ProcessSpec {
+    ProcessSpec::new(
+        "docker",
+        &["image", "ls", "--no-trunc", "--format", "{{json .}}"],
     )
 }
 
@@ -57,6 +64,7 @@ async fn docker_restart_generates_the_expected_cli_request() {
     DockerWorkspace
         .execute_command(
             &cli,
+            &ResourcePanelId::new("containers"),
             &ResourceId::new("container-a"),
             ResourceCommand::Restart,
             ResourceState::Running,
@@ -75,6 +83,7 @@ async fn docker_start_generates_the_expected_cli_request() {
     DockerWorkspace
         .execute_command(
             &cli,
+            &ResourcePanelId::new("containers"),
             &ResourceId::new("container-a"),
             ResourceCommand::Start,
             ResourceState::Stopped,
@@ -93,6 +102,7 @@ async fn docker_stop_generates_the_expected_cli_request() {
     DockerWorkspace
         .execute_command(
             &cli,
+            &ResourcePanelId::new("containers"),
             &ResourceId::new("container-a"),
             ResourceCommand::Stop,
             ResourceState::Running,
@@ -111,6 +121,7 @@ async fn docker_resume_generates_the_expected_cli_request() {
     DockerWorkspace
         .execute_command(
             &cli,
+            &ResourcePanelId::new("containers"),
             &ResourceId::new("container-a"),
             ResourceCommand::Resume,
             ResourceState::Paused,
@@ -129,6 +140,7 @@ async fn deleting_a_stopped_container_generates_the_expected_cli_request() {
     DockerWorkspace
         .execute_command(
             &cli,
+            &ResourcePanelId::new("containers"),
             &ResourceId::new("container-a"),
             ResourceCommand::Delete,
             ResourceState::Stopped,
@@ -150,6 +162,7 @@ async fn deleting_a_running_container_forces_removal_without_a_second_query() {
     DockerWorkspace
         .execute_command(
             &cli,
+            &ResourcePanelId::new("containers"),
             &ResourceId::new("container-a"),
             ResourceCommand::Delete,
             ResourceState::Running,
@@ -177,6 +190,7 @@ async fn deleting_a_container_that_is_not_stopped_forces_removal() {
         DockerWorkspace
             .execute_command(
                 &cli,
+                &ResourcePanelId::new("containers"),
                 &ResourceId::new("container-a"),
                 ResourceCommand::Delete,
                 state,
@@ -188,10 +202,13 @@ async fn deleting_a_container_that_is_not_stopped_forces_removal() {
 
 #[tokio::test]
 async fn docker_maps_every_container_state_into_the_shared_vocabulary() {
-    let cli = FixtureCli::new([(
-        container_ls(),
-        success(include_str!("fixtures/docker/mixed-state-containers.jsonl")),
-    )]);
+    let cli = FixtureCli::new([
+        (
+            container_ls(),
+            success(include_str!("fixtures/docker/mixed-state-containers.jsonl")),
+        ),
+        (image_ls(), success("")),
+    ]);
 
     let snapshot = DockerWorkspace
         .refresh(&cli)
@@ -200,7 +217,12 @@ async fn docker_maps_every_container_state_into_the_shared_vocabulary() {
 
     let states = snapshot
         .resources()
-        .map(|resource| (resource.id.0.as_str(), resource.state))
+        .map(|resource| {
+            (
+                resource.id.0.as_str(),
+                resource.state.expect("containers have lifecycle state"),
+            )
+        })
         .collect::<Vec<_>>();
     assert_eq!(
         states,
@@ -222,10 +244,13 @@ async fn docker_maps_every_container_state_into_the_shared_vocabulary() {
 /// other state may offer the Command that runs it.
 #[tokio::test]
 async fn only_a_paused_container_offers_the_resume_command() {
-    let cli = FixtureCli::new([(
-        container_ls(),
-        success(include_str!("fixtures/docker/mixed-state-containers.jsonl")),
-    )]);
+    let cli = FixtureCli::new([
+        (
+            container_ls(),
+            success(include_str!("fixtures/docker/mixed-state-containers.jsonl")),
+        ),
+        (image_ls(), success("")),
+    ]);
 
     let snapshot = DockerWorkspace
         .refresh(&cli)
@@ -257,10 +282,13 @@ async fn only_a_paused_container_offers_the_resume_command() {
 /// offer them without knowing what a container is.
 #[tokio::test]
 async fn the_containers_panel_declares_dockers_native_detail_views() {
-    let cli = FixtureCli::new([(
-        container_ls(),
-        success(include_str!("fixtures/docker/containers.jsonl")),
-    )]);
+    let cli = FixtureCli::new([
+        (
+            container_ls(),
+            success(include_str!("fixtures/docker/containers.jsonl")),
+        ),
+        (image_ls(), success("")),
+    ]);
 
     let snapshot = DockerWorkspace
         .refresh(&cli)
@@ -308,6 +336,7 @@ async fn each_detail_view_runs_its_own_docker_command() {
         let details = DockerWorkspace
             .load_details(
                 &cli,
+                &ResourcePanelId::new("containers"),
                 &ResourceId::new("container-a"),
                 &DetailViewId::new(view),
             )
@@ -336,6 +365,7 @@ async fn container_logs_include_what_the_container_wrote_to_stderr() {
     let details = DockerWorkspace
         .load_details(
             &cli,
+            &ResourcePanelId::new("containers"),
             &ResourceId::new("container-a"),
             &DetailViewId::new("logs"),
         )
@@ -361,6 +391,7 @@ async fn a_container_that_has_logged_nothing_loads_empty_details() {
     let details = DockerWorkspace
         .load_details(
             &cli,
+            &ResourcePanelId::new("containers"),
             &ResourceId::new("container-a"),
             &DetailViewId::new("logs"),
         )
@@ -380,6 +411,7 @@ async fn a_failed_detail_view_reports_what_docker_wrote_to_stderr() {
     let error = DockerWorkspace
         .load_details(
             &cli,
+            &ResourcePanelId::new("containers"),
             &ResourceId::new("container-a"),
             &DetailViewId::new("inspect"),
         )
@@ -401,6 +433,7 @@ async fn inspect_output_reaches_the_panel_line_for_line() {
     let details = DockerWorkspace
         .load_details(
             &cli,
+            &ResourcePanelId::new("containers"),
             &ResourceId::new("container-a"),
             &DetailViewId::new("inspect"),
         )
@@ -428,6 +461,7 @@ async fn a_detail_view_docker_never_declared_is_refused_without_running_anything
     let error = DockerWorkspace
         .load_details(
             &cli,
+            &ResourcePanelId::new("containers"),
             &ResourceId::new("container-a"),
             &DetailViewId::new("processes"),
         )
@@ -453,6 +487,7 @@ async fn a_detail_view_loaded_without_the_docker_cli_names_docker() {
     let error = DockerWorkspace
         .load_details(
             &cli,
+            &ResourcePanelId::new("containers"),
             &ResourceId::new("container-a"),
             &DetailViewId::new("logs"),
         )
@@ -475,6 +510,7 @@ async fn a_silent_detail_failure_names_the_view_and_container() {
     let error = DockerWorkspace
         .load_details(
             &cli,
+            &ResourcePanelId::new("containers"),
             &ResourceId::new("container-a"),
             &DetailViewId::new("stats"),
         )
@@ -497,6 +533,7 @@ async fn a_silent_command_failure_names_the_operation_and_container() {
     let error = DockerWorkspace
         .execute_command(
             &cli,
+            &ResourcePanelId::new("containers"),
             &ResourceId::new("container-a"),
             ResourceCommand::Restart,
             ResourceState::Running,
@@ -522,6 +559,7 @@ async fn a_failed_command_reports_what_docker_wrote_to_stderr() {
     let error = DockerWorkspace
         .execute_command(
             &cli,
+            &ResourcePanelId::new("containers"),
             &ResourceId::new("container-a"),
             ResourceCommand::Delete,
             ResourceState::Stopped,
@@ -556,6 +594,7 @@ async fn discovered_docker_workspace_renders_target_environment_and_containers()
             ),
             success(include_str!("fixtures/docker/containers.jsonl")),
         ),
+        (image_ls(), success("")),
     ]);
     let docker = DockerWorkspace;
 
@@ -606,6 +645,7 @@ async fn reachable_docker_without_containers_renders_a_distinct_empty_state() {
             ),
             success(""),
         ),
+        (image_ls(), success("")),
     ]);
     let docker = DockerWorkspace;
     let discovered = docker.discover(&cli).await.expect("Docker is installed");

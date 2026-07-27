@@ -7,7 +7,7 @@ use virtui::{
     docker_sandbox::DockerSandboxWorkspace,
     provider::{
         DetailViewId, ProviderId, ProviderRequest, ProviderWorkspace, ResourceCommand, ResourceId,
-        ResourceState, WorkspaceError, WorkspaceSnapshot,
+        ResourcePanelId, ResourceState, WorkspaceError, WorkspaceSnapshot,
     },
     runtime::ProviderRuntime,
     ui::render_to_text,
@@ -57,6 +57,7 @@ async fn sandboxes_become_resources_identified_by_name() {
         .expect("the fixture lists sandboxes");
 
     let panel = snapshot.panels.first().expect("a Sandboxes panel");
+    assert_eq!(panel.id, ResourcePanelId::new("sandboxes"));
     assert_eq!(panel.title, "Sandboxes");
     assert_eq!(
         panel
@@ -66,7 +67,7 @@ async fn sandboxes_become_resources_identified_by_name() {
                 resource.id.0.as_str(),
                 resource.name.as_str(),
                 resource.status.as_deref(),
-                resource.state
+                resource.state.expect("sandboxes have lifecycle state")
             ))
             .collect::<Vec<_>>(),
         [
@@ -106,7 +107,12 @@ async fn docker_sandbox_maps_every_status_into_the_shared_vocabulary() {
     assert_eq!(
         snapshot
             .resources()
-            .map(|resource| (resource.name.as_str(), resource.state))
+            .map(|resource| {
+                (
+                    resource.name.as_str(),
+                    resource.state.expect("sandboxes have lifecycle state"),
+                )
+            })
             .collect::<Vec<_>>(),
         [
             ("running-sandbox", ResourceState::Running),
@@ -192,6 +198,7 @@ async fn starting_a_sandbox_generates_the_expected_cli_request() {
     DockerSandboxWorkspace
         .execute_command(
             &cli,
+            &ResourcePanelId::new("sandboxes"),
             &ResourceId::new("shell-dotfiles"),
             ResourceCommand::Start,
             ResourceState::Stopped,
@@ -210,6 +217,7 @@ async fn stopping_a_sandbox_generates_the_expected_cli_request() {
     DockerSandboxWorkspace
         .execute_command(
             &cli,
+            &ResourcePanelId::new("sandboxes"),
             &ResourceId::new("claude-virtui"),
             ResourceCommand::Stop,
             ResourceState::Running,
@@ -240,6 +248,7 @@ async fn deleting_a_sandbox_always_forces_regardless_of_state() {
         DockerSandboxWorkspace
             .execute_command(
                 &cli,
+                &ResourcePanelId::new("sandboxes"),
                 &ResourceId::new("claude-virtui"),
                 ResourceCommand::Delete,
                 state,
@@ -260,6 +269,7 @@ async fn a_command_sbx_cannot_perform_is_refused_without_running_anything() {
         let error = DockerSandboxWorkspace
             .execute_command(
                 &cli,
+                &ResourcePanelId::new("sandboxes"),
                 &ResourceId::new("claude-virtui"),
                 command,
                 ResourceState::Running,
@@ -500,7 +510,13 @@ async fn deleting_a_sandbox_confirms_first_and_then_runs_the_expected_cli_reques
         success(""),
     )]);
     sandboxes
-        .execute_command(&executing, &resource_id, command, state)
+        .execute_command(
+            &executing,
+            &ResourcePanelId::new("sandboxes"),
+            &resource_id,
+            command,
+            state,
+        )
         .await
         .expect("the confirmed deletion succeeds");
 }
@@ -552,6 +568,7 @@ async fn a_failed_command_reports_what_sbx_wrote_to_stderr() {
     let error = DockerSandboxWorkspace
         .execute_command(
             &cli,
+            &ResourcePanelId::new("sandboxes"),
             &ResourceId::new("claude-virtui"),
             ResourceCommand::Stop,
             ResourceState::Running,
@@ -578,6 +595,7 @@ async fn a_silent_command_failure_names_the_provider_command_and_sandbox() {
     let error = DockerSandboxWorkspace
         .execute_command(
             &cli,
+            &ResourcePanelId::new("sandboxes"),
             &ResourceId::new("claude-virtui"),
             ResourceCommand::Delete,
             ResourceState::Running,
@@ -629,6 +647,7 @@ async fn the_info_view_describes_the_selected_sandbox() {
     let details = DockerSandboxWorkspace
         .load_details(
             &cli,
+            &ResourcePanelId::new("sandboxes"),
             &ResourceId::new("claude-virtui"),
             &DetailViewId::new("info"),
         )
@@ -662,6 +681,7 @@ async fn the_info_view_omits_ports_a_sandbox_does_not_publish() {
     let details = DockerSandboxWorkspace
         .load_details(
             &cli,
+            &ResourcePanelId::new("sandboxes"),
             &ResourceId::new("shell-dotfiles"),
             &DetailViewId::new("info"),
         )
@@ -693,6 +713,7 @@ async fn the_info_view_of_a_vanished_sandbox_is_empty_rather_than_broken() {
     let details = DockerSandboxWorkspace
         .load_details(
             &cli,
+            &ResourcePanelId::new("sandboxes"),
             &ResourceId::new("deleted-since-the-last-refresh"),
             &DetailViewId::new("info"),
         )
@@ -711,6 +732,7 @@ async fn a_view_docker_sandbox_never_declared_is_refused_without_running_anythin
     let error = DockerSandboxWorkspace
         .load_details(
             &cli,
+            &ResourcePanelId::new("sandboxes"),
             &ResourceId::new("claude-virtui"),
             &DetailViewId::new("logs"),
         )
@@ -733,6 +755,7 @@ async fn a_failed_info_view_reports_what_sbx_wrote_to_stderr() {
     let error = DockerSandboxWorkspace
         .load_details(
             &cli,
+            &ResourcePanelId::new("sandboxes"),
             &ResourceId::new("claude-virtui"),
             &DetailViewId::new("info"),
         )
