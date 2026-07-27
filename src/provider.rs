@@ -1,6 +1,6 @@
 use std::{fmt, future::Future, pin::Pin};
 
-use crate::cli::CliRunner;
+use crate::cli::{CliRunner, ProcessError};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct ProviderId(pub String);
@@ -256,6 +256,27 @@ impl WorkspaceError {
         Self {
             message: message.into(),
         }
+    }
+
+    /// Attaches the Provider's suggested next step to a message.
+    pub fn with_help(message: impl AsRef<str>, help: &str) -> Self {
+        Self::new(format!("{}. {help}", message.as_ref()))
+    }
+}
+
+/// What a Provider CLI left behind, with no suggested next step attached.
+///
+/// `fallback` carries the caller's meaning for a process that failed without
+/// writing anything at all.
+pub fn provider_cli_error(provider_name: &str, error: &ProcessError, fallback: &str) -> String {
+    match error {
+        ProcessError::ExecutableNotFound => {
+            format!("{provider_name} CLI is no longer available")
+        }
+        ProcessError::SpawnFailed(reason) => {
+            format!("{provider_name} CLI could not be started: {reason}")
+        }
+        ProcessError::Exited(failure) => failure.message_or(fallback),
     }
 }
 

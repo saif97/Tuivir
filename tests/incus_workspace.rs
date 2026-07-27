@@ -1,13 +1,8 @@
-use std::{
-    collections::VecDeque,
-    future::Future,
-    pin::Pin,
-    sync::{Arc, Mutex},
-};
+use std::sync::Arc;
 
 use virtui::{
     app::{App, AppEvent},
-    cli::{CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec},
+    cli::{ProcessError, ProcessOutput, ProcessSpec},
     incus::IncusWorkspace,
     provider::{
         DetailViewId, ProviderRequest, ProviderWorkspace, ResourceCommand, ResourceId,
@@ -17,67 +12,11 @@ use virtui::{
     ui::render_to_text,
 };
 
-struct FixtureCli {
-    responses: Mutex<VecDeque<(ProcessSpec, Result<ProcessOutput, ProcessError>)>>,
-}
-
-impl FixtureCli {
-    fn new(
-        responses: impl IntoIterator<Item = (ProcessSpec, Result<ProcessOutput, ProcessError>)>,
-    ) -> Self {
-        Self {
-            responses: Mutex::new(responses.into_iter().collect()),
-        }
-    }
-}
-
-impl CliRunner for FixtureCli {
-    fn run<'a>(
-        &'a self,
-        command: ProcessSpec,
-    ) -> Pin<Box<dyn Future<Output = Result<ProcessOutput, ProcessError>> + Send + 'a>> {
-        Box::pin(async move {
-            let (expected, response) = self
-                .responses
-                .lock()
-                .expect("fixture queue lock")
-                .pop_front()
-                .expect("unexpected CLI command");
-            assert_eq!(command, expected);
-            response
-        })
-    }
-}
-
-fn success(stdout: &str) -> Result<ProcessOutput, ProcessError> {
-    Ok(ProcessOutput {
-        stdout: stdout.to_owned(),
-        stderr: String::new(),
-    })
-}
-
-fn failure(stderr: &str) -> Result<ProcessOutput, ProcessError> {
-    Err(ProcessError::Exited(ProcessFailure {
-        exit_code: Some(1),
-        stdout: String::new(),
-        stderr: stderr.to_owned(),
-    }))
-}
-
-fn failure_on_stdout(stdout: &str) -> Result<ProcessOutput, ProcessError> {
-    Err(ProcessError::Exited(ProcessFailure {
-        exit_code: Some(1),
-        stdout: stdout.to_owned(),
-        stderr: String::new(),
-    }))
-}
+mod common;
+use common::{FixtureCli, failure, failure_on_stdout, success};
 
 fn silent_failure() -> Result<ProcessOutput, ProcessError> {
-    Err(ProcessError::Exited(ProcessFailure {
-        exit_code: Some(1),
-        stdout: String::new(),
-        stderr: String::new(),
-    }))
+    common::silent_failure(1)
 }
 
 fn refresh_completed(
@@ -789,6 +728,10 @@ async fn runtime_with_builtin_providers_discovers_installed_incus() {
         (
             ProcessSpec::new("incus", &["project", "get-current"]),
             success("default\n"),
+        ),
+        (
+            ProcessSpec::new("sbx", &["version"]),
+            Err(ProcessError::ExecutableNotFound),
         ),
     ]);
     let runtime = ProviderRuntime::with_builtin_providers(Arc::new(cli));

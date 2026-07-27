@@ -1,0 +1,30 @@
+{
+  "sandboxes": [
+    {
+      "name": "claude-virtui",
+      "id": "3f2a1c88-91b4-4d0e-9c77-1e5b0a6d2f43",
+      "agent": "claude",
+      "status": "running",
+      "ports": [
+        {
+          "host_ip": "127.0.0.1",
+          "host_port": 32768,
+          "sandbox_port": 9418,
+          "protocol": "tcp"
+        }
+      ],
+      "workspaces": [
+        "/home/vibebox/projects/virtui"
+      ]
+    },
+    {
+      "name": "shell-dotfiles",
+      "id": "64081868-4588-4205-8edd-3a2e8e253a95",
+      "agent": "shell",
+      "status": "stopped",
+      "workspaces": [
+        "/home/vibebox/dotfiles"
+      ]
+    }
+  ]
+}
