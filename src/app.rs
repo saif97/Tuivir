@@ -155,6 +155,22 @@ impl ProviderState {
 /// height to take a page from.
 const DETAIL_SCROLL_LINES: isize = 10;
 
+/// One sentence for every operation Virtui asked a Provider for and did not
+/// get.
+///
+/// Lifecycle Commands and Interactive Shells fail in different places and are
+/// worded by different code, but they identify their target the same way, so
+/// the user reads one sentence rather than two dialects of one.
+fn operation_failure(
+    provider_name: &str,
+    operation: &str,
+    resource_name: &str,
+    resource_id: &ResourceId,
+    reason: &str,
+) -> String {
+    format!("{provider_name} {operation} failed for {resource_name} ({resource_id}): {reason}")
+}
+
 /// Keeps the visible detail view among the ones currently offered, falling back
 /// to the first when the selected Resource's panel does not declare it.
 fn reconcile_detail_view(provider: &mut ProviderState) {
@@ -239,9 +255,10 @@ pub struct RunningResourceCommand {
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// One Interactive Shell the application wants the terminal for.
 ///
-/// The Provider and Resource travel with the process so a shell that never
-/// starts can be reported against what it was opened for, long after the
-/// selection may have moved on.
+/// The Provider and Resource travel with the process because the application
+/// state cannot be consulted for them: by the time the shell ends, the shell
+/// has been taken out of the state and the refreshed snapshot may no longer
+/// contain the Resource at all.
 pub struct PendingShell {
     pub provider_id: ProviderId,
     pub provider_name: String,
@@ -722,9 +739,12 @@ impl App {
         };
         let provider_name = running.provider_name;
         if let Err(error) = result {
-            self.state.command_error = Some(format!(
-                "{provider_name} {command} failed for {resource_name} ({resource_id}): {}",
-                error.message
+            self.state.command_error = Some(operation_failure(
+                &provider_name,
+                &command.to_string(),
+                &resource_name,
+                &resource_id,
+                &error.message,
             ));
             return Vec::new();
         }
@@ -745,25 +765,25 @@ impl App {
 
     /// Brings the Active Workspace back into line with whatever the user did
     /// inside the shell.
+    ///
+    /// Only the Active Workspace is asked, and it is always the one the shell
+    /// was opened in: the handover blocks the event loop from the moment the
+    /// shell is taken until this runs, so nothing can have moved in between.
     fn apply_shell_closed(
         &mut self,
         shell: PendingShell,
         result: Result<(), ProcessError>,
     ) -> Vec<ProviderRequest> {
-        self.state.command_error = match result {
-            Ok(()) => None,
-            Err(error) => Some(format!(
-                "{} shell failed for {} ({}): {}",
-                shell.provider_name,
-                shell.resource_name,
-                shell.resource_id,
-                error.summary()
-            )),
-        };
-        // A shell opened in a Provider Workspace the user has since left has
-        // nothing to say about the one they are looking at now.
-        if !self.is_active_provider(&shell.provider_id) {
-            return Vec::new();
+        // Only a failure is reported. A shell that ran has nothing to say, and
+        // clearing here would dismiss a failure the user has not read yet.
+        if let Err(error) = result {
+            self.state.command_error = Some(operation_failure(
+                &shell.provider_name,
+                "shell",
+                &shell.resource_name,
+                &shell.resource_id,
+                &error.summary(),
+            ));
         }
         self.refresh_active_provider()
     }
