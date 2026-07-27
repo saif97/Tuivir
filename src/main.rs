@@ -8,7 +8,11 @@ use std::{
     time::Duration,
 };
 
-use crossterm::event::{self, Event, KeyEvent};
+use crossterm::{
+    event::{self, Event, KeyEvent},
+    execute,
+    terminal::{EnterAlternateScreen, enable_raw_mode},
+};
 use ratatui::DefaultTerminal;
 use tokio::sync::mpsc;
 use virtui::{
@@ -71,10 +75,23 @@ async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::R
                 // this loop until the shell exits, which is the point: Virtui
                 // has no screen to draw on until it comes back.
                 let mut host = Host { terminal: &mut *terminal, input: &mut input };
-                match open_pending_shell(&mut app, &mut host, &TokioCliRunner) {
+                // `block_in_place` moves the rest of this worker's tasks
+                // elsewhere for the duration, so provider work already in flight
+                // keeps running while the shell holds the terminal. It also
+                // makes the multi-threaded runtime a stated requirement rather
+                // than a silent one: it panics on a current-thread runtime.
+                let handover = tokio::task::block_in_place(|| {
+                    open_pending_shell(&mut app, &mut host, &TokioCliRunner)
+                });
+                match handover {
                     Ok(requests) => dispatch_all(&runtime, &completion_tx, requests),
                     Err(error) => break Err(error),
                 }
+                // Anything typed while the shell owned the terminal was meant
+                // for the shell. The reader is stopped with a polled flag, so it
+                // can publish one last key after the handover began; dropping
+                // whatever queued up keeps it from acting on Virtui instead.
+                while key_rx.try_recv().is_ok() {}
             }
             Some(event) = completion_rx.recv() => {
                 let requests = app.update(event);
@@ -106,9 +123,21 @@ impl ShellTerminal for Host<'_> {
     }
 
     fn resume(&mut self) -> io::Result<()> {
-        *self.terminal = ratatui::try_init()?;
+        // Undoing exactly what `try_restore` did, rather than building a second
+        // terminal with `try_init`: that installs a panic hook wrapping the
+        // previous one, so a session with several shells in it would nest a
+        // fresh hook per shell. The terminal Virtui already has is still good —
+        // only raw mode and the alternate screen were given away.
+        enable_raw_mode()?;
+        execute!(io::stdout(), EnterAlternateScreen)?;
         // The shell wrote all over the screen Virtui last drew, so nothing that
-        // survives the handover is worth keeping.
+        // survives the handover is worth keeping — and without this the next
+        // draw would diff against a buffer describing a screen that is gone.
+        //
+        // Clearing asks the terminal where its cursor is and waits for the
+        // answer, which is why reading must not start until it has come back:
+        // an input thread would take that answer for a keystroke and leave the
+        // clear waiting for a reply that has already been eaten.
         self.terminal.clear()?;
         self.input.start_again();
         Ok(())
