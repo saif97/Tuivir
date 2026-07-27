@@ -1428,6 +1428,7 @@ fn container_snapshot(
                     state,
                     fields: vec![("Image".to_owned(), (*image).to_owned())],
                     available_commands: available_commands.clone(),
+                    shell: None,
                 })
                 .collect(),
         }],
@@ -1466,6 +1467,7 @@ fn incus_snapshot(instances: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
                         } else {
                             vec![ResourceCommand::Start, ResourceCommand::Delete]
                         },
+                        shell: None,
                     }
                 })
                 .collect(),

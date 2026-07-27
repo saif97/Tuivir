@@ -276,6 +276,39 @@ async fn docker_maps_every_container_state_into_the_shared_vocabulary() {
     );
 }
 
+/// `docker exec` attaches only to a running container, so no other state may
+/// carry the Interactive Shell that runs it. A container without one offers the
+/// operation nowhere, which is how an unsupported shell stays absent.
+#[tokio::test]
+async fn only_a_running_container_carries_an_interactive_shell() {
+    let cli = FixtureCli::new([(
+        container_ls(),
+        success(include_str!("fixtures/docker/mixed-state-containers.jsonl")),
+    )]);
+
+    let snapshot = DockerWorkspace
+        .refresh(&cli)
+        .await
+        .expect("fixture lists containers");
+
+    let shells = snapshot
+        .resources()
+        .filter_map(|resource| {
+            resource
+                .shell
+                .as_ref()
+                .map(|shell| (resource.id.0.as_str(), shell.clone()))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        shells,
+        [(
+            "container-running",
+            ProcessSpec::new("docker", &["exec", "-it", "container-running", "/bin/sh"]),
+        )]
+    );
+}
+
 /// `docker container unpause` succeeds only against a paused container, so no
 /// other state may offer the Command that runs it.
 #[tokio::test]

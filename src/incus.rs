@@ -116,6 +116,7 @@ impl ProviderWorkspace for IncusWorkspace {
                             ("Location".to_owned(), row.location),
                         ],
                         available_commands,
+                        shell: None,
                     }
                 })
                 .collect();
