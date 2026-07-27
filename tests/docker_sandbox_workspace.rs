@@ -203,6 +203,24 @@ async fn starting_a_sandbox_generates_the_expected_cli_request() {
         .expect("Docker Sandbox start succeeds");
 }
 
+#[tokio::test]
+async fn stopping_a_sandbox_generates_the_expected_cli_request() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("sbx", &["stop", "claude-virtui"]),
+        success(""),
+    )]);
+
+    DockerSandboxWorkspace
+        .execute_command(
+            &cli,
+            &ResourceId::new("claude-virtui"),
+            ResourceCommand::Stop,
+            ResourceState::Running,
+        )
+        .await
+        .expect("Docker Sandbox stop succeeds");
+}
+
 fn failure(stderr: &str) -> Result<ProcessOutput, ProcessError> {
     Err(ProcessError::Exited(ProcessFailure {
         exit_code: Some(1),
