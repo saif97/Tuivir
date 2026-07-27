@@ -37,8 +37,8 @@ struct SandboxRow {
     agent: String,
     status: String,
     /// Host paths mounted into the sandbox.
-    #[serde(default)]
-    workspaces: Vec<String>,
+    #[serde(default, rename = "workspaces")]
+    sbx_workspaces: Vec<String>,
     /// Published ports. sbx reports these only for a running sandbox, so a
     /// stopped row omits the key entirely.
     #[serde(default)]
@@ -62,8 +62,8 @@ fn sandbox_fields(row: &SandboxRow) -> Vec<(String, String)> {
         ("Agent".to_owned(), row.agent.clone()),
         ("ID".to_owned(), row.id.clone()),
     ];
-    if !row.workspaces.is_empty() {
-        fields.push(("Workspaces".to_owned(), row.workspaces.join(", ")));
+    if !row.sbx_workspaces.is_empty() {
+        fields.push(("Workspaces".to_owned(), row.sbx_workspaces.join(", ")));
     }
     fields
 }
@@ -79,9 +79,9 @@ fn sandbox_info(row: &SandboxRow) -> Vec<String> {
         format!("Agent: {}", row.agent),
         format!("Status: {}", row.status),
     ];
-    if !row.workspaces.is_empty() {
+    if !row.sbx_workspaces.is_empty() {
         lines.push("Workspaces:".to_owned());
-        lines.extend(row.workspaces.iter().map(|path| format!("  {path}")));
+        lines.extend(row.sbx_workspaces.iter().map(|path| format!("  {path}")));
     }
     if !row.ports.is_empty() {
         lines.push("Ports:".to_owned());
