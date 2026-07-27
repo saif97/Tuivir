@@ -277,6 +277,70 @@ async fn the_info_view_omits_ports_a_sandbox_does_not_publish() {
     );
 }
 
+/// A sandbox deleted between the last refresh and opening its Info view is an
+/// empty view, not a failure: the panel is about to drop it anyway.
+#[tokio::test]
+async fn the_info_view_of_a_vanished_sandbox_is_empty_rather_than_broken() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("sbx", &["ls", "--json"]),
+        success(include_str!("fixtures/docker-sandbox/sandboxes.json")),
+    )]);
+
+    let details = DockerSandboxWorkspace
+        .load_details(
+            &cli,
+            &ResourceId::new("deleted-since-the-last-refresh"),
+            &DetailViewId::new("info"),
+        )
+        .await
+        .expect("a sandbox that is gone is not a provider failure");
+
+    assert!(details.is_empty());
+}
+
+/// The fixture panics on any CLI request, so a view resolved to a command
+/// would fail here rather than return.
+#[tokio::test]
+async fn a_view_docker_sandbox_never_declared_is_refused_without_running_anything() {
+    let cli = FixtureCli::new([]);
+
+    let error = DockerSandboxWorkspace
+        .load_details(
+            &cli,
+            &ResourceId::new("claude-virtui"),
+            &DetailViewId::new("logs"),
+        )
+        .await
+        .expect_err("Docker Sandbox declares no logs view");
+
+    assert_eq!(
+        error.message,
+        "Docker Sandbox has no logs view for sandbox claude-virtui"
+    );
+}
+
+#[tokio::test]
+async fn a_failed_info_view_reports_what_sbx_wrote_to_stderr() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("sbx", &["ls", "--json"]),
+        failure("Error: sandboxd is not running"),
+    )]);
+
+    let error = DockerSandboxWorkspace
+        .load_details(
+            &cli,
+            &ResourceId::new("claude-virtui"),
+            &DetailViewId::new("info"),
+        )
+        .await
+        .expect_err("a non-zero exit is never loaded details");
+
+    assert_eq!(
+        error.message,
+        "Error: sandboxd is not running. Run `sbx ls` to verify access to the current Target Environment."
+    );
+}
+
 #[tokio::test]
 async fn a_failed_sandbox_refresh_identifies_the_command_and_target() {
     let cli = FixtureCli::new([(
