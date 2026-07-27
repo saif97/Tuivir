@@ -32,6 +32,45 @@ struct SandboxRow {
     /// Host paths mounted into the sandbox.
     #[serde(default)]
     workspaces: Vec<String>,
+    /// Published ports. sbx reports these only for a running sandbox, so a
+    /// stopped row omits the key entirely.
+    #[serde(default)]
+    ports: Vec<SandboxPort>,
+}
+
+#[derive(Deserialize)]
+struct SandboxPort {
+    host_ip: String,
+    host_port: u16,
+    sandbox_port: u16,
+    protocol: String,
+}
+
+/// Lays a sandbox's `sbx ls --json` row out for reading.
+///
+/// sbx has no per-sandbox inspect command, so this row is everything it knows;
+/// a section it has nothing for is left out rather than shown empty.
+fn sandbox_info(row: &SandboxRow) -> Vec<String> {
+    let mut lines = vec![
+        format!("Name: {}", row.name),
+        format!("ID: {}", row.id),
+        format!("Agent: {}", row.agent),
+        format!("Status: {}", row.status),
+    ];
+    if !row.workspaces.is_empty() {
+        lines.push("Workspaces:".to_owned());
+        lines.extend(row.workspaces.iter().map(|path| format!("  {path}")));
+    }
+    if !row.ports.is_empty() {
+        lines.push("Ports:".to_owned());
+        lines.extend(row.ports.iter().map(|port| {
+            format!(
+                "  {}:{} -> {}/{}",
+                port.host_ip, port.host_port, port.sandbox_port, port.protocol
+            )
+        }));
+    }
+    lines
 }
 
 /// Runs `sbx ls --json` and parses the one object it wraps its rows in.
@@ -209,10 +248,28 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
 
     fn load_details<'a>(
         &'a self,
-        _cli: &'a dyn CliRunner,
-        _resource_id: &'a ResourceId,
-        _view_id: &'a DetailViewId,
+        cli: &'a dyn CliRunner,
+        resource_id: &'a ResourceId,
+        view_id: &'a DetailViewId,
     ) -> Pin<Box<dyn Future<Output = Result<ResourceDetails, WorkspaceError>> + Send + 'a>> {
-        Box::pin(async move { Err(WorkspaceError::new("not implemented")) })
+        Box::pin(async move {
+            if view_id.0 != "info" {
+                return Err(WorkspaceError::new(format!(
+                    "Docker Sandbox has no {view_id} view for sandbox {resource_id}"
+                )));
+            }
+            let listing = list_sandboxes(cli).await?;
+            let Some(row) = listing
+                .sandboxes
+                .into_iter()
+                .find(|row| row.name == resource_id.0)
+            else {
+                // The sandbox was listed at the last refresh and is gone now.
+                // That is an empty view, not a failure: the panel is about to
+                // drop it anyway.
+                return Ok(ResourceDetails::default());
+            };
+            Ok(ResourceDetails::from_lines(sandbox_info(&row)))
+        })
     }
 }

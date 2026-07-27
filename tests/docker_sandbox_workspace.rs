@@ -3,7 +3,7 @@ use std::{collections::VecDeque, future::Future, pin::Pin, sync::Mutex};
 use virtui::{
     cli::{CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec},
     docker_sandbox::DockerSandboxWorkspace,
-    provider::{ProviderId, ProviderWorkspace, ResourceState},
+    provider::{DetailViewId, ProviderId, ProviderWorkspace, ResourceId, ResourceState},
 };
 
 struct FixtureCli {
@@ -210,6 +210,70 @@ async fn the_sandboxes_panel_declares_only_the_info_view() {
             .map(|view| (view.id.0.as_str(), view.title.as_str()))
             .collect::<Vec<_>>(),
         [("info", "Info")]
+    );
+}
+
+/// sbx has no per-sandbox inspect command, so Info is the sandbox's own row
+/// from `sbx ls --json` — everything sbx knows about it — laid out for reading.
+#[tokio::test]
+async fn the_info_view_describes_the_selected_sandbox() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("sbx", &["ls", "--json"]),
+        success(include_str!("fixtures/docker-sandbox/sandboxes.json")),
+    )]);
+
+    let details = DockerSandboxWorkspace
+        .load_details(
+            &cli,
+            &ResourceId::new("claude-virtui"),
+            &DetailViewId::new("info"),
+        )
+        .await
+        .expect("the fixture lists claude-virtui");
+
+    assert_eq!(
+        details.lines,
+        [
+            "Name: claude-virtui",
+            "ID: 3f2a1c88-91b4-4d0e-9c77-1e5b0a6d2f43",
+            "Agent: claude",
+            "Status: running",
+            "Workspaces:",
+            "  /home/vibebox/projects/virtui",
+            "Ports:",
+            "  127.0.0.1:32768 -> 9418/tcp",
+        ]
+    );
+}
+
+/// A stopped sandbox publishes nothing, so the Ports section is absent rather
+/// than present and empty.
+#[tokio::test]
+async fn the_info_view_omits_ports_a_sandbox_does_not_publish() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("sbx", &["ls", "--json"]),
+        success(include_str!("fixtures/docker-sandbox/sandboxes.json")),
+    )]);
+
+    let details = DockerSandboxWorkspace
+        .load_details(
+            &cli,
+            &ResourceId::new("shell-dotfiles"),
+            &DetailViewId::new("info"),
+        )
+        .await
+        .expect("the fixture lists shell-dotfiles");
+
+    assert_eq!(
+        details.lines,
+        [
+            "Name: shell-dotfiles",
+            "ID: 64081868-4588-4205-8edd-3a2e8e253a95",
+            "Agent: shell",
+            "Status: stopped",
+            "Workspaces:",
+            "  /home/vibebox/dotfiles",
+        ]
     );
 }
 
