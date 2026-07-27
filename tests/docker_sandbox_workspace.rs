@@ -381,6 +381,39 @@ async fn discovered_docker_sandbox_renders_target_environment_and_sandboxes() {
     assert!(screen.contains("Agent: claude"), "{screen}");
 }
 
+/// A user who has never created a sandbox sees an empty workspace, which must
+/// not be confused with an sbx that could not be reached.
+#[tokio::test]
+async fn reachable_docker_sandbox_without_sandboxes_renders_a_distinct_empty_state() {
+    let empty = r#"{"sandboxes": []}"#;
+    let cli = FixtureCli::new([
+        (
+            ProcessSpec::new("sbx", &["version"]),
+            success("sbx version: v0.37.0 8b65b864b0d49c29f05a55170d6b5eea4c0d11e7\n"),
+        ),
+        (ProcessSpec::new("sbx", &["ls", "--json"]), success(empty)),
+        (ProcessSpec::new("sbx", &["ls", "--json"]), success(empty)),
+    ]);
+    let sandboxes = DockerSandboxWorkspace;
+
+    let discovered = sandboxes.discover(&cli).await.expect("sbx is installed");
+    let mut app = App::new();
+    let request = app
+        .update(AppEvent::ProviderDiscovered(discovered))
+        .into_iter()
+        .next()
+        .expect("initial refresh");
+    app.update(refresh_completed(request, sandboxes.refresh(&cli).await));
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(screen.contains("Target: v0.37.0"), "{screen}");
+    assert!(
+        screen.contains("No Docker Sandbox sandboxes found"),
+        "{screen}"
+    );
+    assert!(!screen.contains("unavailable"), "{screen}");
+}
+
 fn failure(stderr: &str) -> Result<ProcessOutput, ProcessError> {
     Err(ProcessError::Exited(ProcessFailure {
         exit_code: Some(1),
