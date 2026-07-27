@@ -417,6 +417,41 @@ async fn incus_maps_every_instance_status_into_the_shared_vocabulary() {
     );
 }
 
+/// `incus exec` reaches only into a running instance, so no other state may
+/// carry the Interactive Shell that runs it. An Incus instance is a whole
+/// system, so its shell is the root login shell — the same one `incus shell`
+/// itself expands to — rather than the bare `/bin/sh` a minimal Docker image
+/// forces.
+#[tokio::test]
+async fn only_a_running_instance_carries_an_interactive_shell() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("incus", &["list", "--format=json"]),
+        success(include_str!("fixtures/incus/mixed-state-instances.json")),
+    )]);
+
+    let snapshot = IncusWorkspace
+        .refresh(&cli)
+        .await
+        .expect("fixture lists instances");
+
+    let shells = snapshot
+        .resources()
+        .filter_map(|resource| {
+            resource
+                .shell
+                .as_ref()
+                .map(|shell| (resource.name.as_str(), shell.clone()))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        shells,
+        [(
+            "api",
+            ProcessSpec::new("incus", &["exec", "api", "--", "su", "-l"]),
+        )]
+    );
+}
+
 /// `incus unfreeze` succeeds only against a frozen instance, so no other state
 /// may offer the Command that runs it.
 #[tokio::test]

@@ -105,6 +105,7 @@ impl ProviderWorkspace for IncusWorkspace {
                 .map(|row| {
                     let state = incus_resource_state(&row.status);
                     let available_commands = incus_commands(state);
+                    let shell = instance_shell(state, &row.name);
                     Resource {
                         id: ResourceId::new(&row.name),
                         name: row.name,
@@ -116,7 +117,7 @@ impl ProviderWorkspace for IncusWorkspace {
                             ("Location".to_owned(), row.location),
                         ],
                         available_commands,
-                        shell: None,
+                        shell,
                     }
                 })
                 .collect();
@@ -248,6 +249,18 @@ fn incus_commands(state: ResourceState) -> Vec<ResourceCommand> {
             vec![ResourceCommand::Delete]
         }
     }
+}
+
+/// The Interactive Shell Incus offers inside an instance.
+///
+/// `incus exec` reaches only into a running instance, so every other state
+/// offers none. An instance is a whole system rather than one packaged
+/// process, so the shell worth giving the user is root's login shell: this is
+/// what Incus's own `shell` alias expands to, spelled out here so it does not
+/// depend on that alias surviving in the user's configuration.
+fn instance_shell(state: ResourceState, name: &str) -> Option<ProcessSpec> {
+    (state == ResourceState::Running)
+        .then(|| ProcessSpec::new("incus", &["exec", name, "--", "su", "-l"]))
 }
 
 fn discovery_error(message: impl AsRef<str>, command: &str) -> ProviderDiscovery {
