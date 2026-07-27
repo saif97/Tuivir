@@ -298,7 +298,6 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
                 panels: vec![ResourcePanel {
                     id: ResourcePanelId::new(SANDBOXES_PANEL_ID),
                     title: "Sandboxes".to_owned(),
-                    columns: Vec::new(),
                     detail_views: sandbox_detail_views(),
                     resources,
                 }],

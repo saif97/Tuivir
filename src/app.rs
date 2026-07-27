@@ -123,8 +123,9 @@ impl ProviderState {
     }
 
     /// What the detail panel should be describing right now: an existing
-    /// Resource and one of the views its panel offers.
-    fn detail_target(&self) -> Option<(&Resource, DetailView)> {
+    /// Resource, the target that addresses it, and one of the views its panel
+    /// offers.
+    fn detail_target(&self) -> Option<(&ResourceTarget, &Resource, DetailView)> {
         let selected = self.selected_resource.as_ref()?;
         let view_id = self.selected_detail_view.as_ref()?;
         let view = self
@@ -136,7 +137,7 @@ impl ProviderState {
             return None;
         };
         let resource = snapshot.resource(&selected.panel_id, &selected.resource_id)?;
-        Some((resource, view))
+        Some((selected, resource, view))
     }
 }
 
@@ -569,18 +570,13 @@ impl App {
             return Vec::new();
         };
         let provider_id = provider.id.clone();
-        let Some((resource, view)) = provider.detail_target() else {
+        let Some((target, resource, view)) = provider.detail_target() else {
             provider.details = None;
             self.pending_details = None;
             return Vec::new();
         };
+        let panel_id = target.panel_id.clone();
         let resource_id = resource.id.clone();
-        let panel_id = provider
-            .selected_resource
-            .as_ref()
-            .expect("detail target has a selected Resource")
-            .panel_id
-            .clone();
         let resource_name = resource.name.clone();
         let describes_target = provider.details.as_ref().is_some_and(|details| {
             details.panel_id == panel_id

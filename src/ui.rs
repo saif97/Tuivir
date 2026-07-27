@@ -247,15 +247,31 @@ fn render_workspace_panel(
                 );
                 return;
             }
+            // Panels share the height in proportion to how much they have to
+            // show, so a provider's one busy panel is not squeezed to make room
+            // for an empty one. Every panel keeps its border and a first row,
+            // so none can be crowded out entirely.
             let panel_areas = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints(vec![
-                    Constraint::Ratio(1, snapshot.panels.len() as u32);
-                    snapshot.panels.len()
-                ])
+                .constraints(
+                    snapshot
+                        .panels
+                        .iter()
+                        .map(|panel| Constraint::Fill(panel.resources.len().max(1) as u16))
+                        .collect::<Vec<_>>(),
+                )
                 .split(workspace_rows[1]);
-            for (panel, area) in snapshot.panels.iter().zip(panel_areas.iter().copied()) {
-                render_resource_panel(provider, panel, resources_hint, title_style, frame, area);
+            // The focus key reaches the Resource Panes as a whole, so only the
+            // first panel advertises it; repeating it would promise each panel
+            // its own key.
+            for (index, (panel, area)) in snapshot
+                .panels
+                .iter()
+                .zip(panel_areas.iter().copied())
+                .enumerate()
+            {
+                let hint = if index == 0 { resources_hint } else { None };
+                render_resource_panel(provider, panel, hint, title_style, frame, area);
             }
         }
     }
@@ -269,46 +285,34 @@ fn render_resource_panel(
     frame: &mut Frame<'_>,
     area: Rect,
 ) {
-    let mut items = Vec::new();
-    if !panel.columns.is_empty() {
-        items.push(ListItem::new(Line::styled(
-            format!("  Name  {}", panel.columns.join("  ")),
-            Style::default().add_modifier(Modifier::BOLD),
-        )));
-    }
-    items.extend(panel.resources.iter().map(|resource| {
-        let marker = if provider.selected_resource.as_ref().is_some_and(|selected| {
-            selected.panel_id == panel.id && selected.resource_id == resource.id
-        }) {
-            ">"
-        } else {
-            " "
-        };
-        let values = panel
-            .columns
-            .iter()
-            .map(|column| {
-                resource
-                    .fields
-                    .iter()
-                    .find_map(|(label, value)| (label == column).then_some(value.as_str()))
-                    .unwrap_or("")
-            })
-            .collect::<Vec<_>>()
-            .join("  ");
-        let mut spans = vec![Span::raw(format!("{marker} {}  {values}", resource.name))];
-        if let Some(status) = &resource.status {
-            spans.push(Span::raw("  "));
-            spans.push(Span::styled(
-                status.clone(),
-                resource
-                    .state
-                    .map_or_else(Style::default, resource_state_style),
-            ));
-        }
-        ListItem::new(Line::from(spans))
-    }));
-    if panel.resources.is_empty() {
+    // A row names its Resource and, where the Resource has one, says what it is
+    // doing. Everything else a Provider reported is in the Details pane, so a
+    // row never has to compete for width with it.
+    let mut items = panel
+        .resources
+        .iter()
+        .map(|resource| {
+            let marker = if provider.selected_resource.as_ref().is_some_and(|selected| {
+                selected.panel_id == panel.id && selected.resource_id == resource.id
+            }) {
+                ">"
+            } else {
+                " "
+            };
+            let mut spans = vec![Span::raw(format!("{marker} {}", resource.name))];
+            if let Some(status) = &resource.status {
+                spans.push(Span::raw("  "));
+                spans.push(Span::styled(
+                    status.clone(),
+                    resource
+                        .state
+                        .map_or_else(Style::default, resource_state_style),
+                ));
+            }
+            ListItem::new(Line::from(spans))
+        })
+        .collect::<Vec<_>>();
+    if items.is_empty() {
         items.push(ListItem::new(format!(
             "No {} {} found",
             provider.name,

@@ -1426,7 +1426,6 @@ fn container_snapshot(
         panels: vec![ResourcePanel {
             id: ResourcePanelId::new("containers"),
             title: "Containers".to_owned(),
-            columns: vec!["Image".to_owned()],
             detail_views: vec![
                 DetailView::new("logs", "Logs"),
                 DetailView::new("stats", "Stats"),
@@ -1452,7 +1451,6 @@ fn incus_snapshot(instances: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
         panels: vec![ResourcePanel {
             id: ResourcePanelId::new("instances"),
             title: "Instances".to_owned(),
-            columns: vec!["Type".to_owned()],
             detail_views: vec![
                 DetailView::new("info", "Info"),
                 DetailView::new("config", "Config"),
@@ -1494,7 +1492,6 @@ fn docker_multi_panel_snapshot() -> WorkspaceSnapshot {
             ResourcePanel {
                 id: ResourcePanelId::new("containers"),
                 title: "Containers".to_owned(),
-                columns: vec!["Image".to_owned()],
                 detail_views: vec![
                     DetailView::new("logs", "Logs"),
                     DetailView::new("stats", "Stats"),
@@ -1519,12 +1516,6 @@ fn docker_multi_panel_snapshot() -> WorkspaceSnapshot {
             ResourcePanel {
                 id: ResourcePanelId::new("images"),
                 title: "Images".to_owned(),
-                columns: vec![
-                    "Repository".to_owned(),
-                    "Tag".to_owned(),
-                    "Identity".to_owned(),
-                    "Size".to_owned(),
-                ],
                 detail_views: vec![DetailView::new("inspect", "Inspect")],
                 resources: vec![Resource {
                     id: ResourceId::new("shared-id"),
@@ -1673,8 +1664,10 @@ fn settling_on_a_resource_requests_only_the_visible_detail_view() {
     );
 }
 
+/// Rendered at a width a terminal actually has, so a row that only fits on a
+/// very wide screen fails here rather than in front of a user.
 #[test]
-fn docker_renders_provider_defined_resource_panels_and_image_columns() {
+fn docker_renders_every_provider_defined_resource_panel() {
     let mut app = App::new();
     let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
 
@@ -1683,15 +1676,29 @@ fn docker_renders_provider_defined_resource_panels_and_image_columns() {
         Ok(docker_multi_panel_snapshot()),
     ));
 
-    let screen = render_to_text(app.state(), 220, 30);
+    let screen = render_to_text(app.state(), 80, 30);
     assert!(screen.contains("Containers"), "rendered:\n{screen}");
     assert!(screen.contains("Images"), "rendered:\n{screen}");
-    assert!(
-        screen.contains("Repository  Tag  Identity  Size"),
-        "rendered:\n{screen}"
-    );
+    assert!(screen.contains("api"), "rendered:\n{screen}");
     assert!(screen.contains("nginx:1.27"), "rendered:\n{screen}");
-    assert!(screen.contains("192MB"), "rendered:\n{screen}");
+}
+
+/// The focus key reaches the Resource Panes as a whole, so advertising it on
+/// every panel would promise each one a key of its own.
+#[test]
+fn only_the_first_resource_panel_advertises_the_focus_key() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(docker_multi_panel_snapshot()),
+    ));
+
+    let screen = render_to_text(app.state(), 80, 30);
+
+    assert!(screen.contains("[2] Containers"), "rendered:\n{screen}");
+    assert!(screen.contains(" Images "), "rendered:\n{screen}");
+    assert!(!screen.contains("[2] Images"), "rendered:\n{screen}");
 }
 
 #[test]

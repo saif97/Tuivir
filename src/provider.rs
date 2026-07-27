@@ -215,11 +215,6 @@ impl DetailView {
 pub struct ResourcePanel {
     pub id: ResourcePanelId,
     pub title: String,
-    /// Provider-defined labels rendered as columns by the shared shell.
-    ///
-    /// Each label names a value in [`Resource::fields`]. Their order is stable
-    /// even when the panel has no Resources.
-    pub columns: Vec<String>,
     /// The detail views offered for every Resource in this panel, in the order
     /// the user moves through them. The first is shown when a Resource is
     /// selected.
@@ -236,11 +231,12 @@ pub struct WorkspaceSnapshot {
 }
 
 impl WorkspaceSnapshot {
-    /// Iterates every resource across all panels, in panel order.
-    pub fn resources(&self) -> impl Iterator<Item = &Resource> {
-        self.panels.iter().flat_map(|panel| &panel.resources)
-    }
-
+    /// Iterates every Resource across all panels in panel order, each paired
+    /// with the target that identifies it.
+    ///
+    /// A Resource is only addressable together with its panel: two panels may
+    /// hold the same [`ResourceId`], so a bare id is never enough to say which
+    /// Resource is meant.
     pub fn targets(&self) -> impl Iterator<Item = (ResourceTarget, &Resource)> {
         self.panels.iter().flat_map(|panel| {
             panel.resources.iter().map(|resource| {

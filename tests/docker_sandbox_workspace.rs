@@ -106,7 +106,8 @@ async fn docker_sandbox_maps_every_status_into_the_shared_vocabulary() {
 
     assert_eq!(
         snapshot
-            .resources()
+            .targets()
+            .map(|(_, resource)| resource)
             .map(|resource| {
                 (
                     resource.name.as_str(),
@@ -139,7 +140,8 @@ async fn a_sandbox_carries_its_agent_uuid_and_workspaces_as_fields() {
         .expect("the fixture lists sandboxes");
 
     let sandbox = snapshot
-        .resources()
+        .targets()
+        .map(|(_, resource)| resource)
         .find(|resource| resource.name == "claude-virtui")
         .expect("the fixture lists claude-virtui");
     assert_eq!(
@@ -173,7 +175,11 @@ async fn a_sandbox_with_no_workspaces_omits_the_field_entirely() {
         .await
         .expect("the fixture lists one sandbox");
 
-    let sandbox = snapshot.resources().next().expect("one sandbox");
+    let sandbox = snapshot
+        .targets()
+        .map(|(_, resource)| resource)
+        .next()
+        .expect("one sandbox");
     assert_eq!(
         sandbox
             .fields
@@ -303,7 +309,8 @@ async fn command_availability_follows_the_last_refreshed_state() {
 
     assert_eq!(
         snapshot
-            .resources()
+            .targets()
+            .map(|(_, resource)| resource)
             .map(|resource| (resource.name.as_str(), resource.available_commands.clone()))
             .collect::<Vec<_>>(),
         [

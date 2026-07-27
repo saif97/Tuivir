@@ -353,7 +353,8 @@ async fn incus_maps_every_instance_status_into_the_shared_vocabulary() {
         .expect("fixture lists instances");
 
     let states = snapshot
-        .resources()
+        .targets()
+        .map(|(_, resource)| resource)
         .map(|resource| {
             (
                 resource.name.as_str(),
@@ -392,7 +393,8 @@ async fn only_a_frozen_instance_offers_the_resume_command() {
         .expect("fixture lists instances");
 
     let resumable = snapshot
-        .resources()
+        .targets()
+        .map(|(_, resource)| resource)
         .filter(|resource| {
             resource
                 .available_commands
@@ -403,7 +405,8 @@ async fn only_a_frozen_instance_offers_the_resume_command() {
     assert_eq!(resumable, ["cache"]);
 
     let frozen = snapshot
-        .resources()
+        .targets()
+        .map(|(_, resource)| resource)
         .find(|resource| resource.name == "cache")
         .expect("fixture has a frozen instance");
     assert_eq!(

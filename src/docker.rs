@@ -85,26 +85,41 @@ impl ProviderWorkspace for DockerWorkspace {
         cli: &'a dyn CliRunner,
     ) -> Pin<Box<dyn Future<Output = Result<WorkspaceSnapshot, WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
-            let containers = cli
-                .run(ProcessSpec::new(
-                    "docker",
-                    &[
-                        "container",
-                        "ls",
-                        "--all",
-                        "--no-trunc",
-                        "--format",
-                        "{{json .}}",
-                    ],
-                ))
-                .await
-                .map_err(|error| {
-                    refresh_failure(
-                        error,
-                        "Docker could not list containers",
-                        CONTAINER_REFRESH_HELP,
-                    )
-                })?;
+            // Two independent listings, so they wait on Docker together rather
+            // than one after the other.
+            let (containers, images) = tokio::try_join!(
+                async {
+                    cli.run(ProcessSpec::new(
+                        "docker",
+                        &[
+                            "container",
+                            "ls",
+                            "--all",
+                            "--no-trunc",
+                            "--format",
+                            "{{json .}}",
+                        ],
+                    ))
+                    .await
+                    .map_err(|error| {
+                        refresh_failure(
+                            error,
+                            "Docker could not list containers",
+                            CONTAINER_REFRESH_HELP,
+                        )
+                    })
+                },
+                async {
+                    cli.run(ProcessSpec::new(
+                        "docker",
+                        &["image", "ls", "--no-trunc", "--format", "{{json .}}"],
+                    ))
+                    .await
+                    .map_err(|error| {
+                        refresh_failure(error, "Docker could not list images", IMAGE_REFRESH_HELP)
+                    })
+                },
+            )?;
 
             let container_resources = containers
                 .stdout
@@ -133,15 +148,6 @@ impl ProviderWorkspace for DockerWorkspace {
                 })
                 .collect::<Result<Vec<_>, WorkspaceError>>()?;
 
-            let images = cli
-                .run(ProcessSpec::new(
-                    "docker",
-                    &["image", "ls", "--no-trunc", "--format", "{{json .}}"],
-                ))
-                .await
-                .map_err(|error| {
-                    refresh_failure(error, "Docker could not list images", IMAGE_REFRESH_HELP)
-                })?;
             let image_resources = images
                 .stdout
                 .lines()
@@ -153,12 +159,17 @@ impl ProviderWorkspace for DockerWorkspace {
                             IMAGE_REFRESH_HELP,
                         )
                     })?;
+                    // One image carries one digest per tag it was given, so the
+                    // digest repeats down the listing and cannot identify a
+                    // row. `repository:tag` is what Docker itself accepts and
+                    // what it holds unique, so it identifies the Resource; an
+                    // untagged image has only its digest to be known by.
                     let name = match (row.repository.as_str(), row.tag.as_str()) {
                         ("<none>", _) | (_, "<none>") => row.id.clone(),
                         _ => format!("{}:{}", row.repository, row.tag),
                     };
                     Ok(Resource {
-                        id: ResourceId::new(row.id.clone()),
+                        id: ResourceId::new(name.clone()),
                         name,
                         status: None,
                         state: None,
@@ -178,19 +189,12 @@ impl ProviderWorkspace for DockerWorkspace {
                     ResourcePanel {
                         id: ResourcePanelId::new(CONTAINERS_PANEL_ID),
                         title: "Containers".to_owned(),
-                        columns: vec!["Image".to_owned()],
                         detail_views: container_detail_views(),
                         resources: container_resources,
                     },
                     ResourcePanel {
                         id: ResourcePanelId::new(IMAGES_PANEL_ID),
                         title: "Images".to_owned(),
-                        columns: vec![
-                            "Repository".to_owned(),
-                            "Tag".to_owned(),
-                            "Identity".to_owned(),
-                            "Size".to_owned(),
-                        ],
                         detail_views: vec![DetailView::new("inspect", "Inspect")],
                         resources: image_resources,
                     },

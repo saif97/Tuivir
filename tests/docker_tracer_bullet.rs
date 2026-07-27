@@ -3,7 +3,7 @@ use virtui::{
     cli::{ProcessError, ProcessOutput, ProcessSpec},
     docker::DockerWorkspace,
     provider::{
-        DetailViewId, ProviderRequest, ProviderWorkspace, ResourceCommand, ResourceId,
+        DetailViewId, ProviderRequest, ProviderWorkspace, Resource, ResourceCommand, ResourceId,
         ResourcePanelId, ResourceState, WorkspaceError, WorkspaceSnapshot,
     },
     ui::render_to_text,
@@ -216,7 +216,8 @@ async fn docker_maps_every_container_state_into_the_shared_vocabulary() {
         .expect("fixture lists containers");
 
     let states = snapshot
-        .resources()
+        .targets()
+        .map(|(_, resource)| resource)
         .map(|resource| {
             (
                 resource.id.0.as_str(),
@@ -258,7 +259,8 @@ async fn only_a_paused_container_offers_the_resume_command() {
         .expect("fixture lists containers");
 
     let resumable = snapshot
-        .resources()
+        .targets()
+        .map(|(_, resource)| resource)
         .filter(|resource| {
             resource
                 .available_commands
@@ -269,7 +271,8 @@ async fn only_a_paused_container_offers_the_resume_command() {
     assert_eq!(resumable, ["container-paused"]);
 
     let paused = snapshot
-        .resources()
+        .targets()
+        .map(|(_, resource)| resource)
         .find(|resource| resource.id.0 == "container-paused")
         .expect("fixture has a paused container");
     assert_eq!(
@@ -333,7 +336,6 @@ async fn docker_declares_images_after_containers_with_native_stateless_rows() {
         [("containers", "Containers"), ("images", "Images")]
     );
     let images = &snapshot.panels[1];
-    assert_eq!(images.columns, ["Repository", "Tag", "Identity", "Size"]);
     assert_eq!(
         images
             .detail_views
@@ -360,6 +362,59 @@ async fn docker_declares_images_after_containers_with_native_stateless_rows() {
             ("Size".to_owned(), "192MB".to_owned()),
         ]
     );
+}
+
+/// Docker lists one row per tag, so a twice-tagged image repeats its digest.
+/// Identifying rows by the digest would make two Resources indistinguishable:
+/// both would draw as selected, and selection could never move past the first.
+#[tokio::test]
+async fn images_sharing_a_digest_are_distinct_resources() {
+    let cli = FixtureCli::new([
+        (container_ls(), success("")),
+        (
+            image_ls(),
+            success(include_str!("fixtures/docker/images.jsonl")),
+        ),
+    ]);
+
+    let snapshot = DockerWorkspace
+        .refresh(&cli)
+        .await
+        .expect("fixtures list Docker images");
+
+    let images = &snapshot.panels[1];
+    let ids = images
+        .resources
+        .iter()
+        .map(|resource| resource.id.0.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        ids,
+        [
+            "nginx:1.27",
+            "nginx:latest",
+            "example/worker:latest",
+            // An untagged image has only its digest to be known by.
+            "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        ]
+    );
+    let unique = ids.iter().collect::<std::collections::HashSet<_>>();
+    assert_eq!(unique.len(), ids.len(), "every image row is addressable");
+    let identity = |resource: &Resource| {
+        resource
+            .fields
+            .iter()
+            .find(|(label, _)| label == "Identity")
+            .map(|(_, value)| value.clone())
+            .expect("an image reports its Identity")
+    };
+    let (first, second) = (&images.resources[0], &images.resources[1]);
+    assert_eq!(
+        identity(first),
+        identity(second),
+        "the two tags really are one image"
+    );
+    assert_ne!(first.id, second.id, "yet they are separate Resources");
 }
 
 #[tokio::test]
@@ -920,20 +975,23 @@ async fn a_docker_cli_that_cannot_be_started_names_docker_in_the_error() {
 
 #[tokio::test]
 async fn malformed_docker_output_becomes_an_actionable_workspace_error() {
-    let cli = FixtureCli::new([(
-        ProcessSpec::new(
-            "docker",
-            &[
-                "container",
-                "ls",
-                "--all",
-                "--no-trunc",
-                "--format",
-                "{{json .}}",
-            ],
+    let cli = FixtureCli::new([
+        (
+            ProcessSpec::new(
+                "docker",
+                &[
+                    "container",
+                    "ls",
+                    "--all",
+                    "--no-trunc",
+                    "--format",
+                    "{{json .}}",
+                ],
+            ),
+            success(include_str!("fixtures/docker/malformed-containers.jsonl")),
         ),
-        success(include_str!("fixtures/docker/malformed-containers.jsonl")),
-    )]);
+        (image_ls(), success("")),
+    ]);
     let docker = DockerWorkspace;
 
     let error = docker

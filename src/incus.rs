@@ -127,7 +127,6 @@ impl ProviderWorkspace for IncusWorkspace {
                 panels: vec![ResourcePanel {
                     id: ResourcePanelId::new(INSTANCES_PANEL_ID),
                     title: "Instances".to_owned(),
-                    columns: Vec::new(),
                     detail_views: instance_detail_views(),
                     resources,
                 }],
