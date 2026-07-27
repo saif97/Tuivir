@@ -13,6 +13,11 @@ use crate::{
 
 const PROVIDER_ID: &str = "docker-sandbox";
 const PROVIDER_NAME: &str = "Docker Sandbox";
+/// The one listing sbx offers. Discovery, refresh, and the Info view all read
+/// it, so they must ask for it identically.
+const LIST_SANDBOXES: [&str; 2] = ["ls", "--json"];
+/// The only Detail View Docker Sandbox declares.
+const INFO_VIEW: &str = "info";
 
 pub struct DockerSandboxWorkspace;
 
@@ -94,7 +99,7 @@ fn sandbox_info(row: &SandboxRow) -> Vec<String> {
 /// is ever parsed.
 async fn list_sandboxes(cli: &dyn CliRunner) -> Result<SandboxListing, WorkspaceError> {
     let output = cli
-        .run(ProcessSpec::new("sbx", &["ls", "--json"]))
+        .run(ProcessSpec::new("sbx", &LIST_SANDBOXES))
         .await
         .map_err(listing_failure)?;
     serde_json::from_str(&output.stdout)
@@ -107,7 +112,7 @@ async fn list_sandboxes(cli: &dyn CliRunner) -> Result<SandboxListing, Workspace
 /// answer — and borrowing Docker's names for diagnostics sbx does not have
 /// would promise the user something that does not exist.
 fn sandbox_detail_views() -> Vec<DetailView> {
-    vec![DetailView::new("info", "Info")]
+    vec![DetailView::new(INFO_VIEW, "Info")]
 }
 
 /// Maps an sbx sandbox status onto the shared vocabulary.
@@ -266,7 +271,7 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
             // Listing is what proves sbx is usable, and it fails for the two
             // reasons the user can act on: sandboxd is down, or the Docker
             // login has lapsed.
-            if let Err(error) = cli.run(ProcessSpec::new("sbx", &["ls", "--json"])).await {
+            if let Err(error) = cli.run(ProcessSpec::new("sbx", &LIST_SANDBOXES)).await {
                 return Some(discovery_error(listing_message(&error)));
             }
 
@@ -344,7 +349,7 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
         view_id: &'a DetailViewId,
     ) -> Pin<Box<dyn Future<Output = Result<ResourceDetails, WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
-            if view_id.0 != "info" {
+            if view_id.0 != INFO_VIEW {
                 return Err(WorkspaceError::new(format!(
                     "Docker Sandbox has no {view_id} view for sandbox {resource_id}"
                 )));
