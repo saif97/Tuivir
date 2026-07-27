@@ -9,9 +9,10 @@ use std::{
 };
 
 use crossterm::{
+    cursor::MoveTo,
     event::{self, Event, KeyEvent},
     execute,
-    terminal::{EnterAlternateScreen, enable_raw_mode},
+    terminal::{Clear, ClearType, EnterAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::DefaultTerminal;
 use tokio::sync::mpsc;
@@ -137,16 +138,27 @@ impl ShellTerminal for Host<'_> {
         // Reading stops before the screen is given up: a thread still polling
         // crossterm would swallow the keystrokes meant for the shell.
         self.input.stop();
-        ratatui::try_restore()
+        // Raw mode goes; the alternate screen stays. Leaving it would uncover
+        // the terminal Virtui was launched from, and the shell would open on
+        // top of whatever was already there — the user's own scrollback, with a
+        // container's prompt in the middle of it. Wiping the alternate screen
+        // instead opens the shell on nothing but itself, and leaves the real
+        // terminal untouched for Virtui to hand back whole at the end.
+        disable_raw_mode()?;
+        execute!(io::stdout(), Clear(ClearType::All), MoveTo(0, 0))
     }
 
     fn resume(&mut self) -> io::Result<()> {
-        // Undoing exactly what `try_restore` did, rather than building a second
-        // terminal with `try_init`: that installs a panic hook wrapping the
-        // previous one, so a session with several shells in it would nest a
-        // fresh hook per shell. The terminal Virtui already has is still good —
-        // only raw mode and the alternate screen were given away.
+        // Re-entering raw mode and the alternate screen directly rather than
+        // building a second terminal with `try_init`: that installs a panic hook
+        // wrapping the previous one, so a session with several shells in it
+        // would nest a fresh hook per shell.
         enable_raw_mode()?;
+        // Asking for the alternate screen Virtui never gave up costs nothing,
+        // and is what recovers the one case where it did lose it: a full-screen
+        // program run inside the shell — an editor in the container — leaves the
+        // alternate screen on its way out and drops the terminal back onto the
+        // screen Virtui must not draw over.
         execute!(io::stdout(), EnterAlternateScreen)?;
         // The shell wrote all over the screen Virtui last drew, so nothing that
         // survives the handover is worth keeping — and without this the next
