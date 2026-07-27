@@ -5,17 +5,16 @@ use serde::Deserialize;
 use crate::{
     cli::{CliRunner, ProcessError, ProcessSpec},
     provider::{
-        DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderVoice, ProviderWorkspace,
-        Resource, ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourceState,
-        WorkspaceError, WorkspaceSnapshot,
+        DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderWorkspace, Resource,
+        ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourceState, WorkspaceError,
+        WorkspaceSnapshot, provider_cli_error,
     },
 };
 
 const PROVIDER_ID: &str = "incus";
 const PROVIDER_NAME: &str = "Incus";
-const VOICE: ProviderVoice = ProviderVoice::new(PROVIDER_NAME);
 /// What a user can run to check the Target Environment a refresh could not read.
-const REFRESH_REMEDY: &str = "Run `incus list` to verify access to the current Target Environment.";
+const REFRESH_HELP: &str = "Run `incus list` to verify access to the current Target Environment.";
 
 pub struct IncusWorkspace;
 
@@ -46,7 +45,7 @@ impl ProviderWorkspace for IncusWorkspace {
                 Err(ProcessError::ExecutableNotFound) => return None,
                 Err(ProcessError::SpawnFailed(message)) => {
                     return Some(discovery_error(
-                        VOICE.not_started(&message),
+                        format!("{PROVIDER_NAME} CLI could not be started: {message}"),
                         "incus remote get-default",
                     ));
                 }
@@ -64,13 +63,13 @@ impl ProviderWorkspace for IncusWorkspace {
             {
                 Err(ProcessError::ExecutableNotFound) => {
                     return Some(discovery_error(
-                        VOICE.no_longer_available(),
+                        format!("{PROVIDER_NAME} CLI is no longer available"),
                         "incus project get-current",
                     ));
                 }
                 Err(ProcessError::SpawnFailed(message)) => {
                     return Some(discovery_error(
-                        VOICE.not_started(&message),
+                        format!("{PROVIDER_NAME} CLI could not be started: {message}"),
                         "incus project get-current",
                     ));
                 }
@@ -158,10 +157,11 @@ impl ProviderWorkspace for IncusWorkspace {
             cli.run(ProcessSpec::new("incus", &args))
                 .await
                 .map_err(|error| {
-                    VOICE.command_error(
-                        error,
+                    WorkspaceError::new(provider_cli_error(
+                        PROVIDER_NAME,
+                        &error,
                         &format!("Incus could not {command} instance {resource_id}"),
-                    )
+                    ))
                 })?;
             Ok(())
         })
@@ -183,10 +183,11 @@ impl ProviderWorkspace for IncusWorkspace {
                 .run(ProcessSpec::new("incus", &args))
                 .await
                 .map_err(|error| {
-                    VOICE.command_error(
-                        error,
+                    WorkspaceError::new(provider_cli_error(
+                        PROVIDER_NAME,
+                        &error,
                         &format!("Incus could not load {view_id} for instance {resource_id}"),
-                    )
+                    ))
                 })?;
             Ok(ResourceDetails::from_output(&output.stdout))
         })
@@ -257,19 +258,19 @@ fn discovery_error(message: impl AsRef<str>, command: &str) -> ProviderDiscovery
         id: ProviderId::new(PROVIDER_ID),
         name: PROVIDER_NAME.to_owned(),
         target_environment: "unavailable".to_owned(),
-        error: Some(VOICE.with_remedy(
+        error: Some(WorkspaceError::with_help(
             message,
             &format!("Run `{command}` to verify the selected Target Environment."),
         )),
     }
 }
 
-/// A failed listing, carrying the remedy only where one applies.
+/// A failed listing, carrying help only where it applies.
 ///
 /// An Incus that is gone or would not start cannot answer `incus list`, so
 /// suggesting it would send the user nowhere.
 fn refresh_failure(error: ProcessError) -> WorkspaceError {
-    let message = VOICE.message_for(&error, "Incus could not list instances");
+    let message = provider_cli_error(PROVIDER_NAME, &error, "Incus could not list instances");
     match error {
         ProcessError::Exited(_) => refresh_error(message),
         _ => WorkspaceError::new(message),
@@ -277,5 +278,5 @@ fn refresh_failure(error: ProcessError) -> WorkspaceError {
 }
 
 fn refresh_error(message: impl AsRef<str>) -> WorkspaceError {
-    VOICE.with_remedy(message, REFRESH_REMEDY)
+    WorkspaceError::with_help(message, REFRESH_HELP)
 }

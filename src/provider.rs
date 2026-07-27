@@ -257,59 +257,26 @@ impl WorkspaceError {
             message: message.into(),
         }
     }
+
+    /// Attaches the Provider's suggested next step to a message.
+    pub fn with_help(message: impl AsRef<str>, help: &str) -> Self {
+        Self::new(format!("{}. {help}", message.as_ref()))
+    }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-/// How a Provider Workspace words the failures of its own CLI.
+/// What a Provider CLI left behind, with no suggested next step attached.
 ///
-/// Which failure gets which shape is the same for every Provider — a binary
-/// that has gone, one that would not start, one that ran and refused — while
-/// the noun and the command worth suggesting belong to the Provider. Only the
-/// shared decision lives here; each Provider Workspace keeps its own prose for
-/// what the user should go and run.
-pub struct ProviderVoice {
-    /// The Provider's display name, as the user sees it.
-    name: &'static str,
-}
-
-impl ProviderVoice {
-    pub const fn new(name: &'static str) -> Self {
-        Self { name }
-    }
-
-    /// The CLI answered discovery and has since gone.
-    pub fn no_longer_available(&self) -> String {
-        format!("{} CLI is no longer available", self.name)
-    }
-
-    /// The CLI is installed but could not be executed.
-    pub fn not_started(&self, reason: &str) -> String {
-        format!("{} CLI could not be started: {reason}", self.name)
-    }
-
-    /// Attaches the Provider's own remedy to a message.
-    pub fn with_remedy(&self, message: impl AsRef<str>, remedy: &str) -> WorkspaceError {
-        WorkspaceError::new(format!("{}. {remedy}", message.as_ref()))
-    }
-
-    /// What a Provider CLI left behind, with no remedy attached.
-    ///
-    /// `fallback` carries the caller's meaning for a process that failed
-    /// without writing anything at all.
-    pub fn message_for(&self, error: &ProcessError, fallback: &str) -> String {
-        match error {
-            ProcessError::ExecutableNotFound => self.no_longer_available(),
-            ProcessError::SpawnFailed(reason) => self.not_started(reason),
-            ProcessError::Exited(failure) => failure.message_or(fallback),
+/// `fallback` carries the caller's meaning for a process that failed without
+/// writing anything at all.
+pub fn provider_cli_error(provider_name: &str, error: &ProcessError, fallback: &str) -> String {
+    match error {
+        ProcessError::ExecutableNotFound => {
+            format!("{provider_name} CLI is no longer available")
         }
-    }
-
-    /// One lifecycle Command that failed.
-    ///
-    /// A Command names the Resource it was attempted against, so it needs no
-    /// further remedy: the message already says what could not be done.
-    pub fn command_error(&self, error: ProcessError, fallback: &str) -> WorkspaceError {
-        WorkspaceError::new(self.message_for(&error, fallback))
+        ProcessError::SpawnFailed(reason) => {
+            format!("{provider_name} CLI could not be started: {reason}")
+        }
+        ProcessError::Exited(failure) => failure.message_or(fallback),
     }
 }
 

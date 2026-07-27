@@ -5,9 +5,9 @@ use serde::Deserialize;
 use crate::{
     cli::{CliRunner, ProcessError, ProcessSpec},
     provider::{
-        DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderVoice, ProviderWorkspace,
-        Resource, ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourceState,
-        WorkspaceError, WorkspaceSnapshot,
+        DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderWorkspace, Resource,
+        ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourceState, WorkspaceError,
+        WorkspaceSnapshot, provider_cli_error,
     },
 };
 
@@ -18,9 +18,8 @@ const PROVIDER_NAME: &str = "Docker Sandbox";
 const LIST_SANDBOXES: [&str; 2] = ["ls", "--json"];
 /// The only Detail View Docker Sandbox declares.
 const INFO_VIEW: &str = "info";
-const VOICE: ProviderVoice = ProviderVoice::new(PROVIDER_NAME);
 /// What a user can run to check the Target Environment a refresh could not read.
-const REFRESH_REMEDY: &str = "Run `sbx ls` to verify access to the current Target Environment.";
+const REFRESH_HELP: &str = "Run `sbx ls` to verify access to the current Target Environment.";
 
 pub struct DockerSandboxWorkspace;
 
@@ -148,7 +147,7 @@ fn sandbox_commands(state: ResourceState) -> Vec<ResourceCommand> {
 }
 
 fn refresh_error(message: impl AsRef<str>) -> WorkspaceError {
-    VOICE.with_remedy(message, REFRESH_REMEDY)
+    WorkspaceError::with_help(message, REFRESH_HELP)
 }
 
 fn discovery_error(message: impl AsRef<str>) -> ProviderDiscovery {
@@ -156,20 +155,24 @@ fn discovery_error(message: impl AsRef<str>) -> ProviderDiscovery {
         id: ProviderId::new(PROVIDER_ID),
         name: PROVIDER_NAME.to_owned(),
         target_environment: "unavailable".to_owned(),
-        error: Some(VOICE.with_remedy(
+        error: Some(WorkspaceError::with_help(
             message,
             "Run `sbx ls` to verify sandboxd is running and you are signed in to Docker.",
         )),
     }
 }
 
-/// What `sbx ls` left behind when it could not list sandboxes, with no remedy
-/// attached.
+/// What `sbx ls` left behind when it could not list sandboxes, with no
+/// suggested next step attached.
 fn listing_message(error: &ProcessError) -> String {
-    VOICE.message_for(error, "Docker Sandbox could not list sandboxes")
+    provider_cli_error(
+        PROVIDER_NAME,
+        error,
+        "Docker Sandbox could not list sandboxes",
+    )
 }
 
-/// A failed listing, carrying a remedy only where one applies.
+/// A failed listing, carrying help only where it applies.
 ///
 /// Only a Provider that ran and refused has a Target Environment worth
 /// verifying. Pointing at `sbx ls` when sbx is absent, or could not be started
@@ -240,7 +243,9 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
             let version = match cli.run(ProcessSpec::new("sbx", &["version"])).await {
                 Err(ProcessError::ExecutableNotFound) => return None,
                 Err(ProcessError::SpawnFailed(message)) => {
-                    return Some(discovery_error(VOICE.not_started(&message)));
+                    return Some(discovery_error(format!(
+                        "{PROVIDER_NAME} CLI could not be started: {message}"
+                    )));
                 }
                 Err(ProcessError::Exited(failure)) => {
                     return Some(discovery_error(
@@ -314,10 +319,11 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
             cli.run(ProcessSpec::new("sbx", &args))
                 .await
                 .map_err(|error| {
-                    VOICE.command_error(
-                        error,
+                    WorkspaceError::new(provider_cli_error(
+                        PROVIDER_NAME,
+                        &error,
                         &format!("Docker Sandbox could not {command} sandbox {resource_id}"),
-                    )
+                    ))
                 })?;
             Ok(())
         })
