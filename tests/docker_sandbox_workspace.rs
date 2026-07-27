@@ -328,6 +328,55 @@ fn failure(stderr: &str) -> Result<ProcessOutput, ProcessError> {
     }))
 }
 
+#[tokio::test]
+async fn a_failed_command_reports_what_sbx_wrote_to_stderr() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("sbx", &["stop", "claude-virtui"]),
+        failure("Error: sandbox 'claude-virtui' not found"),
+    )]);
+
+    let error = DockerSandboxWorkspace
+        .execute_command(
+            &cli,
+            &ResourceId::new("claude-virtui"),
+            ResourceCommand::Stop,
+            ResourceState::Running,
+        )
+        .await
+        .expect_err("a non-zero exit is never a success");
+
+    assert_eq!(error.message, "Error: sandbox 'claude-virtui' not found");
+}
+
+/// An sbx that fails without a word still has to say which Provider, which
+/// sandbox, and which Command.
+#[tokio::test]
+async fn a_silent_command_failure_names_the_provider_command_and_sandbox() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("sbx", &["rm", "--force", "claude-virtui"]),
+        Err(ProcessError::Exited(ProcessFailure {
+            exit_code: Some(1),
+            stdout: String::new(),
+            stderr: String::new(),
+        })),
+    )]);
+
+    let error = DockerSandboxWorkspace
+        .execute_command(
+            &cli,
+            &ResourceId::new("claude-virtui"),
+            ResourceCommand::Delete,
+            ResourceState::Running,
+        )
+        .await
+        .expect_err("a non-zero exit is never a success");
+
+    assert_eq!(
+        error.message,
+        "Docker Sandbox could not delete sandbox claude-virtui"
+    );
+}
+
 /// sbx offers no logs, stats, or console of its own, so the Sandboxes panel
 /// declares only the one view it can actually answer rather than borrowing
 /// Docker's names for diagnostics it does not have.
