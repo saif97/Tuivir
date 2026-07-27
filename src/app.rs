@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::cli::ProcessSpec;
+use crate::cli::{ProcessError, ProcessSpec};
 use crate::command::{Command, CommandRegistry, CommandScope};
 use crate::keys::Key;
 use crate::provider::{
@@ -25,6 +25,15 @@ pub enum AppEvent {
         request_id: ProviderRequestId,
         provider_id: ProviderId,
         result: Result<WorkspaceSnapshot, WorkspaceError>,
+    },
+    /// An Interactive Shell has given the terminal back, however it ended.
+    ///
+    /// The shell it was opened for travels with the event, so what happened can
+    /// be reported against its Provider and Resource even though the pending
+    /// shell is long gone by then.
+    ShellClosed {
+        shell: PendingShell,
+        result: Result<(), ProcessError>,
     },
     ResourceCommandCompleted {
         request_id: ProviderRequestId,
@@ -342,6 +351,7 @@ impl App {
         match event {
             AppEvent::ProviderDiscovered(discovery) => self.handle_provider_discovered(discovery),
             AppEvent::RefreshTimerElapsed => self.refresh_active_provider(),
+            AppEvent::ShellClosed { shell, result } => self.apply_shell_closed(shell, result),
             AppEvent::RefreshCompleted {
                 request_id,
                 provider_id,
@@ -720,6 +730,33 @@ impl App {
         }
         self.state.command_error = None;
         if !self.is_active_provider(&provider_id) {
+            return Vec::new();
+        }
+        self.refresh_active_provider()
+    }
+
+    /// Takes the Interactive Shell that is waiting for the terminal, if any.
+    ///
+    /// Taking it is what commits the application to the handover: a second call
+    /// finds nothing, so one keypress can only ever hand the terminal over once.
+    pub fn take_pending_shell(&mut self) -> Option<PendingShell> {
+        self.state.pending_shell.take()
+    }
+
+    /// Brings the Active Workspace back into line with whatever the user did
+    /// inside the shell.
+    fn apply_shell_closed(
+        &mut self,
+        shell: PendingShell,
+        result: Result<(), ProcessError>,
+    ) -> Vec<ProviderRequest> {
+        self.state.command_error = match result {
+            Ok(()) => None,
+            Err(_) => Some("shell failed".to_owned()),
+        };
+        // A shell opened in a Provider Workspace the user has since left has
+        // nothing to say about the one they are looking at now.
+        if !self.is_active_provider(&shell.provider_id) {
             return Vec::new();
         }
         self.refresh_active_provider()

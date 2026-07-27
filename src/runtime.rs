@@ -1,11 +1,11 @@
-use std::{sync::Arc, time::Duration};
+use std::{io, sync::Arc, time::Duration};
 
 use crossterm::event::KeyEvent;
 use tokio::time::{Instant, Interval, MissedTickBehavior};
 
 use crate::{
     app::{App, AppEvent},
-    cli::CliRunner,
+    cli::{CliRunner, InteractiveRunner},
     command::Command,
     docker::DockerWorkspace,
     incus::IncusWorkspace,
@@ -38,6 +38,43 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> (ShellControl, Vec<ProviderRe
         Some(command) => (ShellControl::Continue, app.invoke(command)),
         None => (ShellControl::Continue, Vec::new()),
     }
+}
+
+/// The terminal Virtui gives up while an Interactive Shell owns it.
+///
+/// Leaving the Ratatui screen and stopping the competition for keystrokes are
+/// both the host's business, not the application's, so they live behind this
+/// seam rather than inside [`App`].
+pub trait ShellTerminal {
+    /// Gives the terminal back to whatever runs next, and stops reading input.
+    fn suspend(&mut self) -> io::Result<()>;
+
+    /// Takes the terminal back, and starts reading input again.
+    fn resume(&mut self) -> io::Result<()>;
+}
+
+/// Hands the terminal to the Interactive Shell the application asked for, and
+/// takes it back.
+///
+/// Resuming does not depend on how the shell ended: a Provider CLI that never
+/// started, or one that exited badly, must not be able to leave the user
+/// without their terminal. Only then is the outcome reported, which is what
+/// puts any error on a screen the user can actually read.
+///
+/// The returned requests are ordinary background work — a refresh of the
+/// Active Workspace, and nothing else.
+pub fn open_pending_shell(
+    app: &mut App,
+    terminal: &mut dyn ShellTerminal,
+    runner: &dyn InteractiveRunner,
+) -> io::Result<Vec<ProviderRequest>> {
+    let Some(shell) = app.take_pending_shell() else {
+        return Ok(Vec::new());
+    };
+    terminal.suspend()?;
+    let result = runner.run_interactive(&shell.process);
+    terminal.resume()?;
+    Ok(app.update(AppEvent::ShellClosed { shell, result }))
 }
 
 /// A refresh clock that skips missed ticks instead of queuing a backlog.
