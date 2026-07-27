@@ -306,6 +306,116 @@ async fn the_containers_panel_declares_dockers_native_detail_views() {
     );
 }
 
+#[tokio::test]
+async fn docker_declares_images_after_containers_with_native_stateless_rows() {
+    let cli = FixtureCli::new([
+        (
+            container_ls(),
+            success(include_str!("fixtures/docker/containers.jsonl")),
+        ),
+        (
+            image_ls(),
+            success(include_str!("fixtures/docker/images.jsonl")),
+        ),
+    ]);
+
+    let snapshot = DockerWorkspace
+        .refresh(&cli)
+        .await
+        .expect("fixtures list Docker resources");
+
+    assert_eq!(
+        snapshot
+            .panels
+            .iter()
+            .map(|panel| (panel.id.0.as_str(), panel.title.as_str()))
+            .collect::<Vec<_>>(),
+        [("containers", "Containers"), ("images", "Images")]
+    );
+    let images = &snapshot.panels[1];
+    assert_eq!(images.columns, ["Repository", "Tag", "Identity", "Size"]);
+    assert_eq!(
+        images
+            .detail_views
+            .iter()
+            .map(|view| (view.id.0.as_str(), view.title.as_str()))
+            .collect::<Vec<_>>(),
+        [("inspect", "Inspect")]
+    );
+    let nginx = &images.resources[0];
+    assert_eq!(nginx.name, "nginx:1.27");
+    assert_eq!(nginx.state, None, "an image has no lifecycle state");
+    assert_eq!(nginx.status, None);
+    assert!(nginx.available_commands.is_empty());
+    assert_eq!(
+        nginx.fields,
+        [
+            ("Repository".to_owned(), "nginx".to_owned()),
+            ("Tag".to_owned(), "1.27".to_owned()),
+            (
+                "Identity".to_owned(),
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                    .to_owned()
+            ),
+            ("Size".to_owned(), "192MB".to_owned()),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn docker_keeps_an_empty_images_panel() {
+    let cli = FixtureCli::new([(container_ls(), success("")), (image_ls(), success("\n"))]);
+
+    let snapshot = DockerWorkspace
+        .refresh(&cli)
+        .await
+        .expect("empty image output is valid");
+
+    assert_eq!(snapshot.panels.len(), 2);
+    assert!(snapshot.panels[1].resources.is_empty());
+    assert_eq!(snapshot.panels[1].id, ResourcePanelId::new("images"));
+}
+
+#[tokio::test]
+async fn malformed_image_output_becomes_an_actionable_workspace_error() {
+    let cli = FixtureCli::new([
+        (container_ls(), success("")),
+        (
+            image_ls(),
+            success(include_str!("fixtures/docker/malformed-images.jsonl")),
+        ),
+    ]);
+
+    let error = DockerWorkspace
+        .refresh(&cli)
+        .await
+        .expect_err("malformed image output cannot become Resources");
+
+    assert!(error.message.contains("malformed image data"));
+    assert!(error.message.contains("docker image ls"));
+}
+
+#[tokio::test]
+async fn image_inspect_is_routed_through_the_images_panel() {
+    let identity = "sha256:1111111111111111111111111111111111111111111111111111111111111111";
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("docker", &["image", "inspect", identity]),
+        success("[{\"Id\":\"sha256:111\"}]\n"),
+    )]);
+
+    let details = DockerWorkspace
+        .load_details(
+            &cli,
+            &ResourcePanelId::new("images"),
+            &ResourceId::new(identity),
+            &DetailViewId::new("inspect"),
+        )
+        .await
+        .expect("Docker image inspect loads");
+
+    assert_eq!(details.lines, ["[{\"Id\":\"sha256:111\"}]"]);
+}
+
 /// Each declared view runs exactly one Docker command. The fixture answers one
 /// request and panics on any other, so a view that loaded more than the one on
 /// screen would fail here.
