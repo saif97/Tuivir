@@ -39,3 +39,7 @@ _Avoid_: Tab, pane, inspector, log view
 **Resource State**:
 What a Provider reported a Resource to be doing at the last refresh, in one vocabulary shared by every Provider: running, stopped, paused, transitioning, broken, or unknown. Each Provider Workspace maps its own status words into it, and an invoked Command carries it so Virtui never asks a Provider CLI for what it already knows. Only _stopped_ is positively determined; every other state, unknown included, means "not settled and stopped", so a Command that must treat those differently fails safe.
 _Avoid_: Status, run state, power state, phase
+
+**Interactive Shell**:
+A Provider CLI process that temporarily owns Virtui's whole terminal so the user can work inside a Resource directly. Virtui leaves its screen and stops reading keys before handing over, and takes both back however that process ends — including one that never started. A Provider Workspace declares the shell it offers for each Resource in its own words, in the shell a Resource of that kind actually has: Docker's containers get `/bin/sh`, because the image may hold nothing else; an Incus instance is a whole system, so it gets root's login shell. A Resource its Provider declares no shell for offers the operation nowhere rather than failing when asked.
+_Avoid_: Exec, attach, terminal session, embedded terminal
