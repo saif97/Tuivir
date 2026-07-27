@@ -120,6 +120,38 @@ async fn sandboxes_become_resources_identified_by_name() {
     );
 }
 
+/// sbx offers no pause and no restart, so nothing maps to Paused. A status
+/// this workspace does not recognise stays Unknown rather than passing for
+/// stopped, which is what keeps a destructive Command failing safe.
+#[tokio::test]
+async fn docker_sandbox_maps_every_status_into_the_shared_vocabulary() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("sbx", &["ls", "--json"]),
+        success(include_str!(
+            "fixtures/docker-sandbox/mixed-state-sandboxes.json"
+        )),
+    )]);
+
+    let snapshot = DockerSandboxWorkspace
+        .refresh(&cli)
+        .await
+        .expect("the fixture lists sandboxes");
+
+    assert_eq!(
+        snapshot
+            .resources()
+            .map(|resource| (resource.name.as_str(), resource.state))
+            .collect::<Vec<_>>(),
+        [
+            ("running-sandbox", ResourceState::Running),
+            ("stopped-sandbox", ResourceState::Stopped),
+            ("shouting-sandbox", ResourceState::Running),
+            ("starting-sandbox", ResourceState::Unknown),
+            ("unrecognised-sandbox", ResourceState::Unknown),
+        ]
+    );
+}
+
 fn failure(stderr: &str) -> Result<ProcessOutput, ProcessError> {
     Err(ProcessError::Exited(ProcessFailure {
         exit_code: Some(1),
