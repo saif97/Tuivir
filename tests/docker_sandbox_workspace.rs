@@ -681,6 +681,32 @@ async fn a_failed_sandbox_refresh_identifies_the_command_and_target() {
     );
 }
 
+/// Only a Provider that ran and refused has a Target Environment worth
+/// verifying. Telling the user to run a CLI just reported absent, or one that
+/// could not be started at all, sends them at a command that cannot answer.
+#[tokio::test]
+async fn an_sbx_that_is_gone_is_not_reported_by_asking_the_user_to_run_it() {
+    for (error, expected) in [
+        (
+            ProcessError::ExecutableNotFound,
+            "Docker Sandbox CLI is no longer available",
+        ),
+        (
+            ProcessError::SpawnFailed("permission denied".to_owned()),
+            "Docker Sandbox CLI could not be started: permission denied",
+        ),
+    ] {
+        let cli = FixtureCli::new([(ProcessSpec::new("sbx", &["ls", "--json"]), Err(error))]);
+
+        let failure = DockerSandboxWorkspace
+            .refresh(&cli)
+            .await
+            .expect_err("an unrunnable CLI is never a snapshot");
+
+        assert_eq!(failure.message, expected);
+    }
+}
+
 #[tokio::test]
 async fn a_silent_sandbox_refresh_failure_still_explains_itself() {
     let cli = FixtureCli::new([(

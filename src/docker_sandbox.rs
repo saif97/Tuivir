@@ -81,7 +81,7 @@ async fn list_sandboxes(cli: &dyn CliRunner) -> Result<SandboxListing, Workspace
     let output = cli
         .run(ProcessSpec::new("sbx", &["ls", "--json"]))
         .await
-        .map_err(|error| refresh_error(listing_failure(error)))?;
+        .map_err(listing_failure)?;
     serde_json::from_str(&output.stdout)
         .map_err(|error| refresh_error(format!("Docker Sandbox returned malformed data: {error}")))
 }
@@ -143,13 +143,29 @@ fn discovery_error(message: impl AsRef<str>) -> ProviderDiscovery {
     }
 }
 
-/// What `sbx ls` left behind when it could not list sandboxes.
-fn listing_failure(error: ProcessError) -> String {
+/// What `sbx ls` left behind when it could not list sandboxes, with no remedy
+/// attached.
+fn listing_message(error: &ProcessError) -> String {
     match error {
         ProcessError::ExecutableNotFound => "Docker Sandbox CLI is no longer available".to_owned(),
-        ProcessError::SpawnFailed(message) => not_started(&message),
+        ProcessError::SpawnFailed(message) => not_started(message),
         ProcessError::Exited(failure) => {
             failure.message_or("Docker Sandbox could not list sandboxes")
+        }
+    }
+}
+
+/// A failed listing, carrying a remedy only where one applies.
+///
+/// Only a Provider that ran and refused has a Target Environment worth
+/// verifying. Pointing at `sbx ls` when sbx is absent, or could not be started
+/// at all, sends the user at a command that cannot answer.
+fn listing_failure(error: ProcessError) -> WorkspaceError {
+    let message = listing_message(&error);
+    match error {
+        ProcessError::Exited(_) => refresh_error(message),
+        ProcessError::ExecutableNotFound | ProcessError::SpawnFailed(_) => {
+            WorkspaceError::new(message)
         }
     }
 }
@@ -236,7 +252,7 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
             // reasons the user can act on: sandboxd is down, or the Docker
             // login has lapsed.
             if let Err(error) = cli.run(ProcessSpec::new("sbx", &["ls", "--json"])).await {
-                return Some(discovery_error(listing_failure(error)));
+                return Some(discovery_error(listing_message(&error)));
             }
 
             Some(ProviderDiscovery {
