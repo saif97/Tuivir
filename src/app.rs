@@ -870,6 +870,7 @@ impl App {
         };
         let target = resource.name.clone();
         let available_commands = resource.available_commands.clone();
+        let offers_a_shell = resource.shell.is_some();
         self.state.help_overlay = Some(HelpOverlay {
             target,
             entries: self
@@ -883,6 +884,9 @@ impl App {
                         .to_string(),
                     description: match registered.command {
                         Command::Resource(command) if !available_commands.contains(&command) => {
+                            format!("{} (unavailable)", registered.description)
+                        }
+                        Command::OpenShell if !offers_a_shell => {
                             format!("{} (unavailable)", registered.description)
                         }
                         _ => registered.description.to_owned(),

@@ -915,6 +915,55 @@ fn help_offers_resume_only_while_the_resource_is_suspended() {
     );
 }
 
+/// A Resource whose Provider offers no Interactive Shell must not look as
+/// though pressing the key would do something. Nothing is asked for, and help
+/// says why the key is there but idle.
+#[test]
+fn help_offers_a_shell_only_while_the_resource_can_host_one() {
+    let mut stopped = App::new();
+    let initial = refresh_request(stopped.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    stopped.update(refresh_completed(
+        initial,
+        Ok(stopped_snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+
+    handle_key(
+        &mut stopped,
+        KeyEvent::new(KeyCode::Char('E'), KeyModifiers::NONE),
+    );
+    assert!(
+        stopped.state().pending_shell.is_none(),
+        "a stopped container has no shell to open"
+    );
+
+    handle_key(
+        &mut stopped,
+        KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+    );
+    let screen = render_to_text(stopped.state(), 100, 24);
+    assert!(
+        screen.contains("E  Shell (unavailable)"),
+        "rendered screen:\n{screen}"
+    );
+
+    let mut running = App::new();
+    let initial = refresh_request(running.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    running.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+    handle_key(
+        &mut running,
+        KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+    );
+    let screen = render_to_text(running.state(), 100, 24);
+    assert!(screen.contains("E  Shell"), "rendered screen:\n{screen}");
+    assert!(
+        !screen.contains("E  Shell (unavailable)"),
+        "rendered screen:\n{screen}"
+    );
+}
+
 #[test]
 fn question_mark_closes_the_help_overlay_when_it_is_already_open() {
     let mut app = App::new();
