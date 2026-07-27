@@ -6,16 +6,19 @@ use crate::{
     cli::{CliRunner, ProcessError, ProcessSpec},
     provider::{
         DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderWorkspace, Resource,
-        ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourceState, WorkspaceError,
-        WorkspaceSnapshot, provider_cli_error,
+        ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourcePanelId,
+        ResourceState, WorkspaceError, WorkspaceSnapshot, provider_cli_error,
     },
 };
 
 const PROVIDER_ID: &str = "docker";
 const PROVIDER_NAME: &str = "Docker";
-/// What a user can run to check the Target Environment a refresh could not read.
-const REFRESH_HELP: &str =
+const CONTAINER_REFRESH_HELP: &str =
     "Run `docker container ls --all` to verify access to the current Target Environment.";
+const IMAGE_REFRESH_HELP: &str =
+    "Run `docker image ls` to verify access to the current Target Environment.";
+const CONTAINERS_PANEL_ID: &str = "containers";
+const IMAGES_PANEL_ID: &str = "images";
 
 pub struct DockerWorkspace;
 
@@ -31,6 +34,18 @@ struct ContainerRow {
     state: String,
     #[serde(rename = "Status")]
     status: String,
+}
+
+#[derive(Deserialize)]
+struct ImageRow {
+    #[serde(rename = "ID")]
+    id: String,
+    #[serde(rename = "Repository")]
+    repository: String,
+    #[serde(rename = "Tag")]
+    tag: String,
+    #[serde(rename = "Size")]
+    size: String,
 }
 
 impl ProviderWorkspace for DockerWorkspace {
@@ -70,28 +85,52 @@ impl ProviderWorkspace for DockerWorkspace {
         cli: &'a dyn CliRunner,
     ) -> Pin<Box<dyn Future<Output = Result<WorkspaceSnapshot, WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
-            let output = cli
-                .run(ProcessSpec::new(
-                    "docker",
-                    &[
-                        "container",
-                        "ls",
-                        "--all",
-                        "--no-trunc",
-                        "--format",
-                        "{{json .}}",
-                    ],
-                ))
-                .await
-                .map_err(refresh_failure)?;
+            // Two independent listings, so they wait on Docker together rather
+            // than one after the other.
+            let (containers, images) = tokio::try_join!(
+                async {
+                    cli.run(ProcessSpec::new(
+                        "docker",
+                        &[
+                            "container",
+                            "ls",
+                            "--all",
+                            "--no-trunc",
+                            "--format",
+                            "{{json .}}",
+                        ],
+                    ))
+                    .await
+                    .map_err(|error| {
+                        refresh_failure(
+                            error,
+                            "Docker could not list containers",
+                            CONTAINER_REFRESH_HELP,
+                        )
+                    })
+                },
+                async {
+                    cli.run(ProcessSpec::new(
+                        "docker",
+                        &["image", "ls", "--no-trunc", "--format", "{{json .}}"],
+                    ))
+                    .await
+                    .map_err(|error| {
+                        refresh_failure(error, "Docker could not list images", IMAGE_REFRESH_HELP)
+                    })
+                },
+            )?;
 
-            let resources = output
+            let container_resources = containers
                 .stdout
                 .lines()
                 .filter(|line| !line.trim().is_empty())
                 .map(|line| {
                     let row: ContainerRow = serde_json::from_str(line).map_err(|error| {
-                        refresh_error(format!("Docker returned malformed container data: {error}"))
+                        refresh_error(
+                            format!("Docker returned malformed container data: {error}"),
+                            CONTAINER_REFRESH_HELP,
+                        )
                     })?;
                     let state = docker_resource_state(&row.state);
                     let available_commands = docker_commands(state);
@@ -99,7 +138,7 @@ impl ProviderWorkspace for DockerWorkspace {
                         id: ResourceId::new(row.id),
                         name: row.names,
                         status: Some(row.state),
-                        state,
+                        state: Some(state),
                         fields: vec![
                             ("Image".to_owned(), row.image),
                             ("Status".to_owned(), row.status),
@@ -109,12 +148,57 @@ impl ProviderWorkspace for DockerWorkspace {
                 })
                 .collect::<Result<Vec<_>, WorkspaceError>>()?;
 
+            let image_resources = images
+                .stdout
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .map(|line| {
+                    let row: ImageRow = serde_json::from_str(line).map_err(|error| {
+                        refresh_error(
+                            format!("Docker returned malformed image data: {error}"),
+                            IMAGE_REFRESH_HELP,
+                        )
+                    })?;
+                    // One image carries one digest per tag it was given, so the
+                    // digest repeats down the listing and cannot identify a
+                    // row. `repository:tag` is what Docker itself accepts and
+                    // what it holds unique, so it identifies the Resource; an
+                    // untagged image has only its digest to be known by.
+                    let name = match (row.repository.as_str(), row.tag.as_str()) {
+                        ("<none>", _) | (_, "<none>") => row.id.clone(),
+                        _ => format!("{}:{}", row.repository, row.tag),
+                    };
+                    Ok(Resource {
+                        id: ResourceId::new(name.clone()),
+                        name,
+                        status: None,
+                        state: None,
+                        fields: vec![
+                            ("Repository".to_owned(), row.repository),
+                            ("Tag".to_owned(), row.tag),
+                            ("Identity".to_owned(), row.id),
+                            ("Size".to_owned(), row.size),
+                        ],
+                        available_commands: Vec::new(),
+                    })
+                })
+                .collect::<Result<Vec<_>, WorkspaceError>>()?;
+
             Ok(WorkspaceSnapshot {
-                panels: vec![ResourcePanel {
-                    title: "Containers".to_owned(),
-                    detail_views: container_detail_views(),
-                    resources,
-                }],
+                panels: vec![
+                    ResourcePanel {
+                        id: ResourcePanelId::new(CONTAINERS_PANEL_ID),
+                        title: "Containers".to_owned(),
+                        detail_views: container_detail_views(),
+                        resources: container_resources,
+                    },
+                    ResourcePanel {
+                        id: ResourcePanelId::new(IMAGES_PANEL_ID),
+                        title: "Images".to_owned(),
+                        detail_views: vec![DetailView::new("inspect", "Inspect")],
+                        resources: image_resources,
+                    },
+                ],
             })
         })
     }
@@ -122,11 +206,17 @@ impl ProviderWorkspace for DockerWorkspace {
     fn execute_command<'a>(
         &'a self,
         cli: &'a dyn CliRunner,
+        panel_id: &'a ResourcePanelId,
         resource_id: &'a ResourceId,
         command: ResourceCommand,
         state: ResourceState,
     ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
+            if panel_id.0 != CONTAINERS_PANEL_ID {
+                return Err(WorkspaceError::new(format!(
+                    "Docker has no {command} command for Resource Panel {panel_id}"
+                )));
+            }
             let verb = match command {
                 ResourceCommand::Start => "start",
                 ResourceCommand::Stop => "stop",
@@ -158,13 +248,25 @@ impl ProviderWorkspace for DockerWorkspace {
     fn load_details<'a>(
         &'a self,
         cli: &'a dyn CliRunner,
+        panel_id: &'a ResourcePanelId,
         resource_id: &'a ResourceId,
         view_id: &'a DetailViewId,
     ) -> Pin<Box<dyn Future<Output = Result<ResourceDetails, WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
-            let Some(args) = container_detail_command(view_id, resource_id.0.as_str()) else {
+            let (resource_kind, args) = match panel_id.0.as_str() {
+                CONTAINERS_PANEL_ID => (
+                    "container",
+                    container_detail_command(view_id, resource_id.0.as_str()),
+                ),
+                IMAGES_PANEL_ID if view_id.0 == "inspect" => (
+                    "image",
+                    Some(vec!["image", "inspect", resource_id.0.as_str()]),
+                ),
+                _ => (panel_id.0.as_str(), None),
+            };
+            let Some(args) = args else {
                 return Err(WorkspaceError::new(format!(
-                    "Docker has no {view_id} view for container {resource_id}"
+                    "Docker has no {view_id} view for {resource_kind} {resource_id}"
                 )));
             };
             let output = cli
@@ -174,7 +276,9 @@ impl ProviderWorkspace for DockerWorkspace {
                     WorkspaceError::new(provider_cli_error(
                         PROVIDER_NAME,
                         &error,
-                        &format!("Docker could not load {view_id} for container {resource_id}"),
+                        &format!(
+                            "Docker could not load {view_id} for {resource_kind} {resource_id}"
+                        ),
                     ))
                 })?;
             // A container writes wherever it likes, so both streams are its
@@ -262,16 +366,16 @@ fn discovery_with_error(message: impl Into<String>) -> ProviderDiscovery {
 
 /// A failed listing, carrying help only where it applies.
 ///
-/// A Docker that is gone or would not start cannot answer `docker container
-/// ls`, so suggesting it would send the user nowhere.
-fn refresh_failure(error: ProcessError) -> WorkspaceError {
-    let message = provider_cli_error(PROVIDER_NAME, &error, "Docker could not list containers");
+/// A Docker that is gone or would not start cannot answer another listing, so
+/// suggesting one would send the user nowhere.
+fn refresh_failure(error: ProcessError, fallback: &str, help: &str) -> WorkspaceError {
+    let message = provider_cli_error(PROVIDER_NAME, &error, fallback);
     match error {
-        ProcessError::Exited(_) => refresh_error(message),
+        ProcessError::Exited(_) => refresh_error(message, help),
         _ => WorkspaceError::new(message),
     }
 }
 
-fn refresh_error(message: impl AsRef<str>) -> WorkspaceError {
-    WorkspaceError::with_help(message, REFRESH_HELP)
+fn refresh_error(message: impl AsRef<str>, help: &str) -> WorkspaceError {
+    WorkspaceError::with_help(message, help)
 }

@@ -16,6 +16,18 @@ _Avoid_: Provider tab, unified resource view
 The single provider workspace currently visible and being refreshed. Inactive workspaces remain idle.
 _Avoid_: Selected backend, current tab
 
+**Pane**:
+A focusable region of the application shell, such as the Provider selector, a Resource Panel, or the Details pane. Use _Panel_ only for a provider-defined Resource Panel.
+_Avoid_: Area, section, focus region
+
+**Resource**:
+One selectable native thing managed by a Provider, such as a container, image, volume, network, or instance. A Resource has a Resource State only when its kind has a lifecycle state.
+_Avoid_: Item, entity, provider object
+
+**Resource Panel**:
+A provider-defined Pane containing one kind of Resource, such as Docker Containers or Images.
+_Avoid_: Resource pane, resource list
+
 **Target Environment**:
 The Docker context or Incus remote and project already selected through the provider's CLI configuration.
 _Avoid_: Cluster, server, connection
@@ -36,6 +48,10 @@ _Avoid_: Shortcut, hotkey
 One provider-native way of inspecting a selected Resource, declared by the Provider Workspace that offers it and named in that Provider's own words — Docker's Logs, Stats, and Inspect; Incus's Info, Config, and Console Log. Only the view on screen is ever loaded, and a result that arrives for a Resource or view the user has left is refused rather than shown.
 _Avoid_: Tab, pane, inspector, log view
 
+**Resource Shell Session**:
+An ongoing command shell attached to one Resource through a Detail View. It remains active when the user navigates elsewhere in Virtui and is ended explicitly or when Virtui exits.
+_Avoid_: Interactive Detail Session, shell panel, terminal tab
+
 **Resource State**:
-What a Provider reported a Resource to be doing at the last refresh, in one vocabulary shared by every Provider: running, stopped, paused, transitioning, broken, or unknown. Each Provider Workspace maps its own status words into it, and an invoked Command carries it so Virtui never asks a Provider CLI for what it already knows. Only _stopped_ is positively determined; every other state, unknown included, means "not settled and stopped", so a Command that must treat those differently fails safe.
+What a Provider reported a stateful Resource to be doing at the last refresh, in one vocabulary shared by every Provider: running, stopped, paused, transitioning, broken, or unknown. Each Provider Workspace maps its own status words into it, and an invoked Command carries it so Virtui never asks a Provider CLI for what it already knows. A stateless Resource has no Resource State; absence is not _unknown_. Only _stopped_ is positively determined; every other state, unknown included, means "not settled and stopped", so a Command that must treat those differently fails safe.
 _Avoid_: Status, run state, power state, phase

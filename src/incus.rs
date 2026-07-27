@@ -6,8 +6,8 @@ use crate::{
     cli::{CliRunner, ProcessError, ProcessSpec},
     provider::{
         DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderWorkspace, Resource,
-        ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourceState, WorkspaceError,
-        WorkspaceSnapshot, provider_cli_error,
+        ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourcePanelId,
+        ResourceState, WorkspaceError, WorkspaceSnapshot, provider_cli_error,
     },
 };
 
@@ -15,6 +15,7 @@ const PROVIDER_ID: &str = "incus";
 const PROVIDER_NAME: &str = "Incus";
 /// What a user can run to check the Target Environment a refresh could not read.
 const REFRESH_HELP: &str = "Run `incus list` to verify access to the current Target Environment.";
+const INSTANCES_PANEL_ID: &str = "instances";
 
 pub struct IncusWorkspace;
 
@@ -111,7 +112,7 @@ impl ProviderWorkspace for IncusWorkspace {
                         id: ResourceId::new(&row.name),
                         name: row.name,
                         status: Some(row.status),
-                        state,
+                        state: Some(state),
                         fields: vec![
                             ("Type".to_owned(), row.instance_type),
                             ("Architecture".to_owned(), row.architecture),
@@ -124,6 +125,7 @@ impl ProviderWorkspace for IncusWorkspace {
 
             Ok(WorkspaceSnapshot {
                 panels: vec![ResourcePanel {
+                    id: ResourcePanelId::new(INSTANCES_PANEL_ID),
                     title: "Instances".to_owned(),
                     detail_views: instance_detail_views(),
                     resources,
@@ -135,11 +137,17 @@ impl ProviderWorkspace for IncusWorkspace {
     fn execute_command<'a>(
         &'a self,
         cli: &'a dyn CliRunner,
+        panel_id: &'a ResourcePanelId,
         resource_id: &'a ResourceId,
         command: ResourceCommand,
         state: ResourceState,
     ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
+            if panel_id.0 != INSTANCES_PANEL_ID {
+                return Err(WorkspaceError::new(format!(
+                    "Incus has no {command} command for Resource Panel {panel_id}"
+                )));
+            }
             let verb = match command {
                 ResourceCommand::Start => "start",
                 ResourceCommand::Stop => "stop",
@@ -170,10 +178,16 @@ impl ProviderWorkspace for IncusWorkspace {
     fn load_details<'a>(
         &'a self,
         cli: &'a dyn CliRunner,
+        panel_id: &'a ResourcePanelId,
         resource_id: &'a ResourceId,
         view_id: &'a DetailViewId,
     ) -> Pin<Box<dyn Future<Output = Result<ResourceDetails, WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
+            if panel_id.0 != INSTANCES_PANEL_ID {
+                return Err(WorkspaceError::new(format!(
+                    "Incus has no {view_id} view for Resource Panel {panel_id}"
+                )));
+            }
             let Some(args) = instance_detail_command(view_id, resource_id.0.as_str()) else {
                 return Err(WorkspaceError::new(format!(
                     "Incus has no {view_id} view for instance {resource_id}"

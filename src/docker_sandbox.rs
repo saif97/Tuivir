@@ -6,13 +6,14 @@ use crate::{
     cli::{CliRunner, ProcessError, ProcessSpec},
     provider::{
         DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderWorkspace, Resource,
-        ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourceState, WorkspaceError,
-        WorkspaceSnapshot, provider_cli_error,
+        ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourcePanelId,
+        ResourceState, WorkspaceError, WorkspaceSnapshot, provider_cli_error,
     },
 };
 
 const PROVIDER_ID: &str = "docker-sandbox";
 const PROVIDER_NAME: &str = "Docker Sandbox";
+const SANDBOXES_PANEL_ID: &str = "sandboxes";
 /// The one listing sbx offers. Discovery, refresh, and the Info view all read
 /// it, so they must ask for it identically.
 const LIST_SANDBOXES: [&str; 2] = ["ls", "--json"];
@@ -286,7 +287,7 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
                         id: ResourceId::new(&row.name),
                         name: row.name,
                         status: Some(row.status),
-                        state,
+                        state: Some(state),
                         fields,
                         available_commands: sandbox_commands(state),
                     }
@@ -295,6 +296,7 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
 
             Ok(WorkspaceSnapshot {
                 panels: vec![ResourcePanel {
+                    id: ResourcePanelId::new(SANDBOXES_PANEL_ID),
                     title: "Sandboxes".to_owned(),
                     detail_views: sandbox_detail_views(),
                     resources,
@@ -306,11 +308,17 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
     fn execute_command<'a>(
         &'a self,
         cli: &'a dyn CliRunner,
+        panel_id: &'a ResourcePanelId,
         resource_id: &'a ResourceId,
         command: ResourceCommand,
         _state: ResourceState,
     ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
+            if panel_id.0 != SANDBOXES_PANEL_ID {
+                return Err(WorkspaceError::new(format!(
+                    "Docker Sandbox has no {command} command for Resource Panel {panel_id}"
+                )));
+            }
             let Some(args) = sandbox_command(command, resource_id.0.as_str()) else {
                 return Err(WorkspaceError::new(format!(
                     "Docker Sandbox cannot {command} sandbox {resource_id}"
@@ -332,10 +340,16 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
     fn load_details<'a>(
         &'a self,
         cli: &'a dyn CliRunner,
+        panel_id: &'a ResourcePanelId,
         resource_id: &'a ResourceId,
         view_id: &'a DetailViewId,
     ) -> Pin<Box<dyn Future<Output = Result<ResourceDetails, WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
+            if panel_id.0 != SANDBOXES_PANEL_ID {
+                return Err(WorkspaceError::new(format!(
+                    "Docker Sandbox has no {view_id} view for Resource Panel {panel_id}"
+                )));
+            }
             if view_id.0 != INFO_VIEW {
                 return Err(WorkspaceError::new(format!(
                     "Docker Sandbox has no {view_id} view for sandbox {resource_id}"
