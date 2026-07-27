@@ -236,7 +236,7 @@ impl KeyHints {
                 .first_key(Command::FocusProviders)
                 .map(|key| key.to_string()),
             focus_resources: registry
-                .first_key(Command::FocusResources)
+                .first_key(Command::FocusResourcePanel(0))
                 .map(|key| key.to_string()),
         }
     }
@@ -464,8 +464,11 @@ impl App {
                 self.state.focused_panel = FocusedPanel::Providers;
                 Vec::new()
             }
-            Command::FocusResources => {
+            Command::FocusResourcePanel(_) => {
                 self.state.focused_panel = FocusedPanel::Resources;
+                Vec::new()
+            }
+            Command::FocusDetails | Command::FocusNextPane | Command::FocusPreviousPane => {
                 Vec::new()
             }
             Command::SelectNext => self.select_by_focus(1),
