@@ -3,7 +3,9 @@ use std::{collections::VecDeque, future::Future, pin::Pin, sync::Mutex};
 use virtui::{
     cli::{CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec},
     docker_sandbox::DockerSandboxWorkspace,
-    provider::{DetailViewId, ProviderId, ProviderWorkspace, ResourceId, ResourceState},
+    provider::{
+        DetailViewId, ProviderId, ProviderWorkspace, ResourceCommand, ResourceId, ResourceState,
+    },
 };
 
 struct FixtureCli {
@@ -177,6 +179,28 @@ async fn a_sandbox_carries_its_agent_uuid_and_workspaces_as_fields() {
             ("Workspaces", "/home/vibebox/projects/virtui"),
         ]
     );
+}
+
+/// `sbx run --name` is the documented way to reattach, but it opens an
+/// interactive agent session that never exits, which would leave the request
+/// pending forever. `sbx exec` starts a stopped sandbox before running its
+/// command, and `-d` returns as soon as it has.
+#[tokio::test]
+async fn starting_a_sandbox_generates_the_expected_cli_request() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("sbx", &["exec", "-d", "shell-dotfiles", "true"]),
+        success(""),
+    )]);
+
+    DockerSandboxWorkspace
+        .execute_command(
+            &cli,
+            &ResourceId::new("shell-dotfiles"),
+            ResourceCommand::Start,
+            ResourceState::Stopped,
+        )
+        .await
+        .expect("Docker Sandbox start succeeds");
 }
 
 fn failure(stderr: &str) -> Result<ProcessOutput, ProcessError> {

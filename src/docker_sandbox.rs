@@ -138,6 +138,38 @@ fn listing_failure(error: ProcessError) -> String {
     }
 }
 
+/// The sbx command behind each lifecycle Command, or `None` for one sbx has no
+/// way to perform.
+///
+/// Start goes through `sbx exec` rather than the `sbx run --name` sbx
+/// documents for reattaching: `run` opens an interactive agent session that
+/// never exits, which would leave the request pending forever. `exec` starts a
+/// stopped sandbox before running its command, and `-d` returns as soon as it
+/// has.
+///
+/// Deletion always forces. Unlike Docker and Incus, the flag is not about a
+/// running Resource: `sbx rm` prompts for confirmation it reads from a
+/// terminal Virtui does not give it, and `--force` is what skips that prompt.
+/// The user has already confirmed through Virtui's own.
+fn sandbox_command(command: ResourceCommand, resource_id: &str) -> Option<Vec<&str>> {
+    match command {
+        ResourceCommand::Start => Some(vec!["exec", "-d", resource_id, "true"]),
+        ResourceCommand::Stop => Some(vec!["stop", resource_id]),
+        ResourceCommand::Delete => Some(vec!["rm", "--force", resource_id]),
+        // sbx has no restart, and no pause to resume from.
+        ResourceCommand::Restart | ResourceCommand::Resume => None,
+    }
+}
+
+fn command_error(error: ProcessError, fallback: &str) -> WorkspaceError {
+    let message = match error {
+        ProcessError::ExecutableNotFound => "Docker Sandbox CLI is no longer available".to_owned(),
+        ProcessError::SpawnFailed(message) => not_started(&message),
+        ProcessError::Exited(failure) => failure.message_or(fallback),
+    };
+    WorkspaceError::new(message)
+}
+
 fn not_started(reason: &str) -> String {
     format!("Docker Sandbox CLI could not be started: {reason}")
 }
@@ -238,12 +270,27 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
 
     fn execute_command<'a>(
         &'a self,
-        _cli: &'a dyn CliRunner,
-        _resource_id: &'a ResourceId,
-        _command: ResourceCommand,
+        cli: &'a dyn CliRunner,
+        resource_id: &'a ResourceId,
+        command: ResourceCommand,
         _state: ResourceState,
     ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>> {
-        Box::pin(async move { Err(WorkspaceError::new("not implemented")) })
+        Box::pin(async move {
+            let Some(args) = sandbox_command(command, resource_id.0.as_str()) else {
+                return Err(WorkspaceError::new(format!(
+                    "Docker Sandbox cannot {command} sandbox {resource_id}"
+                )));
+            };
+            cli.run(ProcessSpec::new("sbx", &args))
+                .await
+                .map_err(|error| {
+                    command_error(
+                        error,
+                        &format!("Docker Sandbox could not {command} sandbox {resource_id}"),
+                    )
+                })?;
+            Ok(())
+        })
     }
 
     fn load_details<'a>(
