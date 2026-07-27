@@ -192,6 +192,76 @@ fn failure(stderr: &str) -> Result<ProcessOutput, ProcessError> {
     }))
 }
 
+#[tokio::test]
+async fn a_failed_sandbox_refresh_identifies_the_command_and_target() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("sbx", &["ls", "--json"]),
+        failure("Error: sandboxd is not running"),
+    )]);
+
+    let error = DockerSandboxWorkspace
+        .refresh(&cli)
+        .await
+        .expect_err("a non-zero exit is never a snapshot");
+
+    assert_eq!(
+        error.message,
+        "Error: sandboxd is not running. Run `sbx ls` to verify access to the current Target Environment."
+    );
+}
+
+#[tokio::test]
+async fn a_silent_sandbox_refresh_failure_still_explains_itself() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("sbx", &["ls", "--json"]),
+        Err(ProcessError::Exited(ProcessFailure {
+            exit_code: Some(1),
+            stdout: String::new(),
+            stderr: String::new(),
+        })),
+    )]);
+
+    let error = DockerSandboxWorkspace
+        .refresh(&cli)
+        .await
+        .expect_err("a non-zero exit is never a snapshot");
+
+    assert_eq!(
+        error.message,
+        "Docker Sandbox could not list sandboxes. Run `sbx ls` to verify access to the current Target Environment."
+    );
+}
+
+/// Truncated output is a failure the user can see, not an empty workspace that
+/// silently hides every sandbox they own.
+#[tokio::test]
+async fn malformed_sandbox_output_is_reported_rather_than_read_as_empty() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("sbx", &["ls", "--json"]),
+        success(include_str!(
+            "fixtures/docker-sandbox/malformed-sandboxes.json"
+        )),
+    )]);
+
+    let error = DockerSandboxWorkspace
+        .refresh(&cli)
+        .await
+        .expect_err("truncated JSON is never a snapshot");
+
+    assert!(
+        error.message.starts_with("Docker Sandbox returned malformed data:"),
+        "the message names the provider and the problem: {}",
+        error.message
+    );
+    assert!(
+        error.message.ends_with(
+            ". Run `sbx ls` to verify access to the current Target Environment."
+        ),
+        "the message stays actionable: {}",
+        error.message
+    );
+}
+
 /// An installed sbx whose daemon is down or whose Docker login has lapsed is a
 /// Provider the user can act on, so it stays on screen instead of vanishing
 /// the way an uninstalled one does.
