@@ -15,7 +15,7 @@ use virtui::{
     provider::{
         DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderRequest, Resource,
         ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourcePanelId,
-        ResourceState, WorkspaceError, WorkspaceSnapshot,
+        ResourceState, ResourceTarget, WorkspaceError, WorkspaceSnapshot,
     },
     runtime::{ProviderRuntime, RefreshTimer, ShellControl, handle_key},
     ui::{render_foreground_colours, render_to_text},
@@ -609,7 +609,10 @@ fn returning_from_a_shell_refreshes_the_active_workspace_and_preserves_selection
 
     assert_eq!(
         app.state().providers[0].selected_resource,
-        Some(ResourceId::new("container-b"))
+        Some(ResourceTarget::new(
+            ResourcePanelId::new("containers"),
+            ResourceId::new("container-b")
+        ))
     );
 }
 
@@ -1651,6 +1654,10 @@ fn docker_multi_panel_snapshot() -> WorkspaceSnapshot {
                         ResourceCommand::Restart,
                         ResourceCommand::Delete,
                     ],
+                    shell: Some(ProcessSpec::new(
+                        "docker",
+                        &["exec", "-it", "shared-id", "/bin/sh"],
+                    )),
                 }],
             },
             ResourcePanel {
@@ -1669,6 +1676,7 @@ fn docker_multi_panel_snapshot() -> WorkspaceSnapshot {
                         ("Size".to_owned(), "192MB".to_owned()),
                     ],
                     available_commands: Vec::new(),
+                    shell: None,
                 }],
             },
         ],
