@@ -246,10 +246,13 @@ async fn docker_maps_every_container_state_into_the_shared_vocabulary() {
 /// operation nowhere, which is how an unsupported shell stays absent.
 #[tokio::test]
 async fn only_a_running_container_carries_an_interactive_shell() {
-    let cli = FixtureCli::new([(
-        container_ls(),
-        success(include_str!("fixtures/docker/mixed-state-containers.jsonl")),
-    )]);
+    let cli = FixtureCli::new([
+        (
+            container_ls(),
+            success(include_str!("fixtures/docker/mixed-state-containers.jsonl")),
+        ),
+        (image_ls(), success("")),
+    ]);
 
     let snapshot = DockerWorkspace
         .refresh(&cli)

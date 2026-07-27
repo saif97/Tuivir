@@ -239,6 +239,11 @@ pub struct WorkspaceSnapshot {
 }
 
 impl WorkspaceSnapshot {
+    /// Iterates every Resource across all panels in provider-defined order.
+    pub fn resources(&self) -> impl Iterator<Item = &Resource> {
+        self.panels.iter().flat_map(|panel| panel.resources.iter())
+    }
+
     /// Iterates every Resource across all panels in panel order, each paired
     /// with the target that identifies it.
     ///
