@@ -113,6 +113,54 @@ async fn installed_docker_sandbox_that_cannot_list_stays_visible_with_an_actiona
     );
 }
 
+/// A binary that exists but cannot be executed is installed, not absent, so it
+/// is reported rather than silently dropped.
+#[tokio::test]
+async fn an_sbx_that_cannot_be_started_names_docker_sandbox_in_the_error() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("sbx", &["version"]),
+        Err(ProcessError::SpawnFailed("permission denied".to_owned())),
+    )]);
+
+    let discovered = DockerSandboxWorkspace
+        .discover(&cli)
+        .await
+        .expect("a CLI that exists is never omitted");
+
+    assert_eq!(
+        discovered
+            .error
+            .expect("a provider that cannot start explains itself")
+            .message,
+        "Docker Sandbox CLI could not be started: permission denied. Run `sbx ls` to verify sandboxd is running and you are signed in to Docker."
+    );
+}
+
+#[tokio::test]
+async fn a_silent_version_probe_failure_still_explains_itself() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("sbx", &["version"]),
+        Err(ProcessError::Exited(ProcessFailure {
+            exit_code: Some(1),
+            stdout: String::new(),
+            stderr: String::new(),
+        })),
+    )]);
+
+    let discovered = DockerSandboxWorkspace
+        .discover(&cli)
+        .await
+        .expect("a CLI that ran is never omitted");
+
+    assert_eq!(
+        discovered
+            .error
+            .expect("a silent failure still explains itself")
+            .message,
+        "Docker Sandbox could not report its version. Run `sbx ls` to verify sandboxd is running and you are signed in to Docker."
+    );
+}
+
 #[tokio::test]
 async fn docker_sandbox_is_omitted_when_its_cli_is_absent() {
     let cli = FixtureCli::new([(

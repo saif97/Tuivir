@@ -68,8 +68,15 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
             // one whose daemon is down or whose login has lapsed.
             let version = match cli.run(ProcessSpec::new("sbx", &["version"])).await {
                 Err(ProcessError::ExecutableNotFound) => return None,
+                Err(ProcessError::SpawnFailed(message)) => {
+                    return Some(discovery_error(not_started(&message)));
+                }
+                Err(ProcessError::Exited(failure)) => {
+                    return Some(discovery_error(
+                        failure.message_or("Docker Sandbox could not report its version"),
+                    ));
+                }
                 Ok(output) => sbx_version(&output.stdout),
-                Err(_) => return None,
             };
             // Listing is what proves sbx is usable, and it fails for the two
             // reasons the user can act on: sandboxd is down, or the Docker
