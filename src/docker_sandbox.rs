@@ -46,6 +46,21 @@ struct SandboxPort {
     protocol: String,
 }
 
+/// The summary fields shown beside a selected sandbox.
+///
+/// A field with nothing behind it renders as a bare label, so a sandbox
+/// mounting no host path leaves the row out rather than showing an empty one.
+fn sandbox_fields(row: &SandboxRow) -> Vec<(String, String)> {
+    let mut fields = vec![
+        ("Agent".to_owned(), row.agent.clone()),
+        ("ID".to_owned(), row.id.clone()),
+    ];
+    if !row.workspaces.is_empty() {
+        fields.push(("Workspaces".to_owned(), row.workspaces.join(", ")));
+    }
+    fields
+}
+
 /// Lays a sandbox's `sbx ls --json` row out for reading.
 ///
 /// sbx has no per-sandbox inspect command, so this row is everything it knows;
@@ -275,16 +290,13 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
                 .into_iter()
                 .map(|row| {
                     let state = sandbox_resource_state(&row.status);
+                    let fields = sandbox_fields(&row);
                     Resource {
                         id: ResourceId::new(&row.name),
                         name: row.name,
                         status: Some(row.status),
                         state,
-                        fields: vec![
-                            ("Agent".to_owned(), row.agent),
-                            ("ID".to_owned(), row.id),
-                            ("Workspaces".to_owned(), row.workspaces.join(", ")),
-                        ],
+                        fields,
                         available_commands: sandbox_commands(state),
                     }
                 })

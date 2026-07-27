@@ -190,6 +190,34 @@ async fn a_sandbox_carries_its_agent_uuid_and_workspaces_as_fields() {
     );
 }
 
+/// A field with nothing behind it renders as a bare label in the summary, so
+/// a sandbox mounting no host path leaves the row out rather than showing
+/// "Workspaces:" with nothing after it.
+#[tokio::test]
+async fn a_sandbox_with_no_workspaces_omits_the_field_entirely() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("sbx", &["ls", "--json"]),
+        success(
+            r#"{"sandboxes":[{"name":"no-workspace","id":"77777777-7777-4777-8777-777777777777","agent":"shell","status":"stopped","workspaces":[]}]}"#,
+        ),
+    )]);
+
+    let snapshot = DockerSandboxWorkspace
+        .refresh(&cli)
+        .await
+        .expect("the fixture lists one sandbox");
+
+    let sandbox = snapshot.resources().next().expect("one sandbox");
+    assert_eq!(
+        sandbox
+            .fields
+            .iter()
+            .map(|(label, _)| label.as_str())
+            .collect::<Vec<_>>(),
+        ["Agent", "ID"]
+    );
+}
+
 /// `sbx run --name` is the documented way to reattach, but it opens an
 /// interactive agent session that never exits, which would leave the request
 /// pending forever. `sbx exec` starts a stopped sandbox before running its
