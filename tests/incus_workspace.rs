@@ -790,6 +790,10 @@ async fn runtime_with_builtin_providers_discovers_installed_incus() {
             ProcessSpec::new("incus", &["project", "get-current"]),
             success("default\n"),
         ),
+        (
+            ProcessSpec::new("sbx", &["version"]),
+            Err(ProcessError::ExecutableNotFound),
+        ),
     ]);
     let runtime = ProviderRuntime::with_builtin_providers(Arc::new(cli));
 

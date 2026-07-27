@@ -1,4 +1,9 @@
-use std::{collections::VecDeque, future::Future, pin::Pin, sync::Mutex};
+use std::{
+    collections::VecDeque,
+    future::Future,
+    pin::Pin,
+    sync::{Arc, Mutex},
+};
 
 use virtui::{
     app::{App, AppEvent},
@@ -8,6 +13,7 @@ use virtui::{
         DetailViewId, ProviderId, ProviderRequest, ProviderWorkspace, ResourceCommand, ResourceId,
         ResourceState, WorkspaceError, WorkspaceSnapshot,
     },
+    runtime::ProviderRuntime,
     ui::render_to_text,
 };
 
@@ -412,6 +418,38 @@ async fn reachable_docker_sandbox_without_sandboxes_renders_a_distinct_empty_sta
         "{screen}"
     );
     assert!(!screen.contains("unavailable"), "{screen}");
+}
+
+/// A Provider Workspace nothing constructs is a Provider the user never sees,
+/// so registration is verified through the runtime that builds them.
+#[tokio::test]
+async fn runtime_with_builtin_providers_discovers_installed_docker_sandbox() {
+    let cli = FixtureCli::new([
+        (
+            ProcessSpec::new("docker", &["context", "show"]),
+            Err(ProcessError::ExecutableNotFound),
+        ),
+        (
+            ProcessSpec::new("incus", &["remote", "get-default"]),
+            Err(ProcessError::ExecutableNotFound),
+        ),
+        (
+            ProcessSpec::new("sbx", &["version"]),
+            success("sbx version: v0.37.0 8b65b864b0d49c29f05a55170d6b5eea4c0d11e7\n"),
+        ),
+        (
+            ProcessSpec::new("sbx", &["ls", "--json"]),
+            success(include_str!("fixtures/docker-sandbox/sandboxes.json")),
+        ),
+    ]);
+    let runtime = ProviderRuntime::with_builtin_providers(Arc::new(cli));
+
+    let discovered = runtime.discover().await;
+
+    assert_eq!(discovered.len(), 1);
+    assert_eq!(discovered[0].id, ProviderId::new("docker-sandbox"));
+    assert_eq!(discovered[0].name, "Docker Sandbox");
+    assert_eq!(discovered[0].target_environment, "v0.37.0");
 }
 
 fn failure(stderr: &str) -> Result<ProcessOutput, ProcessError> {
