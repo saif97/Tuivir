@@ -134,6 +134,7 @@ impl ProviderWorkspace for DockerWorkspace {
                     })?;
                     let state = docker_resource_state(&row.state);
                     let available_commands = docker_commands(state);
+                    let shell = container_shell(state, &row.id);
                     Ok(Resource {
                         id: ResourceId::new(row.id),
                         name: row.names,
@@ -144,6 +145,7 @@ impl ProviderWorkspace for DockerWorkspace {
                             ("Status".to_owned(), row.status),
                         ],
                         available_commands,
+                        shell,
                     })
                 })
                 .collect::<Result<Vec<_>, WorkspaceError>>()?;
@@ -349,6 +351,17 @@ fn docker_commands(state: ResourceState) -> Vec<ResourceCommand> {
             vec![ResourceCommand::Delete]
         }
     }
+}
+
+/// The Interactive Shell Docker offers inside a container.
+///
+/// `docker exec` attaches only to a running container, so every other state
+/// offers none. Plain `/bin/sh` is the shell that exists wherever any shell
+/// does, including the minimal images Docker containers are so often built
+/// from; reaching for a login shell instead would fail on exactly those.
+fn container_shell(state: ResourceState, resource_id: &str) -> Option<ProcessSpec> {
+    (state == ResourceState::Running)
+        .then(|| ProcessSpec::new("docker", &["exec", "-it", resource_id, "/bin/sh"]))
 }
 
 fn discovery_with_error(message: impl Into<String>) -> ProviderDiscovery {

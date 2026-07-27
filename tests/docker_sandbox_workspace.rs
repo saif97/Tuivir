@@ -290,6 +290,56 @@ async fn a_command_sbx_cannot_perform_is_refused_without_running_anything() {
     }
 }
 
+/// `sbx exec` starts a stopped sandbox before running in it, so a sandbox does
+/// not have to be running to carry an Interactive Shell — it only has to be one
+/// Virtui recognises. That is a real difference from Docker and Incus, where
+/// exec against anything but a running Resource simply fails, and the rule in
+/// both cases is the same one: offer the shell exactly where it works.
+///
+/// A status this workspace cannot read is not a sandbox it can promise `sbx
+/// exec` will reach, so those carry none.
+#[tokio::test]
+async fn every_recognised_sandbox_carries_an_interactive_shell() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("sbx", &["ls", "--json"]),
+        success(include_str!(
+            "fixtures/docker-sandbox/mixed-state-sandboxes.json"
+        )),
+    )]);
+
+    let snapshot = DockerSandboxWorkspace
+        .refresh(&cli)
+        .await
+        .expect("the fixture lists sandboxes");
+
+    let shells = snapshot
+        .resources()
+        .filter_map(|resource| {
+            resource
+                .shell
+                .as_ref()
+                .map(|shell| (resource.name.as_str(), shell.clone()))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        shells,
+        [
+            (
+                "running-sandbox",
+                ProcessSpec::new("sbx", &["exec", "-it", "running-sandbox", "bash"]),
+            ),
+            (
+                "stopped-sandbox",
+                ProcessSpec::new("sbx", &["exec", "-it", "stopped-sandbox", "bash"]),
+            ),
+            (
+                "shouting-sandbox",
+                ProcessSpec::new("sbx", &["exec", "-it", "shouting-sandbox", "bash"]),
+            ),
+        ]
+    );
+}
+
 /// Availability comes from the state the last refresh already reported, so
 /// offering the Commands costs no extra sbx query. The fixture answers one
 /// listing and panics on anything else, which is what proves it.

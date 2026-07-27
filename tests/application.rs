@@ -562,6 +562,57 @@ fn successful_resource_command_refreshes_the_active_workspace_and_preserves_sele
     assert!(render_to_text(app.state(), 100, 24).contains("Image: alpine:3.21"));
 }
 
+/// A user who went into a shell to change something wants to see the change,
+/// and wants to come back to the Resource they left. Only the Active Workspace
+/// is asked, so a shell never wakes a Provider the user is not looking at.
+#[test]
+fn returning_from_a_shell_refreshes_the_active_workspace_and_preserves_selection() {
+    let containers = [
+        ("container-a", "api", "nginx:1.27"),
+        ("container-b", "worker", "redis:7"),
+    ];
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(initial, Ok(snapshot(&containers))));
+    handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
+    );
+    handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('E'), KeyModifiers::NONE),
+    );
+    let shell = app.take_pending_shell().expect("a shell to hand over to");
+    assert_eq!(shell.resource_id, ResourceId::new("container-b"));
+
+    let requests = app.update(AppEvent::ShellClosed {
+        shell,
+        result: Ok(()),
+    });
+
+    let refresh = requests
+        .iter()
+        .filter(|request| matches!(request, ProviderRequest::RefreshWorkspace { .. }))
+        .collect::<Vec<_>>();
+    assert!(
+        matches!(
+            refresh.as_slice(),
+            [ProviderRequest::RefreshWorkspace { provider_id, .. }]
+                if provider_id == &ProviderId::new("docker")
+        ),
+        "exactly one refresh, for the Active Workspace, got {requests:?}"
+    );
+    app.update(refresh_completed(
+        refresh_request(requests),
+        Ok(snapshot(&containers)),
+    ));
+
+    assert_eq!(
+        app.state().providers[0].selected_resource,
+        Some(ResourceId::new("container-b"))
+    );
+}
+
 #[test]
 fn failed_resource_command_identifies_provider_resource_and_attempted_command() {
     let mut app = App::new();
@@ -926,6 +977,55 @@ fn help_offers_resume_only_while_the_resource_is_suspended() {
     );
 }
 
+/// A Resource whose Provider offers no Interactive Shell must not look as
+/// though pressing the key would do something. Nothing is asked for, and help
+/// says why the key is there but idle.
+#[test]
+fn help_offers_a_shell_only_while_the_resource_can_host_one() {
+    let mut stopped = App::new();
+    let initial = refresh_request(stopped.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    stopped.update(refresh_completed(
+        initial,
+        Ok(stopped_snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+
+    handle_key(
+        &mut stopped,
+        KeyEvent::new(KeyCode::Char('E'), KeyModifiers::NONE),
+    );
+    assert!(
+        stopped.state().pending_shell.is_none(),
+        "a stopped container has no shell to open"
+    );
+
+    handle_key(
+        &mut stopped,
+        KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+    );
+    let screen = render_to_text(stopped.state(), 100, 24);
+    assert!(
+        screen.contains("E  Shell (unavailable)"),
+        "rendered screen:\n{screen}"
+    );
+
+    let mut running = App::new();
+    let initial = refresh_request(running.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    running.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+    handle_key(
+        &mut running,
+        KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+    );
+    let screen = render_to_text(running.state(), 100, 24);
+    assert!(screen.contains("E  Shell"), "rendered screen:\n{screen}");
+    assert!(
+        !screen.contains("E  Shell (unavailable)"),
+        "rendered screen:\n{screen}"
+    );
+}
+
 #[test]
 fn question_mark_closes_the_help_overlay_when_it_is_already_open() {
     let mut app = App::new();
@@ -952,6 +1052,42 @@ fn question_mark_closes_the_help_overlay_when_it_is_already_open() {
     );
     assert!(screen.contains("Containers"), "rendered screen:\n{screen}");
     assert!(screen.contains("api"), "rendered screen:\n{screen}");
+}
+
+/// An Interactive Shell is not work Virtui can run behind its own screen, so
+/// the shell key produces no provider request at all. It asks for the terminal
+/// instead, naming what the shell was opened for so a failure can say so later.
+#[test]
+fn the_shell_key_asks_for_the_terminal_for_the_selected_container() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+
+    let (_, requests) = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('E'), KeyModifiers::NONE),
+    );
+
+    assert!(
+        requests.is_empty(),
+        "an Interactive Shell is never dispatched as background work"
+    );
+    let pending = app
+        .state()
+        .pending_shell
+        .as_ref()
+        .expect("a shell waiting for the terminal");
+    assert_eq!(pending.provider_id, ProviderId::new("docker"));
+    assert_eq!(pending.provider_name, "Docker");
+    assert_eq!(pending.resource_id, ResourceId::new("container-a"));
+    assert_eq!(pending.resource_name, "api");
+    assert_eq!(
+        pending.process,
+        ProcessSpec::new("docker", &["exec", "-it", "container-a", "/bin/sh"])
+    );
 }
 
 #[test]
@@ -1440,6 +1576,8 @@ fn container_snapshot(
                     state: Some(state),
                     fields: vec![("Image".to_owned(), (*image).to_owned())],
                     available_commands: available_commands.clone(),
+                    shell: (state == ResourceState::Running)
+                        .then(|| ProcessSpec::new("docker", &["exec", "-it", *id, "/bin/sh"])),
                 })
                 .collect(),
         }],
@@ -1479,6 +1617,8 @@ fn incus_snapshot(instances: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
                         } else {
                             vec![ResourceCommand::Start, ResourceCommand::Delete]
                         },
+                        shell: running
+                            .then(|| ProcessSpec::new("incus", &["exec", *name, "--", "su", "-l"])),
                     }
                 })
                 .collect(),

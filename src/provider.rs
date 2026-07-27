@@ -1,6 +1,6 @@
 use std::{fmt, future::Future, pin::Pin};
 
-use crate::cli::{CliRunner, ProcessError};
+use crate::cli::{CliRunner, ProcessError, ProcessSpec};
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct ProviderId(pub String);
@@ -172,6 +172,14 @@ pub struct Resource {
     pub fields: Vec<(String, String)>,
     /// Lifecycle Commands currently available for this provider Resource.
     pub available_commands: Vec<ResourceCommand>,
+    /// The Interactive Shell this Provider offers inside the Resource right
+    /// now, or `None` when it offers none.
+    ///
+    /// Declaring the process here rather than answering a later "can I?" is
+    /// what keeps availability and the command that implements it from
+    /// drifting: a Resource with no shell has nothing to run, so the operation
+    /// is absent rather than offered and then refused.
+    pub shell: Option<ProcessSpec>,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]

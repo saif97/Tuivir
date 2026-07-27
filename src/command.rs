@@ -30,6 +30,9 @@ pub enum Command {
     /// Moves through the output of the visible detail view.
     ScrollDetailsDown,
     ScrollDetailsUp,
+    /// Hands the terminal to the Provider CLI for an Interactive Shell inside
+    /// the selected Resource.
+    OpenShell,
     /// Accepts the open modal.
     Confirm,
     /// Cancels or returns from the open modal.
@@ -461,6 +464,13 @@ const BUILTIN_COMMANDS: &[CommandDefinition] = &[
         command: Command::Resource(ResourceCommand::Resume),
         scopes: &[CommandScope::ResourceView],
         default_keys: &["p"],
+    },
+    CommandDefinition {
+        id: "resource.shell",
+        description: "Shell",
+        command: Command::OpenShell,
+        scopes: RESOURCE_VIEW,
+        default_keys: &["E"],
     },
     CommandDefinition {
         id: "resource.delete",

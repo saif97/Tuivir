@@ -131,6 +131,21 @@ fn sandbox_resource_state(status: &str) -> ResourceState {
     }
 }
 
+/// The Interactive Shell Docker Sandbox offers inside a sandbox.
+///
+/// `sbx exec` starts a stopped sandbox before running in it, so unlike Docker
+/// and Incus a sandbox need not already be running to be worth opening a shell
+/// in. The shared rule is unchanged — offer the shell exactly where it works —
+/// and here it works in one more place. A status this workspace cannot read is
+/// not a sandbox it can promise `sbx exec` will reach, so it offers none.
+///
+/// `bash` is what sbx's own documentation reaches for, and a sandbox is a
+/// prepared agent environment rather than a stripped image, so it is there.
+fn sandbox_shell(state: ResourceState, name: &str) -> Option<ProcessSpec> {
+    matches!(state, ResourceState::Running | ResourceState::Stopped)
+        .then(|| ProcessSpec::new("sbx", &["exec", "-it", name, "bash"]))
+}
+
 /// The Commands a sandbox in this state can be asked to perform.
 ///
 /// sbx offers no restart and no pause, so Running and Stopped are the only
@@ -283,6 +298,7 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
                 .map(|row| {
                     let state = sandbox_resource_state(&row.status);
                     let fields = sandbox_fields(&row);
+                    let shell = sandbox_shell(state, &row.name);
                     Resource {
                         id: ResourceId::new(&row.name),
                         name: row.name,
@@ -290,6 +306,7 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
                         state: Some(state),
                         fields,
                         available_commands: sandbox_commands(state),
+                        shell,
                     }
                 })
                 .collect();

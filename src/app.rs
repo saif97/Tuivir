@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::cli::{ProcessError, ProcessSpec};
 use crate::command::{Command, CommandRegistry, CommandScope};
 use crate::keys::Key;
 use crate::provider::{
@@ -24,6 +25,15 @@ pub enum AppEvent {
         request_id: ProviderRequestId,
         provider_id: ProviderId,
         result: Result<WorkspaceSnapshot, WorkspaceError>,
+    },
+    /// An Interactive Shell has given the terminal back, however it ended.
+    ///
+    /// The shell it was opened for travels with the event, so what happened can
+    /// be reported against its Provider and Resource even though the pending
+    /// shell is long gone by then.
+    ShellClosed {
+        shell: PendingShell,
+        result: Result<(), ProcessError>,
     },
     ResourceCommandCompleted {
         request_id: ProviderRequestId,
@@ -146,6 +156,22 @@ impl ProviderState {
 /// height to take a page from.
 const DETAIL_SCROLL_LINES: isize = 10;
 
+/// One sentence for every operation Virtui asked a Provider for and did not
+/// get.
+///
+/// Lifecycle Commands and Interactive Shells fail in different places and are
+/// worded by different code, but they identify their target the same way, so
+/// the user reads one sentence rather than two dialects of one.
+fn operation_failure(
+    provider_name: &str,
+    operation: &str,
+    resource_name: &str,
+    resource_id: &ResourceId,
+    reason: &str,
+) -> String {
+    format!("{provider_name} {operation} failed for {resource_name} ({resource_id}): {reason}")
+}
+
 /// Keeps the visible detail view among the ones currently offered, falling back
 /// to the first when the selected Resource's panel does not declare it.
 fn reconcile_detail_view(provider: &mut ProviderState) {
@@ -175,6 +201,12 @@ pub struct AppState {
     pub help_overlay: Option<HelpOverlay>,
     pub confirmation: Option<ResourceCommandInvocation>,
     pub command_error: Option<String>,
+    /// The Interactive Shell waiting to be given the terminal.
+    ///
+    /// The application cannot suspend a screen or run a process, so this is how
+    /// it asks: the host takes the shell, hands the terminal over, and reports
+    /// back with [`AppEvent::ShellClosed`].
+    pub pending_shell: Option<PendingShell>,
     /// Dispatched Resource Commands that have not completed yet, in dispatch
     /// order.
     ///
@@ -219,6 +251,22 @@ pub struct RunningResourceCommand {
     pub resource_id: ResourceId,
     pub resource_name: String,
     pub command: ResourceCommand,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+/// One Interactive Shell the application wants the terminal for.
+///
+/// The Provider and Resource travel with the process because the application
+/// state cannot be consulted for them: by the time the shell ends, the shell
+/// has been taken out of the state and the refreshed snapshot may no longer
+/// contain the Resource at all.
+pub struct PendingShell {
+    pub provider_id: ProviderId,
+    pub provider_name: String,
+    pub resource_id: ResourceId,
+    pub resource_name: String,
+    /// The Provider CLI process that takes over the terminal.
+    pub process: ProcessSpec,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -323,6 +371,7 @@ impl App {
         match event {
             AppEvent::ProviderDiscovered(discovery) => self.handle_provider_discovered(discovery),
             AppEvent::RefreshTimerElapsed => self.refresh_active_provider(),
+            AppEvent::ShellClosed { shell, result } => self.apply_shell_closed(shell, result),
             AppEvent::RefreshCompleted {
                 request_id,
                 provider_id,
@@ -445,6 +494,10 @@ impl App {
             }
             Command::ScrollDetailsUp => {
                 self.scroll_details(-DETAIL_SCROLL_LINES);
+                Vec::new()
+            }
+            Command::OpenShell => {
+                self.open_shell();
                 Vec::new()
             }
             Command::Confirm => self.confirm_or_dismiss(),
@@ -703,15 +756,52 @@ impl App {
         };
         let provider_name = running.provider_name;
         if let Err(error) = result {
-            self.state.command_error = Some(format!(
-                "{provider_name} {command} failed for {resource_name} ({resource_id}): {}",
-                error.message
+            self.state.command_error = Some(operation_failure(
+                &provider_name,
+                &command.to_string(),
+                &resource_name,
+                &resource_id,
+                &error.message,
             ));
             return Vec::new();
         }
         self.state.command_error = None;
         if !self.is_active_provider(&provider_id) {
             return Vec::new();
+        }
+        self.refresh_active_provider()
+    }
+
+    /// Takes the Interactive Shell that is waiting for the terminal, if any.
+    ///
+    /// Taking it is what commits the application to the handover: a second call
+    /// finds nothing, so one keypress can only ever hand the terminal over once.
+    pub fn take_pending_shell(&mut self) -> Option<PendingShell> {
+        self.state.pending_shell.take()
+    }
+
+    /// Brings the Active Workspace back into line with whatever the user did
+    /// inside the shell.
+    ///
+    /// Only the Active Workspace is asked, and it is always the one the shell
+    /// was opened in: the handover blocks the event loop from the moment the
+    /// shell is taken until this runs, so nothing can have moved in between.
+    fn apply_shell_closed(
+        &mut self,
+        shell: PendingShell,
+        result: Result<(), ProcessError>,
+    ) -> Vec<ProviderRequest> {
+        // Only a shell that never started is reported. One that ran did what
+        // was asked of it whatever status it left, and clearing here would
+        // dismiss a failure the user has not read yet.
+        if let Some(reason) = result.err().as_ref().and_then(ProcessError::start_failure) {
+            self.state.command_error = Some(operation_failure(
+                &shell.provider_name,
+                "shell",
+                &shell.resource_name,
+                &shell.resource_id,
+                &reason,
+            ));
         }
         self.refresh_active_provider()
     }
@@ -801,6 +891,39 @@ impl App {
         }]
     }
 
+    /// Asks for the terminal on behalf of the selected Resource's Interactive
+    /// Shell.
+    ///
+    /// A Resource whose Provider offers no shell asks for nothing, so an
+    /// unsupported operation stays unsupported rather than being attempted and
+    /// refused.
+    fn open_shell(&mut self) {
+        let Some(provider) = self
+            .state
+            .active_provider
+            .and_then(|active| self.state.providers.get(active))
+        else {
+            return;
+        };
+        let provider_id = provider.id.clone();
+        let provider_name = provider.name.clone();
+        let Some(resource) = self.selected_resource() else {
+            return;
+        };
+        let Some(process) = resource.shell.clone() else {
+            return;
+        };
+        let resource_id = resource.id.clone();
+        let resource_name = resource.name.clone();
+        self.state.pending_shell = Some(PendingShell {
+            provider_id,
+            provider_name,
+            resource_id,
+            resource_name,
+            process,
+        });
+    }
+
     fn toggle_help(&mut self) {
         if self.state.help_overlay.take().is_some() {
             return;
@@ -813,6 +936,7 @@ impl App {
         };
         let target = resource.name.clone();
         let available_commands = resource.available_commands.clone();
+        let offers_a_shell = resource.shell.is_some();
         self.state.help_overlay = Some(HelpOverlay {
             target,
             entries: self
@@ -826,6 +950,9 @@ impl App {
                         .to_string(),
                     description: match registered.command {
                         Command::Resource(command) if !available_commands.contains(&command) => {
+                            format!("{} (unavailable)", registered.description)
+                        }
+                        Command::OpenShell if !offers_a_shell => {
                             format!("{} (unavailable)", registered.description)
                         }
                         _ => registered.description.to_owned(),

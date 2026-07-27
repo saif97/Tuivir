@@ -8,7 +8,12 @@ use std::{
     time::Duration,
 };
 
-use crossterm::event::{self, Event, KeyEvent};
+use crossterm::{
+    cursor::MoveTo,
+    event::{self, Event, KeyEvent},
+    execute,
+    terminal::{Clear, ClearType, EnterAlternateScreen, disable_raw_mode, enable_raw_mode},
+};
 use ratatui::DefaultTerminal;
 use tokio::sync::mpsc;
 use virtui::{
@@ -17,7 +22,9 @@ use virtui::{
     command::CommandRegistry,
     config::{Env, FileSystemReader, load},
     provider::ProviderRequest,
-    runtime::{ProviderRuntime, RefreshTimer, ShellControl, handle_key},
+    runtime::{
+        ProviderRuntime, RefreshTimer, ShellControl, ShellTerminal, handle_key, open_pending_shell,
+    },
     ui,
 };
 
@@ -50,8 +57,7 @@ async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::R
     }
 
     let (key_tx, mut key_rx) = mpsc::unbounded_channel();
-    let stop_input = Arc::new(AtomicBool::new(false));
-    let input_thread = spawn_input_thread(key_tx, Arc::clone(&stop_input));
+    let mut input = InputThread::start(key_tx);
     let mut refresh_timer = RefreshTimer::new();
 
     let result = loop {
@@ -66,6 +72,42 @@ async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::R
                 if control == ShellControl::Quit {
                     break Ok(());
                 }
+                // A key may have asked for the terminal. Handing it over blocks
+                // this loop until the shell exits, which is the point: Virtui
+                // has no screen to draw on until it comes back.
+                //
+                // Asked only when a shell is actually waiting: `block_in_place`
+                // hands this worker's remaining tasks to another thread, which
+                // is worth doing for a shell and worth nothing for the `j` that
+                // moved the selection.
+                if app.state().pending_shell.is_some() {
+                    let mut host = Host {
+                        terminal: &mut *terminal,
+                        input: &mut input,
+                        keys: &mut key_rx,
+                    };
+                    // Moving those tasks aside is what keeps provider work
+                    // already in flight running while the shell holds the
+                    // terminal. It also makes the multi-threaded runtime a
+                    // stated requirement rather than a silent one: it panics on
+                    // a current-thread runtime.
+                    let handover = tokio::task::block_in_place(|| {
+                        open_pending_shell(&mut app, &mut host, &TokioCliRunner)
+                    });
+                    match handover {
+                        Ok(requests) => dispatch_all(&runtime, &completion_tx, requests),
+                        // The screen never came back, so the modal that would
+                        // have carried the shell's own failure will never be
+                        // drawn. This exit line is the last place left to say
+                        // it, and it is printed once the terminal is restored.
+                        Err(error) => break Err(match app.state().command_error.as_deref() {
+                            Some(shell) => {
+                                io::Error::new(error.kind(), format!("{error}; {shell}"))
+                            }
+                            None => error,
+                        }),
+                    }
+                }
             }
             Some(event) = completion_rx.recv() => {
                 let requests = app.update(event);
@@ -78,9 +120,108 @@ async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::R
         }
     };
 
-    stop_input.store(true, Ordering::Relaxed);
-    let _ = input_thread.join();
+    input.stop();
     result
+}
+
+/// The real terminal and the thread competing with a shell for its keystrokes.
+struct Host<'a> {
+    terminal: &'a mut DefaultTerminal,
+    input: &'a mut InputThread,
+    /// The keys the reader has already published, which the discard step empties
+    /// before anything is allowed to read again.
+    keys: &'a mut mpsc::UnboundedReceiver<KeyEvent>,
+}
+
+impl ShellTerminal for Host<'_> {
+    fn suspend(&mut self) -> io::Result<()> {
+        // Reading stops before the screen is given up: a thread still polling
+        // crossterm would swallow the keystrokes meant for the shell.
+        self.input.stop();
+        // Raw mode goes; the alternate screen stays. Leaving it would uncover
+        // the terminal Virtui was launched from, and the shell would open on
+        // top of whatever was already there — the user's own scrollback, with a
+        // container's prompt in the middle of it. Wiping the alternate screen
+        // instead opens the shell on nothing but itself, and leaves the real
+        // terminal untouched for Virtui to hand back whole at the end.
+        disable_raw_mode()?;
+        execute!(io::stdout(), Clear(ClearType::All), MoveTo(0, 0))
+    }
+
+    fn resume(&mut self) -> io::Result<()> {
+        // Re-entering raw mode and the alternate screen directly rather than
+        // building a second terminal with `try_init`: that installs a panic hook
+        // wrapping the previous one, so a session with several shells in it
+        // would nest a fresh hook per shell.
+        enable_raw_mode()?;
+        // Asking for the alternate screen Virtui never gave up costs nothing,
+        // and is what recovers the one case where it did lose it: a full-screen
+        // program run inside the shell — an editor in the container — leaves the
+        // alternate screen on its way out and drops the terminal back onto the
+        // screen Virtui must not draw over.
+        execute!(io::stdout(), EnterAlternateScreen)?;
+        // The shell wrote all over the screen Virtui last drew, so nothing that
+        // survives the handover is worth keeping — and without this the next
+        // draw would diff against a buffer describing a screen that is gone.
+        //
+        // Clearing asks the terminal where its cursor is and waits for the
+        // answer, which is a second reason this step must finish before
+        // `resume_reading`: an input thread would take that answer for a
+        // keystroke and leave the clear waiting for a reply already eaten.
+        self.terminal.clear()?;
+        Ok(())
+    }
+
+    fn discard_keys(&mut self) {
+        // Draining what the reader published rather than what the terminal
+        // still holds: the reader is stopped, so anything it had time to send
+        // before noticing is already here, and nothing new can arrive until
+        // `resume_reading`.
+        while self.keys.try_recv().is_ok() {}
+    }
+
+    fn resume_reading(&mut self) {
+        self.input.start_again();
+    }
+}
+
+/// The blocking terminal reader, publishing keys as application input.
+///
+/// It is stoppable because an Interactive Shell needs the keystrokes more than
+/// Virtui does, and restartable because Virtui needs them back afterwards.
+struct InputThread {
+    keys: mpsc::UnboundedSender<KeyEvent>,
+    stop: Arc<AtomicBool>,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl InputThread {
+    fn start(keys: mpsc::UnboundedSender<KeyEvent>) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let handle = spawn_input_thread(keys.clone(), Arc::clone(&stop));
+        Self {
+            keys,
+            stop,
+            handle: Some(handle),
+        }
+    }
+
+    /// Stops reading and waits for the thread to notice, so no reader is left
+    /// holding the terminal when the next process takes it.
+    fn stop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+
+    fn start_again(&mut self) {
+        self.stop.store(false, Ordering::Relaxed);
+        self.handle = Some(spawn_input_thread(
+            self.keys.clone(),
+            Arc::clone(&self.stop),
+        ));
+    }
 }
 
 fn dispatch_all(
