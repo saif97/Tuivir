@@ -46,12 +46,27 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> (ShellControl, Vec<ProviderRe
 /// Leaving the Ratatui screen and stopping the competition for keystrokes are
 /// both the host's business, not the application's, so they live behind this
 /// seam rather than inside [`App`].
+///
+/// Taking it back is three steps rather than one because their order is the
+/// whole point: keys queued while the shell held the terminal have to be gone
+/// before anything reads again, and a reader started first would race the
+/// discard for them. Stating the order here, in the function every test drives,
+/// is what stops a host from getting it subtly wrong on its own.
 pub trait ShellTerminal {
     /// Gives the terminal back to whatever runs next, and stops reading input.
     fn suspend(&mut self) -> io::Result<()>;
 
-    /// Takes the terminal back, and starts reading input again.
+    /// Takes the screen back, still not reading.
     fn resume(&mut self) -> io::Result<()>;
+
+    /// Drops whatever the user typed while the shell held the terminal.
+    ///
+    /// Those keys were typed at the shell, not at Virtui, so acting on them
+    /// would be acting on an instruction meant for somebody else.
+    fn discard_keys(&mut self);
+
+    /// Starts reading keys into Virtui again.
+    fn resume_reading(&mut self);
 }
 
 /// Hands the terminal to the Interactive Shell the application asked for, and
@@ -75,6 +90,10 @@ pub fn open_pending_shell(
     terminal.suspend()?;
     let result = runner.run_interactive(&shell.process);
     terminal.resume()?;
+    // Discarding before reading, not after: a reader started first is already
+    // competing for the keys the discard is meant to remove.
+    terminal.discard_keys();
+    terminal.resume_reading();
     Ok(app.update(AppEvent::ShellClosed { shell, result }))
 }
 

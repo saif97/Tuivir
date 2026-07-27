@@ -49,6 +49,14 @@ impl ShellTerminal for FakeTerminal {
         self.0.record("resume");
         Ok(())
     }
+
+    fn discard_keys(&mut self) {
+        self.0.record("discard keys");
+    }
+
+    fn resume_reading(&mut self) {
+        self.0.record("resume reading");
+    }
 }
 
 struct FakeShell {
@@ -148,6 +156,8 @@ fn the_terminal_is_suspended_for_the_provider_cli_and_taken_back_after() {
             "suspend",
             "run docker exec -it container-a /bin/sh",
             "resume",
+            "discard keys",
+            "resume reading",
         ]
     );
     assert!(
@@ -179,12 +189,9 @@ fn a_shell_that_never_starts_still_gives_the_terminal_back_and_names_what_failed
     open_pending_shell(&mut app, &mut terminal, &shell).expect("the terminal to come back");
 
     assert_eq!(
-        handover.steps(),
-        [
-            "suspend",
-            "run docker exec -it container-a /bin/sh",
-            "resume",
-        ]
+        handover.steps().last().map(String::as_str),
+        Some("resume reading"),
+        "the handover finishes even when the shell never started"
     );
     assert_eq!(
         app.state().command_error.as_deref(),
@@ -217,7 +224,10 @@ fn a_shell_that_exits_unsuccessfully_reports_the_status_it_left() {
     let requests =
         open_pending_shell(&mut app, &mut terminal, &shell).expect("the terminal to come back");
 
-    assert_eq!(handover.steps().last().map(String::as_str), Some("resume"));
+    assert_eq!(
+        handover.steps().last().map(String::as_str),
+        Some("resume reading")
+    );
     assert_eq!(
         app.state().command_error.as_deref(),
         Some("Docker shell failed for api (container-a): exit status 126")
@@ -228,6 +238,40 @@ fn a_shell_that_exits_unsuccessfully_reports_the_status_it_left() {
             [ProviderRequest::RefreshWorkspace { .. }]
         ),
         "a shell that ran still leaves the workspace worth refreshing, got {requests:?}"
+    );
+}
+
+/// Keys typed while the shell held the terminal were typed at the shell, and
+/// are gone before Virtui reads anything.
+///
+/// The order is what makes that true rather than merely likely: a reader
+/// started first is already pulling those keys out of the queue, so a discard
+/// that follows it empties a queue the reader has partly drained and the
+/// remainder lands on Virtui as commands the user never aimed at it.
+#[test]
+fn keys_typed_at_the_shell_are_discarded_before_virtui_reads_again() {
+    let mut app = app_awaiting_the_terminal();
+    let handover = Handover::default();
+    let mut terminal = FakeTerminal(handover.clone());
+    let shell = FakeShell {
+        handover: handover.clone(),
+        outcome: Ok(()),
+    };
+
+    open_pending_shell(&mut app, &mut terminal, &shell).expect("the terminal to come back");
+
+    let steps = handover.steps();
+    let discarded = steps
+        .iter()
+        .position(|step| step == "discard keys")
+        .expect("the keys typed at the shell to be discarded");
+    let reading = steps
+        .iter()
+        .position(|step| step == "resume reading")
+        .expect("Virtui to read keys again");
+    assert!(
+        discarded < reading,
+        "discarding must precede reading, got {steps:?}"
     );
 }
 

@@ -74,7 +74,11 @@ async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::R
                 // A key may have asked for the terminal. Handing it over blocks
                 // this loop until the shell exits, which is the point: Virtui
                 // has no screen to draw on until it comes back.
-                let mut host = Host { terminal: &mut *terminal, input: &mut input };
+                let mut host = Host {
+                    terminal: &mut *terminal,
+                    input: &mut input,
+                    keys: &mut key_rx,
+                };
                 // `block_in_place` moves the rest of this worker's tasks
                 // elsewhere for the duration, so provider work already in flight
                 // keeps running while the shell holds the terminal. It also
@@ -87,11 +91,6 @@ async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::R
                     Ok(requests) => dispatch_all(&runtime, &completion_tx, requests),
                     Err(error) => break Err(error),
                 }
-                // Anything typed while the shell owned the terminal was meant
-                // for the shell. The reader is stopped with a polled flag, so it
-                // can publish one last key after the handover began; dropping
-                // whatever queued up keeps it from acting on Virtui instead.
-                while key_rx.try_recv().is_ok() {}
             }
             Some(event) = completion_rx.recv() => {
                 let requests = app.update(event);
@@ -112,6 +111,9 @@ async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::R
 struct Host<'a> {
     terminal: &'a mut DefaultTerminal,
     input: &'a mut InputThread,
+    /// The keys the reader has already published, which the discard step empties
+    /// before anything is allowed to read again.
+    keys: &'a mut mpsc::UnboundedReceiver<KeyEvent>,
 }
 
 impl ShellTerminal for Host<'_> {
@@ -135,12 +137,23 @@ impl ShellTerminal for Host<'_> {
         // draw would diff against a buffer describing a screen that is gone.
         //
         // Clearing asks the terminal where its cursor is and waits for the
-        // answer, which is why reading must not start until it has come back:
-        // an input thread would take that answer for a keystroke and leave the
-        // clear waiting for a reply that has already been eaten.
+        // answer, which is a second reason this step must finish before
+        // `resume_reading`: an input thread would take that answer for a
+        // keystroke and leave the clear waiting for a reply already eaten.
         self.terminal.clear()?;
-        self.input.start_again();
         Ok(())
+    }
+
+    fn discard_keys(&mut self) {
+        // Draining what the reader published rather than what the terminal
+        // still holds: the reader is stopped, so anything it had time to send
+        // before noticing is already here, and nothing new can arrive until
+        // `resume_reading`.
+        while self.keys.try_recv().is_ok() {}
+    }
+
+    fn resume_reading(&mut self) {
+        self.input.start_again();
     }
 }
 
