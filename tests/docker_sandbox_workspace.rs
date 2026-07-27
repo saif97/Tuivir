@@ -1,11 +1,14 @@
 use std::{collections::VecDeque, future::Future, pin::Pin, sync::Mutex};
 
 use virtui::{
+    app::{App, AppEvent},
     cli::{CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec},
     docker_sandbox::DockerSandboxWorkspace,
     provider::{
-        DetailViewId, ProviderId, ProviderWorkspace, ResourceCommand, ResourceId, ResourceState,
+        DetailViewId, ProviderId, ProviderRequest, ProviderWorkspace, ResourceCommand, ResourceId,
+        ResourceState, WorkspaceError, WorkspaceSnapshot,
     },
+    ui::render_to_text,
 };
 
 struct FixtureCli {
@@ -318,6 +321,64 @@ async fn command_availability_follows_the_last_refreshed_state() {
             ("unrecognised-sandbox", vec![ResourceCommand::Delete]),
         ]
     );
+}
+
+fn refresh_completed(
+    request: ProviderRequest,
+    result: Result<WorkspaceSnapshot, WorkspaceError>,
+) -> AppEvent {
+    match request {
+        ProviderRequest::RefreshWorkspace {
+            request_id,
+            provider_id,
+        } => AppEvent::RefreshCompleted {
+            request_id,
+            provider_id,
+            result,
+        },
+        other => panic!("expected refresh request, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn discovered_docker_sandbox_renders_target_environment_and_sandboxes() {
+    let cli = FixtureCli::new([
+        (
+            ProcessSpec::new("sbx", &["version"]),
+            success("sbx version: v0.37.0 8b65b864b0d49c29f05a55170d6b5eea4c0d11e7\n"),
+        ),
+        (
+            ProcessSpec::new("sbx", &["ls", "--json"]),
+            success(include_str!("fixtures/docker-sandbox/sandboxes.json")),
+        ),
+        (
+            ProcessSpec::new("sbx", &["ls", "--json"]),
+            success(include_str!("fixtures/docker-sandbox/sandboxes.json")),
+        ),
+    ]);
+    let sandboxes = DockerSandboxWorkspace;
+
+    let discovered = sandboxes
+        .discover(&cli)
+        .await
+        .expect("the fixture represents an installed sbx");
+    let mut app = App::new();
+    let request = app
+        .update(AppEvent::ProviderDiscovered(discovered))
+        .into_iter()
+        .next()
+        .expect("discovery requests the first workspace refresh");
+    app.update(refresh_completed(request, sandboxes.refresh(&cli).await));
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(screen.contains("Docker Sandbox"), "{screen}");
+    assert!(screen.contains("Target: v0.37.0"), "{screen}");
+    assert!(screen.contains("Sandboxes"), "{screen}");
+    assert!(screen.contains("claude-virtui"), "{screen}");
+    assert!(screen.contains("running"), "{screen}");
+    assert!(screen.contains("shell-dotfiles"), "{screen}");
+    assert!(screen.contains("stopped"), "{screen}");
+    assert!(screen.contains("Agent: claude"), "{screen}");
 }
 
 fn failure(stderr: &str) -> Result<ProcessOutput, ProcessError> {
