@@ -1,13 +1,8 @@
-use std::{
-    collections::VecDeque,
-    future::Future,
-    pin::Pin,
-    sync::{Arc, Mutex},
-};
+use std::sync::Arc;
 
 use virtui::{
     app::{App, AppEvent},
-    cli::{CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec},
+    cli::{ProcessError, ProcessFailure, ProcessSpec},
     command::Command,
     docker_sandbox::DockerSandboxWorkspace,
     provider::{
@@ -18,44 +13,8 @@ use virtui::{
     ui::render_to_text,
 };
 
-struct FixtureCli {
-    responses: Mutex<VecDeque<(ProcessSpec, Result<ProcessOutput, ProcessError>)>>,
-}
-
-impl FixtureCli {
-    fn new(
-        responses: impl IntoIterator<Item = (ProcessSpec, Result<ProcessOutput, ProcessError>)>,
-    ) -> Self {
-        Self {
-            responses: Mutex::new(responses.into_iter().collect()),
-        }
-    }
-}
-
-impl CliRunner for FixtureCli {
-    fn run<'a>(
-        &'a self,
-        command: ProcessSpec,
-    ) -> Pin<Box<dyn Future<Output = Result<ProcessOutput, ProcessError>> + Send + 'a>> {
-        Box::pin(async move {
-            let (expected, response) = self
-                .responses
-                .lock()
-                .expect("fixture queue lock")
-                .pop_front()
-                .expect("unexpected CLI command");
-            assert_eq!(command, expected);
-            response
-        })
-    }
-}
-
-fn success(stdout: &str) -> Result<ProcessOutput, ProcessError> {
-    Ok(ProcessOutput {
-        stdout: stdout.to_owned(),
-        stderr: String::new(),
-    })
-}
+mod common;
+use common::{FixtureCli, failure, success};
 
 /// `sbx version` reports a version and a build commit on one line; only the
 /// version identifies the Target Environment.
@@ -581,14 +540,6 @@ async fn starting_an_already_running_sandbox_is_not_offered_and_issues_nothing()
         requests.is_empty(),
         "a Command the Resource never offered issues nothing"
     );
-}
-
-fn failure(stderr: &str) -> Result<ProcessOutput, ProcessError> {
-    Err(ProcessError::Exited(ProcessFailure {
-        exit_code: Some(1),
-        stdout: String::new(),
-        stderr: stderr.to_owned(),
-    }))
 }
 
 #[tokio::test]
