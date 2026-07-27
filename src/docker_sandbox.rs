@@ -1,10 +1,13 @@
 use std::{future::Future, pin::Pin};
 
+use serde::Deserialize;
+
 use crate::{
     cli::{CliRunner, ProcessError, ProcessSpec},
     provider::{
-        DetailViewId, ProviderDiscovery, ProviderId, ProviderWorkspace, ResourceCommand,
-        ResourceDetails, ResourceId, ResourceState, WorkspaceError, WorkspaceSnapshot,
+        DetailViewId, ProviderDiscovery, ProviderId, ProviderWorkspace, Resource, ResourceCommand,
+        ResourceDetails, ResourceId, ResourcePanel, ResourceState, WorkspaceError,
+        WorkspaceSnapshot,
     },
 };
 
@@ -12,6 +15,50 @@ const PROVIDER_ID: &str = "docker-sandbox";
 const PROVIDER_NAME: &str = "Docker Sandbox";
 
 pub struct DockerSandboxWorkspace;
+
+#[derive(Deserialize)]
+struct SandboxListing {
+    sandboxes: Vec<SandboxRow>,
+}
+
+#[derive(Deserialize)]
+struct SandboxRow {
+    name: String,
+    status: String,
+}
+
+/// Runs `sbx ls --json` and parses the one object it wraps its rows in.
+///
+/// sbx starts sandboxd on demand and narrates that on stderr, so only stdout
+/// is ever parsed.
+async fn list_sandboxes(cli: &dyn CliRunner) -> Result<SandboxListing, WorkspaceError> {
+    let output = cli
+        .run(ProcessSpec::new("sbx", &["ls", "--json"]))
+        .await
+        .map_err(|error| refresh_error(listing_failure(error)))?;
+    serde_json::from_str(&output.stdout)
+        .map_err(|error| refresh_error(format!("Docker Sandbox returned malformed data: {error}")))
+}
+
+/// Maps an sbx sandbox status onto the shared vocabulary.
+///
+/// sbx reports `running` and `stopped`; it offers no pause, so nothing maps to
+/// `Paused`. Anything else is deliberately left `Unknown` rather than assumed
+/// to be stopped.
+fn sandbox_resource_state(status: &str) -> ResourceState {
+    match status.to_ascii_lowercase().as_str() {
+        "running" => ResourceState::Running,
+        "stopped" => ResourceState::Stopped,
+        _ => ResourceState::Unknown,
+    }
+}
+
+fn refresh_error(message: impl AsRef<str>) -> WorkspaceError {
+    WorkspaceError::new(format!(
+        "{}. Run `sbx ls` to verify access to the current Target Environment.",
+        message.as_ref()
+    ))
+}
 
 fn discovery_error(message: impl AsRef<str>) -> ProviderDiscovery {
     ProviderDiscovery {
@@ -96,9 +143,34 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
 
     fn refresh<'a>(
         &'a self,
-        _cli: &'a dyn CliRunner,
+        cli: &'a dyn CliRunner,
     ) -> Pin<Box<dyn Future<Output = Result<WorkspaceSnapshot, WorkspaceError>> + Send + 'a>> {
-        Box::pin(async move { Err(WorkspaceError::new("not implemented")) })
+        Box::pin(async move {
+            let listing = list_sandboxes(cli).await?;
+            let resources = listing
+                .sandboxes
+                .into_iter()
+                .map(|row| {
+                    let state = sandbox_resource_state(&row.status);
+                    Resource {
+                        id: ResourceId::new(&row.name),
+                        name: row.name,
+                        status: Some(row.status),
+                        state,
+                        fields: Vec::new(),
+                        available_commands: Vec::new(),
+                    }
+                })
+                .collect();
+
+            Ok(WorkspaceSnapshot {
+                panels: vec![ResourcePanel {
+                    title: "Sandboxes".to_owned(),
+                    detail_views: Vec::new(),
+                    resources,
+                }],
+            })
+        })
     }
 
     fn execute_command<'a>(

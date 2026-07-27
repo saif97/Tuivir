@@ -8,7 +8,7 @@ use std::{
 use virtui::{
     cli::{CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec},
     docker_sandbox::DockerSandboxWorkspace,
-    provider::{ProviderId, ProviderWorkspace},
+    provider::{ProviderId, ProviderWorkspace, ResourceState},
 };
 
 struct FixtureCli {
@@ -74,6 +74,50 @@ async fn an_installed_docker_sandbox_reports_the_sbx_version_as_its_target_envir
     assert_eq!(discovered.name, "Docker Sandbox");
     assert_eq!(discovered.target_environment, "v0.37.0");
     assert_eq!(discovered.error, None);
+}
+
+/// sbx resolves a sandbox by name and by nothing else — the UUID it also
+/// reports addresses no command — so the name is the Resource's identity.
+#[tokio::test]
+async fn sandboxes_become_resources_identified_by_name() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("sbx", &["ls", "--json"]),
+        success(include_str!("fixtures/docker-sandbox/sandboxes.json")),
+    )]);
+
+    let snapshot = DockerSandboxWorkspace
+        .refresh(&cli)
+        .await
+        .expect("the fixture lists sandboxes");
+
+    let panel = snapshot.panels.first().expect("a Sandboxes panel");
+    assert_eq!(panel.title, "Sandboxes");
+    assert_eq!(
+        panel
+            .resources
+            .iter()
+            .map(|resource| (
+                resource.id.0.as_str(),
+                resource.name.as_str(),
+                resource.status.as_deref(),
+                resource.state
+            ))
+            .collect::<Vec<_>>(),
+        [
+            (
+                "claude-virtui",
+                "claude-virtui",
+                Some("running"),
+                ResourceState::Running
+            ),
+            (
+                "shell-dotfiles",
+                "shell-dotfiles",
+                Some("stopped"),
+                ResourceState::Stopped
+            ),
+        ]
+    );
 }
 
 fn failure(stderr: &str) -> Result<ProcessOutput, ProcessError> {
