@@ -551,6 +551,57 @@ fn successful_resource_command_refreshes_the_active_workspace_and_preserves_sele
     assert!(render_to_text(app.state(), 100, 24).contains("Image: alpine:3.21"));
 }
 
+/// A user who went into a shell to change something wants to see the change,
+/// and wants to come back to the Resource they left. Only the Active Workspace
+/// is asked, so a shell never wakes a Provider the user is not looking at.
+#[test]
+fn returning_from_a_shell_refreshes_the_active_workspace_and_preserves_selection() {
+    let containers = [
+        ("container-a", "api", "nginx:1.27"),
+        ("container-b", "worker", "redis:7"),
+    ];
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(initial, Ok(snapshot(&containers))));
+    handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
+    );
+    handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('E'), KeyModifiers::NONE),
+    );
+    let shell = app.take_pending_shell().expect("a shell to hand over to");
+    assert_eq!(shell.resource_id, ResourceId::new("container-b"));
+
+    let requests = app.update(AppEvent::ShellClosed {
+        shell,
+        result: Ok(()),
+    });
+
+    let refresh = requests
+        .iter()
+        .filter(|request| matches!(request, ProviderRequest::RefreshWorkspace { .. }))
+        .collect::<Vec<_>>();
+    assert!(
+        matches!(
+            refresh.as_slice(),
+            [ProviderRequest::RefreshWorkspace { provider_id, .. }]
+                if provider_id == &ProviderId::new("docker")
+        ),
+        "exactly one refresh, for the Active Workspace, got {requests:?}"
+    );
+    app.update(refresh_completed(
+        refresh_request(requests),
+        Ok(snapshot(&containers)),
+    ));
+
+    assert_eq!(
+        app.state().providers[0].selected_resource,
+        Some(ResourceId::new("container-b"))
+    );
+}
+
 #[test]
 fn failed_resource_command_identifies_provider_resource_and_attempted_command() {
     let mut app = App::new();
