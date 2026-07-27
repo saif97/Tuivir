@@ -152,6 +152,38 @@ async fn docker_sandbox_maps_every_status_into_the_shared_vocabulary() {
     );
 }
 
+/// The UUID addresses no sbx command, but it is what the user quotes in a bug
+/// report, so it stays visible as a field rather than becoming the identity.
+#[tokio::test]
+async fn a_sandbox_carries_its_agent_uuid_and_workspaces_as_fields() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("sbx", &["ls", "--json"]),
+        success(include_str!("fixtures/docker-sandbox/sandboxes.json")),
+    )]);
+
+    let snapshot = DockerSandboxWorkspace
+        .refresh(&cli)
+        .await
+        .expect("the fixture lists sandboxes");
+
+    let sandbox = snapshot
+        .resources()
+        .find(|resource| resource.name == "claude-virtui")
+        .expect("the fixture lists claude-virtui");
+    assert_eq!(
+        sandbox
+            .fields
+            .iter()
+            .map(|(label, value)| (label.as_str(), value.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("Agent", "claude"),
+            ("ID", "3f2a1c88-91b4-4d0e-9c77-1e5b0a6d2f43"),
+            ("Workspaces", "/home/vibebox/projects/virtui"),
+        ]
+    );
+}
+
 fn failure(stderr: &str) -> Result<ProcessOutput, ProcessError> {
     Err(ProcessError::Exited(ProcessFailure {
         exit_code: Some(1),

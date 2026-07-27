@@ -24,7 +24,14 @@ struct SandboxListing {
 #[derive(Deserialize)]
 struct SandboxRow {
     name: String,
+    /// The UUID sbx assigns. It addresses no sbx command, so it is shown but
+    /// never used as the Resource identity.
+    id: String,
+    agent: String,
     status: String,
+    /// Host paths mounted into the sandbox.
+    #[serde(default)]
+    workspaces: Vec<String>,
 }
 
 /// Runs `sbx ls --json` and parses the one object it wraps its rows in.
@@ -157,7 +164,11 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
                         name: row.name,
                         status: Some(row.status),
                         state,
-                        fields: Vec::new(),
+                        fields: vec![
+                            ("Agent".to_owned(), row.agent),
+                            ("ID".to_owned(), row.id),
+                            ("Workspaces".to_owned(), row.workspaces.join(", ")),
+                        ],
                         available_commands: Vec::new(),
                     }
                 })
