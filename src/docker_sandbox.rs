@@ -5,8 +5,8 @@ use serde::Deserialize;
 use crate::{
     cli::{CliRunner, ProcessError, ProcessSpec},
     provider::{
-        DetailViewId, ProviderDiscovery, ProviderId, ProviderWorkspace, Resource, ResourceCommand,
-        ResourceDetails, ResourceId, ResourcePanel, ResourceState, WorkspaceError,
+        DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderWorkspace, Resource,
+        ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourceState, WorkspaceError,
         WorkspaceSnapshot,
     },
 };
@@ -45,6 +45,15 @@ async fn list_sandboxes(cli: &dyn CliRunner) -> Result<SandboxListing, Workspace
         .map_err(|error| refresh_error(listing_failure(error)))?;
     serde_json::from_str(&output.stdout)
         .map_err(|error| refresh_error(format!("Docker Sandbox returned malformed data: {error}")))
+}
+
+/// The views Docker Sandbox itself offers for a sandbox.
+///
+/// sbx has no logs, stats, or console command, so Info is the only view it can
+/// answer — and borrowing Docker's names for diagnostics sbx does not have
+/// would promise the user something that does not exist.
+fn sandbox_detail_views() -> Vec<DetailView> {
+    vec![DetailView::new("info", "Info")]
 }
 
 /// Maps an sbx sandbox status onto the shared vocabulary.
@@ -102,7 +111,11 @@ fn not_started(reason: &str) -> String {
 fn sbx_version(output: &str) -> String {
     let reported = output.trim();
     match reported.strip_prefix("sbx version:") {
-        Some(rest) => rest.split_whitespace().next().unwrap_or(reported).to_owned(),
+        Some(rest) => rest
+            .split_whitespace()
+            .next()
+            .unwrap_or(reported)
+            .to_owned(),
         None => reported.to_owned(),
     }
 }
@@ -177,7 +190,7 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
             Ok(WorkspaceSnapshot {
                 panels: vec![ResourcePanel {
                     title: "Sandboxes".to_owned(),
-                    detail_views: Vec::new(),
+                    detail_views: sandbox_detail_views(),
                     resources,
                 }],
             })

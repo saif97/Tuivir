@@ -1,9 +1,4 @@
-use std::{
-    collections::VecDeque,
-    future::Future,
-    pin::Pin,
-    sync::Mutex,
-};
+use std::{collections::VecDeque, future::Future, pin::Pin, sync::Mutex};
 
 use virtui::{
     cli::{CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec},
@@ -192,6 +187,32 @@ fn failure(stderr: &str) -> Result<ProcessOutput, ProcessError> {
     }))
 }
 
+/// sbx offers no logs, stats, or console of its own, so the Sandboxes panel
+/// declares only the one view it can actually answer rather than borrowing
+/// Docker's names for diagnostics it does not have.
+#[tokio::test]
+async fn the_sandboxes_panel_declares_only_the_info_view() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("sbx", &["ls", "--json"]),
+        success(include_str!("fixtures/docker-sandbox/sandboxes.json")),
+    )]);
+
+    let snapshot = DockerSandboxWorkspace
+        .refresh(&cli)
+        .await
+        .expect("the fixture lists sandboxes");
+
+    let panel = snapshot.panels.first().expect("a Sandboxes panel");
+    assert_eq!(
+        panel
+            .detail_views
+            .iter()
+            .map(|view| (view.id.0.as_str(), view.title.as_str()))
+            .collect::<Vec<_>>(),
+        [("info", "Info")]
+    );
+}
+
 #[tokio::test]
 async fn a_failed_sandbox_refresh_identifies_the_command_and_target() {
     let cli = FixtureCli::new([(
@@ -249,14 +270,16 @@ async fn malformed_sandbox_output_is_reported_rather_than_read_as_empty() {
         .expect_err("truncated JSON is never a snapshot");
 
     assert!(
-        error.message.starts_with("Docker Sandbox returned malformed data:"),
+        error
+            .message
+            .starts_with("Docker Sandbox returned malformed data:"),
         "the message names the provider and the problem: {}",
         error.message
     );
     assert!(
-        error.message.ends_with(
-            ". Run `sbx ls` to verify access to the current Target Environment."
-        ),
+        error
+            .message
+            .ends_with(". Run `sbx ls` to verify access to the current Target Environment."),
         "the message stays actionable: {}",
         error.message
     );
@@ -286,7 +309,10 @@ async fn installed_docker_sandbox_that_cannot_list_stays_visible_with_an_actiona
     assert_eq!(discovered.name, "Docker Sandbox");
     assert_eq!(discovered.target_environment, "unavailable");
     assert_eq!(
-        discovered.error.expect("an unusable provider explains itself").message,
+        discovered
+            .error
+            .expect("an unusable provider explains itself")
+            .message,
         "Error: not signed in to Docker. Run `sbx ls` to verify sandboxd is running and you are signed in to Docker."
     );
 }
