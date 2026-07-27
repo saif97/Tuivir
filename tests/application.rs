@@ -1564,9 +1564,8 @@ fn container_snapshot(
                     state,
                     fields: vec![("Image".to_owned(), (*image).to_owned())],
                     available_commands: available_commands.clone(),
-                    shell: (state == ResourceState::Running).then(|| {
-                        ProcessSpec::new("docker", &["exec", "-it", *id, "/bin/sh"])
-                    }),
+                    shell: (state == ResourceState::Running)
+                        .then(|| ProcessSpec::new("docker", &["exec", "-it", *id, "/bin/sh"])),
                 })
                 .collect(),
         }],
