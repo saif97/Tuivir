@@ -9,8 +9,22 @@ use crate::{
 };
 
 const PROVIDER_ID: &str = "docker-sandbox";
+const PROVIDER_NAME: &str = "Docker Sandbox";
 
 pub struct DockerSandboxWorkspace;
+
+/// The version out of `sbx version: v0.37.0 <commit>`.
+///
+/// The build commit identifies nothing the user is targeting, so only the
+/// version reaches the Target Environment. An unrecognised line is shown whole
+/// rather than guessed at.
+fn sbx_version(output: &str) -> String {
+    let reported = output.trim();
+    match reported.strip_prefix("sbx version:") {
+        Some(rest) => rest.split_whitespace().next().unwrap_or(reported).to_owned(),
+        None => reported.to_owned(),
+    }
+}
 
 impl ProviderWorkspace for DockerSandboxWorkspace {
     fn id(&self) -> ProviderId {
@@ -22,10 +36,24 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
         cli: &'a dyn CliRunner,
     ) -> Pin<Box<dyn Future<Output = Option<ProviderDiscovery>> + Send + 'a>> {
         Box::pin(async move {
-            match cli.run(ProcessSpec::new("sbx", &["version"])).await {
-                Err(ProcessError::ExecutableNotFound) => None,
-                _ => None,
-            }
+            // `sbx version` answers "installed?" on its own: it never contacts
+            // sandboxd, so an absent CLI is distinguishable from an installed
+            // one whose daemon is down or whose login has lapsed.
+            let version = match cli.run(ProcessSpec::new("sbx", &["version"])).await {
+                Err(ProcessError::ExecutableNotFound) => return None,
+                Ok(output) => sbx_version(&output.stdout),
+                Err(_) => return None,
+            };
+            cli.run(ProcessSpec::new("sbx", &["ls", "--json"]))
+                .await
+                .ok()?;
+
+            Some(ProviderDiscovery {
+                id: self.id(),
+                name: PROVIDER_NAME.to_owned(),
+                target_environment: version,
+                error: None,
+            })
         })
     }
 

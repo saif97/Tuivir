@@ -8,7 +8,7 @@ use std::{
 use virtui::{
     cli::{CliRunner, ProcessError, ProcessOutput, ProcessSpec},
     docker_sandbox::DockerSandboxWorkspace,
-    provider::ProviderWorkspace,
+    provider::{ProviderId, ProviderWorkspace},
 };
 
 struct FixtureCli {
@@ -41,6 +41,39 @@ impl CliRunner for FixtureCli {
             response
         })
     }
+}
+
+fn success(stdout: &str) -> Result<ProcessOutput, ProcessError> {
+    Ok(ProcessOutput {
+        stdout: stdout.to_owned(),
+        stderr: String::new(),
+    })
+}
+
+/// `sbx version` reports a version and a build commit on one line; only the
+/// version identifies the Target Environment.
+#[tokio::test]
+async fn an_installed_docker_sandbox_reports_the_sbx_version_as_its_target_environment() {
+    let cli = FixtureCli::new([
+        (
+            ProcessSpec::new("sbx", &["version"]),
+            success("sbx version: v0.37.0 8b65b864b0d49c29f05a55170d6b5eea4c0d11e7\n"),
+        ),
+        (
+            ProcessSpec::new("sbx", &["ls", "--json"]),
+            success(include_str!("fixtures/docker-sandbox/sandboxes.json")),
+        ),
+    ]);
+
+    let discovered = DockerSandboxWorkspace
+        .discover(&cli)
+        .await
+        .expect("the fixture represents an installed sbx");
+
+    assert_eq!(discovered.id, ProviderId::new("docker-sandbox"));
+    assert_eq!(discovered.name, "Docker Sandbox");
+    assert_eq!(discovered.target_environment, "v0.37.0");
+    assert_eq!(discovered.error, None);
 }
 
 #[tokio::test]
