@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::cli::ProcessSpec;
 use crate::command::{Command, CommandRegistry, CommandScope};
 use crate::keys::Key;
 use crate::provider::{
@@ -174,6 +175,12 @@ pub struct AppState {
     pub help_overlay: Option<HelpOverlay>,
     pub confirmation: Option<ResourceCommandConfirmation>,
     pub command_error: Option<String>,
+    /// The Interactive Shell waiting to be given the terminal.
+    ///
+    /// The application cannot suspend a screen or run a process, so this is how
+    /// it asks: the host takes the shell, hands the terminal over, and reports
+    /// back with [`AppEvent::ShellClosed`].
+    pub pending_shell: Option<PendingShell>,
     /// Dispatched Resource Commands that have not completed yet, in dispatch
     /// order.
     ///
@@ -218,6 +225,21 @@ pub struct RunningResourceCommand {
     pub resource_id: ResourceId,
     pub resource_name: String,
     pub command: ResourceCommand,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+/// One Interactive Shell the application wants the terminal for.
+///
+/// The Provider and Resource travel with the process so a shell that never
+/// starts can be reported against what it was opened for, long after the
+/// selection may have moved on.
+pub struct PendingShell {
+    pub provider_id: ProviderId,
+    pub provider_name: String,
+    pub resource_id: ResourceId,
+    pub resource_name: String,
+    /// The Provider CLI process that takes over the terminal.
+    pub process: ProcessSpec,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -434,6 +456,10 @@ impl App {
             }
             Command::ScrollDetailsUp => {
                 self.scroll_details(-DETAIL_SCROLL_LINES);
+                Vec::new()
+            }
+            Command::OpenShell => {
+                self.open_shell();
                 Vec::new()
             }
             Command::Confirm => self.confirm_or_dismiss(),
@@ -797,6 +823,39 @@ impl App {
             command,
             state,
         }]
+    }
+
+    /// Asks for the terminal on behalf of the selected Resource's Interactive
+    /// Shell.
+    ///
+    /// A Resource whose Provider offers no shell asks for nothing, so an
+    /// unsupported operation stays unsupported rather than being attempted and
+    /// refused.
+    fn open_shell(&mut self) {
+        let Some(provider) = self
+            .state
+            .active_provider
+            .and_then(|active| self.state.providers.get(active))
+        else {
+            return;
+        };
+        let provider_id = provider.id.clone();
+        let provider_name = provider.name.clone();
+        let Some(resource) = self.selected_resource() else {
+            return;
+        };
+        let Some(process) = resource.shell.clone() else {
+            return;
+        };
+        let resource_id = resource.id.clone();
+        let resource_name = resource.name.clone();
+        self.state.pending_shell = Some(PendingShell {
+            provider_id,
+            provider_name,
+            resource_id,
+            resource_name,
+            process,
+        });
     }
 
     fn toggle_help(&mut self) {

@@ -943,6 +943,42 @@ fn question_mark_closes_the_help_overlay_when_it_is_already_open() {
     assert!(screen.contains("api"), "rendered screen:\n{screen}");
 }
 
+/// An Interactive Shell is not work Virtui can run behind its own screen, so
+/// the shell key produces no provider request at all. It asks for the terminal
+/// instead, naming what the shell was opened for so a failure can say so later.
+#[test]
+fn the_shell_key_asks_for_the_terminal_for_the_selected_container() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+
+    let (_, requests) = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('E'), KeyModifiers::NONE),
+    );
+
+    assert!(
+        requests.is_empty(),
+        "an Interactive Shell is never dispatched as background work"
+    );
+    let pending = app
+        .state()
+        .pending_shell
+        .as_ref()
+        .expect("a shell waiting for the terminal");
+    assert_eq!(pending.provider_id, ProviderId::new("docker"));
+    assert_eq!(pending.provider_name, "Docker");
+    assert_eq!(pending.resource_id, ResourceId::new("container-a"));
+    assert_eq!(pending.resource_name, "api");
+    assert_eq!(
+        pending.process,
+        ProcessSpec::new("docker", &["exec", "-it", "container-a", "/bin/sh"])
+    );
+}
+
 #[test]
 fn unavailable_resource_command_is_disabled_in_help_and_does_not_dispatch() {
     let mut app = App::new();
@@ -1428,7 +1464,9 @@ fn container_snapshot(
                     state,
                     fields: vec![("Image".to_owned(), (*image).to_owned())],
                     available_commands: available_commands.clone(),
-                    shell: None,
+                    shell: (state == ResourceState::Running).then(|| {
+                        ProcessSpec::new("docker", &["exec", "-it", *id, "/bin/sh"])
+                    }),
                 })
                 .collect(),
         }],
@@ -1467,7 +1505,8 @@ fn incus_snapshot(instances: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
                         } else {
                             vec![ResourceCommand::Start, ResourceCommand::Delete]
                         },
-                        shell: None,
+                        shell: running
+                            .then(|| ProcessSpec::new("incus", &["exec", *name, "--", "su", "-l"])),
                     }
                 })
                 .collect(),
