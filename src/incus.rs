@@ -7,12 +7,14 @@ use crate::{
     provider::{
         DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderWorkspace, Resource,
         ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourceState, WorkspaceError,
-        WorkspaceSnapshot,
+        WorkspaceSnapshot, provider_cli_error,
     },
 };
 
 const PROVIDER_ID: &str = "incus";
 const PROVIDER_NAME: &str = "Incus";
+/// What a user can run to check the Target Environment a refresh could not read.
+const REFRESH_HELP: &str = "Run `incus list` to verify access to the current Target Environment.";
 
 pub struct IncusWorkspace;
 
@@ -43,7 +45,7 @@ impl ProviderWorkspace for IncusWorkspace {
                 Err(ProcessError::ExecutableNotFound) => return None,
                 Err(ProcessError::SpawnFailed(message)) => {
                     return Some(discovery_error(
-                        not_started(&message),
+                        format!("{PROVIDER_NAME} CLI could not be started: {message}"),
                         "incus remote get-default",
                     ));
                 }
@@ -61,13 +63,13 @@ impl ProviderWorkspace for IncusWorkspace {
             {
                 Err(ProcessError::ExecutableNotFound) => {
                     return Some(discovery_error(
-                        "Incus CLI is no longer available",
+                        format!("{PROVIDER_NAME} CLI is no longer available"),
                         "incus project get-current",
                     ));
                 }
                 Err(ProcessError::SpawnFailed(message)) => {
                     return Some(discovery_error(
-                        not_started(&message),
+                        format!("{PROVIDER_NAME} CLI could not be started: {message}"),
                         "incus project get-current",
                     ));
                 }
@@ -157,10 +159,11 @@ impl ProviderWorkspace for IncusWorkspace {
             cli.run(ProcessSpec::new("incus", &args))
                 .await
                 .map_err(|error| {
-                    command_error(
-                        error,
+                    WorkspaceError::new(provider_cli_error(
+                        PROVIDER_NAME,
+                        &error,
                         &format!("Incus could not {command} instance {resource_id}"),
-                    )
+                    ))
                 })?;
             Ok(())
         })
@@ -182,10 +185,11 @@ impl ProviderWorkspace for IncusWorkspace {
                 .run(ProcessSpec::new("incus", &args))
                 .await
                 .map_err(|error| {
-                    command_error(
-                        error,
+                    WorkspaceError::new(provider_cli_error(
+                        PROVIDER_NAME,
+                        &error,
                         &format!("Incus could not load {view_id} for instance {resource_id}"),
-                    )
+                    ))
                 })?;
             Ok(ResourceDetails::from_output(&output.stdout))
         })
@@ -268,39 +272,25 @@ fn discovery_error(message: impl AsRef<str>, command: &str) -> ProviderDiscovery
         id: ProviderId::new(PROVIDER_ID),
         name: PROVIDER_NAME.to_owned(),
         target_environment: "unavailable".to_owned(),
-        error: Some(WorkspaceError::new(format!(
-            "{}. Run `{command}` to verify the selected Target Environment.",
-            message.as_ref(),
-        ))),
+        error: Some(WorkspaceError::with_help(
+            message,
+            &format!("Run `{command}` to verify the selected Target Environment."),
+        )),
     }
 }
 
+/// A failed listing, carrying help only where it applies.
+///
+/// An Incus that is gone or would not start cannot answer `incus list`, so
+/// suggesting it would send the user nowhere.
 fn refresh_failure(error: ProcessError) -> WorkspaceError {
+    let message = provider_cli_error(PROVIDER_NAME, &error, "Incus could not list instances");
     match error {
-        ProcessError::ExecutableNotFound => WorkspaceError::new("Incus CLI is not available"),
-        ProcessError::SpawnFailed(message) => WorkspaceError::new(not_started(&message)),
-        ProcessError::Exited(failure) => {
-            refresh_error(failure.message_or("Incus could not list instances"))
-        }
+        ProcessError::Exited(_) => refresh_error(message),
+        _ => WorkspaceError::new(message),
     }
-}
-
-fn not_started(reason: &str) -> String {
-    format!("Incus CLI could not be started: {reason}")
 }
 
 fn refresh_error(message: impl AsRef<str>) -> WorkspaceError {
-    WorkspaceError::new(format!(
-        "{}. Run `incus list` to verify access to the current Target Environment.",
-        message.as_ref()
-    ))
-}
-
-fn command_error(error: ProcessError, fallback: &str) -> WorkspaceError {
-    let message = match error {
-        ProcessError::ExecutableNotFound => "Incus CLI is no longer available".to_owned(),
-        ProcessError::SpawnFailed(message) => not_started(&message),
-        ProcessError::Exited(failure) => failure.message_or(fallback),
-    };
-    WorkspaceError::new(message)
+    WorkspaceError::with_help(message, REFRESH_HELP)
 }

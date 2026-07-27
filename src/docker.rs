@@ -7,12 +7,15 @@ use crate::{
     provider::{
         DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderWorkspace, Resource,
         ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourceState, WorkspaceError,
-        WorkspaceSnapshot,
+        WorkspaceSnapshot, provider_cli_error,
     },
 };
 
 const PROVIDER_ID: &str = "docker";
 const PROVIDER_NAME: &str = "Docker";
+/// What a user can run to check the Target Environment a refresh could not read.
+const REFRESH_HELP: &str =
+    "Run `docker container ls --all` to verify access to the current Target Environment.";
 
 pub struct DockerWorkspace;
 
@@ -46,9 +49,9 @@ impl ProviderWorkspace for DockerWorkspace {
 
             match result {
                 Err(ProcessError::ExecutableNotFound) => None,
-                Err(ProcessError::SpawnFailed(message)) => {
-                    Some(discovery_with_error(not_started(&message)))
-                }
+                Err(ProcessError::SpawnFailed(message)) => Some(discovery_with_error(format!(
+                    "{PROVIDER_NAME} CLI could not be started: {message}"
+                ))),
                 Err(ProcessError::Exited(failure)) => Some(discovery_with_error(
                     failure.message_or("Docker could not report its current context"),
                 )),
@@ -80,17 +83,7 @@ impl ProviderWorkspace for DockerWorkspace {
                     ],
                 ))
                 .await
-                .map_err(|error| match error {
-                    ProcessError::ExecutableNotFound => {
-                        WorkspaceError::new("Docker CLI is no longer available")
-                    }
-                    ProcessError::SpawnFailed(message) => {
-                        WorkspaceError::new(not_started(&message))
-                    }
-                    ProcessError::Exited(failure) => {
-                        refresh_error(failure.message_or("Docker could not list containers"))
-                    }
-                })?;
+                .map_err(refresh_failure)?;
 
             let resources = output
                 .stdout
@@ -154,10 +147,11 @@ impl ProviderWorkspace for DockerWorkspace {
             cli.run(ProcessSpec::new("docker", &args))
                 .await
                 .map_err(|error| {
-                    command_error(
-                        error,
+                    WorkspaceError::new(provider_cli_error(
+                        PROVIDER_NAME,
+                        &error,
                         &format!("Docker could not {command} container {resource_id}"),
-                    )
+                    ))
                 })?;
             Ok(())
         })
@@ -179,10 +173,11 @@ impl ProviderWorkspace for DockerWorkspace {
                 .run(ProcessSpec::new("docker", &args))
                 .await
                 .map_err(|error| {
-                    command_error(
-                        error,
+                    WorkspaceError::new(provider_cli_error(
+                        PROVIDER_NAME,
+                        &error,
                         &format!("Docker could not load {view_id} for container {resource_id}"),
-                    )
+                    ))
                 })?;
             // A container writes wherever it likes, so both streams are its
             // output. Only a non-zero exit means Docker itself failed.
@@ -271,28 +266,25 @@ fn discovery_with_error(message: impl Into<String>) -> ProviderDiscovery {
         id: ProviderId::new(PROVIDER_ID),
         name: PROVIDER_NAME.to_owned(),
         target_environment: "unavailable".to_owned(),
-        error: Some(WorkspaceError::new(format!(
-            "{message}. Run `docker context show` to verify the selected context and ensure Docker is running."
-        ))),
+        error: Some(WorkspaceError::with_help(
+            message,
+            "Run `docker context show` to verify the selected context and ensure Docker is running.",
+        )),
     }
 }
 
-fn not_started(reason: &str) -> String {
-    format!("Docker CLI could not be started: {reason}")
+/// A failed listing, carrying help only where it applies.
+///
+/// A Docker that is gone or would not start cannot answer `docker container
+/// ls`, so suggesting it would send the user nowhere.
+fn refresh_failure(error: ProcessError) -> WorkspaceError {
+    let message = provider_cli_error(PROVIDER_NAME, &error, "Docker could not list containers");
+    match error {
+        ProcessError::Exited(_) => refresh_error(message),
+        _ => WorkspaceError::new(message),
+    }
 }
 
-fn refresh_error(message: impl Into<String>) -> WorkspaceError {
-    WorkspaceError::new(format!(
-        "{}. Run `docker container ls --all` to verify access to the current Target Environment.",
-        message.into()
-    ))
-}
-
-fn command_error(error: ProcessError, fallback: &str) -> WorkspaceError {
-    let message = match error {
-        ProcessError::ExecutableNotFound => "Docker CLI is no longer available".to_owned(),
-        ProcessError::SpawnFailed(message) => not_started(&message),
-        ProcessError::Exited(failure) => failure.message_or(fallback),
-    };
-    WorkspaceError::new(message)
+fn refresh_error(message: impl AsRef<str>) -> WorkspaceError {
+    WorkspaceError::with_help(message, REFRESH_HELP)
 }

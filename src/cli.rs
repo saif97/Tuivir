@@ -80,6 +80,11 @@ impl ProcessError {
     /// this supplies only the part it cannot: what the process itself did. A
     /// process whose streams were captured is quoted; one that owned the
     /// terminal has nothing left to quote, so its status stands in.
+    ///
+    /// This is the clause form. `provider_cli_error` words the same three
+    /// failures as a whole sentence that names the Provider itself, for callers
+    /// with no sentence of their own to put this inside — change one and read
+    /// the other.
     pub fn summary(&self) -> String {
         match self {
             Self::ExecutableNotFound => "the CLI is no longer available".to_owned(),

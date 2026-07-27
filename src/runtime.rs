@@ -8,6 +8,7 @@ use crate::{
     cli::{CliRunner, InteractiveRunner},
     command::Command,
     docker::DockerWorkspace,
+    docker_sandbox::DockerSandboxWorkspace,
     incus::IncusWorkspace,
     keys::Key,
     provider::{ProviderDiscovery, ProviderId, ProviderRequest, ProviderWorkspace},
@@ -117,6 +118,7 @@ impl ProviderRuntime {
             vec![
                 Arc::new(DockerWorkspace) as Arc<dyn ProviderWorkspace>,
                 Arc::new(IncusWorkspace) as Arc<dyn ProviderWorkspace>,
+                Arc::new(DockerSandboxWorkspace) as Arc<dyn ProviderWorkspace>,
             ],
             cli,
         )
