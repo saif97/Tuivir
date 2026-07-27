@@ -74,22 +74,29 @@ async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::R
                 // A key may have asked for the terminal. Handing it over blocks
                 // this loop until the shell exits, which is the point: Virtui
                 // has no screen to draw on until it comes back.
-                let mut host = Host {
-                    terminal: &mut *terminal,
-                    input: &mut input,
-                    keys: &mut key_rx,
-                };
-                // `block_in_place` moves the rest of this worker's tasks
-                // elsewhere for the duration, so provider work already in flight
-                // keeps running while the shell holds the terminal. It also
-                // makes the multi-threaded runtime a stated requirement rather
-                // than a silent one: it panics on a current-thread runtime.
-                let handover = tokio::task::block_in_place(|| {
-                    open_pending_shell(&mut app, &mut host, &TokioCliRunner)
-                });
-                match handover {
-                    Ok(requests) => dispatch_all(&runtime, &completion_tx, requests),
-                    Err(error) => break Err(error),
+                //
+                // Asked only when a shell is actually waiting: `block_in_place`
+                // hands this worker's remaining tasks to another thread, which
+                // is worth doing for a shell and worth nothing for the `j` that
+                // moved the selection.
+                if app.state().pending_shell.is_some() {
+                    let mut host = Host {
+                        terminal: &mut *terminal,
+                        input: &mut input,
+                        keys: &mut key_rx,
+                    };
+                    // Moving those tasks aside is what keeps provider work
+                    // already in flight running while the shell holds the
+                    // terminal. It also makes the multi-threaded runtime a
+                    // stated requirement rather than a silent one: it panics on
+                    // a current-thread runtime.
+                    let handover = tokio::task::block_in_place(|| {
+                        open_pending_shell(&mut app, &mut host, &TokioCliRunner)
+                    });
+                    match handover {
+                        Ok(requests) => dispatch_all(&runtime, &completion_tx, requests),
+                        Err(error) => break Err(error),
+                    }
                 }
             }
             Some(event) = completion_rx.recv() => {
