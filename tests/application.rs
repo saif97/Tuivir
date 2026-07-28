@@ -1894,6 +1894,66 @@ fn focus_cycles_through_provider_order_and_wraps() {
 }
 
 #[test]
+fn every_workspace_and_resource_panel_restores_its_navigation_state() {
+    let mut app = App::new();
+    let docker_refresh =
+        refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let mut docker_snapshot = docker_multi_panel_snapshot();
+    for (panel_index, suffix) in [(0, "worker"), (1, "alpine:3.20")] {
+        let mut second = docker_snapshot.panels[panel_index].resources[0].clone();
+        second.id = ResourceId::new(format!("second-{panel_index}"));
+        second.name = suffix.to_owned();
+        docker_snapshot.panels[panel_index].resources.push(second);
+    }
+    app.update(refresh_completed(docker_refresh, Ok(docker_snapshot)));
+
+    app.invoke(Command::SelectNext);
+    app.invoke(Command::FocusResourcePanel(1));
+    app.invoke(Command::SelectNext);
+    app.update(AppEvent::ProviderDiscovered(incus_discovery()));
+    let incus_refresh = refresh_request(app.invoke(Command::NextWorkspace));
+    app.update(refresh_completed(
+        incus_refresh,
+        Ok(incus_snapshot(&[("instance-a", "gateway", "Running")])),
+    ));
+
+    app.invoke(Command::PreviousWorkspace);
+
+    let docker = &app.state().providers[0];
+    assert_eq!(
+        docker.focused_resource_panel,
+        Some(ResourcePanelId::new("images"))
+    );
+    assert_eq!(
+        app.state().focused_pane,
+        FocusedPane::ResourcePanel(ResourcePanelId::new("images"))
+    );
+    assert_eq!(
+        docker
+            .panel_navigation
+            .iter()
+            .map(|panel| (
+                &panel.panel_id,
+                panel.selected_resource.as_ref(),
+                panel.scroll
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                &ResourcePanelId::new("containers"),
+                Some(&ResourceId::new("second-0")),
+                1,
+            ),
+            (
+                &ResourcePanelId::new("images"),
+                Some(&ResourceId::new("second-1")),
+                1,
+            ),
+        ]
+    );
+}
+
+#[test]
 fn selecting_an_image_routes_details_by_panel_and_resource() {
     let mut app = App::new();
     let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));

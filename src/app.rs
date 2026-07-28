@@ -1191,20 +1191,47 @@ impl App {
         let WorkspaceState::Ready(snapshot) = &provider.workspace_state else {
             return;
         };
-        let resources = snapshot.targets().collect::<Vec<_>>();
-        let Some(current) = provider
-            .selected_resource
-            .as_ref()
-            .and_then(|selected| resources.iter().position(|(target, _)| target == selected))
+        let Some(panel_id) = provider.focused_resource_panel.clone() else {
+            return;
+        };
+        let Some(panel) = snapshot.panel(&panel_id) else {
+            return;
+        };
+        let Some(navigation) = provider
+            .panel_navigation
+            .iter_mut()
+            .find(|navigation| navigation.panel_id == panel_id)
         else {
-            provider.selected_resource = resources.first().map(|(target, _)| target.clone());
+            return;
+        };
+        let Some(current) = navigation.selected_resource.as_ref().and_then(|selected| {
+            panel
+                .resources
+                .iter()
+                .position(|resource| &resource.id == selected)
+        }) else {
+            navigation.selected_resource =
+                panel.resources.first().map(|resource| resource.id.clone());
+            navigation.scroll = 0;
+            provider.selected_resource = navigation
+                .selected_resource
+                .as_ref()
+                .map(|resource_id| ResourceTarget::new(panel_id, resource_id.clone()));
             reconcile_detail_view(provider);
             return;
         };
         let next = current
             .saturating_add_signed(delta)
-            .min(resources.len().saturating_sub(1));
-        provider.selected_resource = resources.get(next).map(|(target, _)| target.clone());
+            .min(panel.resources.len().saturating_sub(1));
+        navigation.selected_resource = panel
+            .resources
+            .get(next)
+            .map(|resource| resource.id.clone());
+        navigation.scroll = next;
+        provider.selected_resource = navigation
+            .selected_resource
+            .as_ref()
+            .map(|resource_id| ResourceTarget::new(panel_id, resource_id.clone()));
         reconcile_detail_view(provider);
     }
 
@@ -1274,6 +1301,15 @@ impl App {
             .retain(|_, provider_id| provider_id != &previous_provider);
         self.state.active_provider =
             Some((active_provider as isize + delta).rem_euclid(provider_count as isize) as usize);
+        if matches!(&self.state.focused_pane, FocusedPane::ResourcePanel(_)) {
+            self.state.focused_pane = self.state.providers[self.state.active_provider.unwrap()]
+                .focused_resource_panel
+                .clone()
+                .map_or_else(
+                    || FocusedPane::ResourcePanel(ResourcePanelId::new("")),
+                    FocusedPane::ResourcePanel,
+                );
+        }
         self.refresh_active_provider()
     }
 }
