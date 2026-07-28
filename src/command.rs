@@ -97,24 +97,32 @@ impl Default for CommandRegistry {
 impl CommandRegistry {
     /// The compiled defaults, before any configuration is layered over them.
     pub fn builtin() -> Self {
-        Self {
-            commands: BUILTIN_COMMANDS
+        let mut commands = BUILTIN_COMMANDS
+            .iter()
+            .map(effective_command)
+            .collect::<Vec<_>>();
+        let focus_position = commands
+            .iter()
+            .position(|registered| registered.command == Command::FocusProviders)
+            .expect("the Provider selector focus Command is registered")
+            + 1;
+        commands.splice(
+            focus_position..focus_position,
+            RESOURCE_PANEL_FOCUS_COMMANDS
                 .iter()
-                .map(|definition| EffectiveCommand {
+                .enumerate()
+                .map(|(index, definition)| EffectiveCommand {
                     id: definition.id,
                     description: definition.description,
-                    command: definition.command,
-                    scopes: definition.scopes,
-                    keys: definition
-                        .default_keys
-                        .iter()
-                        .map(|text| {
-                            Key::parse(text).expect("compiled default keys are representable")
-                        })
-                        .collect(),
-                })
-                .collect(),
-        }
+                    command: Command::FocusResourcePanel(index),
+                    scopes: WORKSPACE,
+                    keys: vec![
+                        Key::parse(definition.default_key)
+                            .expect("compiled Resource Panel focus keys are representable"),
+                    ],
+                }),
+        );
+        Self { commands }
     }
 
     /// Layers a `[keybindings]` table over the compiled defaults.
@@ -275,6 +283,20 @@ impl CommandRegistry {
     }
 }
 
+fn effective_command(definition: &CommandDefinition) -> EffectiveCommand {
+    EffectiveCommand {
+        id: definition.id,
+        description: definition.description,
+        command: definition.command,
+        scopes: definition.scopes,
+        keys: definition
+            .default_keys
+            .iter()
+            .map(|text| Key::parse(text).expect("compiled default keys are representable"))
+            .collect(),
+    }
+}
+
 /// Reports each key one Command lists more than once, naming it once however
 /// many times it was repeated.
 ///
@@ -308,6 +330,64 @@ struct CommandDefinition {
     scopes: &'static [CommandScope],
     default_keys: &'static [&'static str],
 }
+
+struct ResourcePanelFocusDefinition {
+    id: &'static str,
+    description: &'static str,
+    default_key: &'static str,
+}
+
+const RESOURCE_PANEL_FOCUS_COMMANDS: &[ResourcePanelFocusDefinition] = &[
+    ResourcePanelFocusDefinition {
+        id: "focus.resources",
+        description: "Focus first Resource Panel",
+        default_key: "2",
+    },
+    ResourcePanelFocusDefinition {
+        id: "focus.resources.2",
+        description: "Focus second Resource Panel",
+        default_key: "3",
+    },
+    ResourcePanelFocusDefinition {
+        id: "focus.resources.3",
+        description: "Focus third Resource Panel",
+        default_key: "4",
+    },
+    ResourcePanelFocusDefinition {
+        id: "focus.resources.4",
+        description: "Focus fourth Resource Panel",
+        default_key: "5",
+    },
+    ResourcePanelFocusDefinition {
+        id: "focus.resources.5",
+        description: "Focus fifth Resource Panel",
+        default_key: "6",
+    },
+    ResourcePanelFocusDefinition {
+        id: "focus.resources.6",
+        description: "Focus sixth Resource Panel",
+        default_key: "7",
+    },
+    ResourcePanelFocusDefinition {
+        id: "focus.resources.7",
+        description: "Focus seventh Resource Panel",
+        default_key: "8",
+    },
+    ResourcePanelFocusDefinition {
+        id: "focus.resources.8",
+        description: "Focus eighth Resource Panel",
+        default_key: "9",
+    },
+    ResourcePanelFocusDefinition {
+        id: "focus.resources.9",
+        description: "Focus ninth Resource Panel",
+        default_key: "0",
+    },
+];
+
+/// A Provider Workspace may expose at most this many Resource Panels so every
+/// one retains a single-key numbered focus Command and visible hint.
+pub const NUMBERED_RESOURCE_PANEL_CAPACITY: usize = RESOURCE_PANEL_FOCUS_COMMANDS.len();
 
 /// Every scope in which the user is working inside a Provider Workspace rather
 /// than answering a modal.
@@ -361,69 +441,6 @@ const BUILTIN_COMMANDS: &[CommandDefinition] = &[
         command: Command::FocusProviders,
         scopes: WORKSPACE,
         default_keys: &["1"],
-    },
-    CommandDefinition {
-        id: "focus.resources",
-        description: "Focus first Resource Panel",
-        command: Command::FocusResourcePanel(0),
-        scopes: WORKSPACE,
-        default_keys: &["2"],
-    },
-    CommandDefinition {
-        id: "focus.resources.2",
-        description: "Focus second Resource Panel",
-        command: Command::FocusResourcePanel(1),
-        scopes: WORKSPACE,
-        default_keys: &["3"],
-    },
-    CommandDefinition {
-        id: "focus.resources.3",
-        description: "Focus third Resource Panel",
-        command: Command::FocusResourcePanel(2),
-        scopes: WORKSPACE,
-        default_keys: &["4"],
-    },
-    CommandDefinition {
-        id: "focus.resources.4",
-        description: "Focus fourth Resource Panel",
-        command: Command::FocusResourcePanel(3),
-        scopes: WORKSPACE,
-        default_keys: &["5"],
-    },
-    CommandDefinition {
-        id: "focus.resources.5",
-        description: "Focus fifth Resource Panel",
-        command: Command::FocusResourcePanel(4),
-        scopes: WORKSPACE,
-        default_keys: &["6"],
-    },
-    CommandDefinition {
-        id: "focus.resources.6",
-        description: "Focus sixth Resource Panel",
-        command: Command::FocusResourcePanel(5),
-        scopes: WORKSPACE,
-        default_keys: &["7"],
-    },
-    CommandDefinition {
-        id: "focus.resources.7",
-        description: "Focus seventh Resource Panel",
-        command: Command::FocusResourcePanel(6),
-        scopes: WORKSPACE,
-        default_keys: &["8"],
-    },
-    CommandDefinition {
-        id: "focus.resources.8",
-        description: "Focus eighth Resource Panel",
-        command: Command::FocusResourcePanel(7),
-        scopes: WORKSPACE,
-        default_keys: &["9"],
-    },
-    CommandDefinition {
-        id: "focus.resources.9",
-        description: "Focus ninth Resource Panel",
-        command: Command::FocusResourcePanel(8),
-        scopes: WORKSPACE,
-        default_keys: &["0"],
     },
     CommandDefinition {
         id: "focus.details",

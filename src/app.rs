@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::cli::{ProcessError, ProcessSpec};
-use crate::command::{Command, CommandRegistry, CommandScope};
+use crate::command::{Command, CommandRegistry, CommandScope, NUMBERED_RESOURCE_PANEL_CAPACITY};
 use crate::keys::Key;
 use crate::provider::{
     DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderRequest, ProviderRequestId,
@@ -61,13 +61,15 @@ pub enum AppEvent {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FocusedPane {
     Providers,
+    /// Resource focus requested before the Active Workspace has a snapshot.
+    FirstResourcePanel,
     ResourcePanel(ResourcePanelId),
     Details,
 }
 
 impl Default for FocusedPane {
     fn default() -> Self {
-        Self::ResourcePanel(ResourcePanelId::new(""))
+        Self::FirstResourcePanel
     }
 }
 
@@ -320,7 +322,7 @@ impl KeyHints {
             focus_providers: registry
                 .first_key(Command::FocusProviders)
                 .map(|key| key.to_string()),
-            focus_resource_panels: (0..9)
+            focus_resource_panels: (0..NUMBERED_RESOURCE_PANEL_CAPACITY)
                 .map(|index| {
                     registry
                         .first_key(Command::FocusResourcePanel(index))
@@ -519,6 +521,7 @@ impl App {
         } else {
             match &self.state.focused_pane {
                 FocusedPane::Providers => CommandScope::ProviderSelector,
+                FocusedPane::FirstResourcePanel => CommandScope::ResourceView,
                 FocusedPane::ResourcePanel(panel_id) => self
                     .state
                     .active_provider
@@ -629,7 +632,7 @@ impl App {
     fn select_by_focus(&mut self, delta: isize) -> Vec<ProviderRequest> {
         match &self.state.focused_pane {
             FocusedPane::Providers => self.move_provider_selection(delta),
-            FocusedPane::ResourcePanel(_) => {
+            FocusedPane::FirstResourcePanel | FocusedPane::ResourcePanel(_) => {
                 self.move_resource_selection(delta);
                 Vec::new()
             }
@@ -707,11 +710,23 @@ impl App {
             return Vec::new();
         };
         match result {
+            Ok(snapshot) if snapshot.panels.len() > NUMBERED_RESOURCE_PANEL_CAPACITY => {
+                provider.panel_navigation.clear();
+                provider.focused_resource_panel = None;
+                provider.selected_resource = None;
+                provider.workspace_state = WorkspaceState::Error(WorkspaceError::new(format!(
+                    "{} returned {} Resource Panels; Virtui supports at most \
+                     {NUMBERED_RESOURCE_PANEL_CAPACITY} Resource Panels so each retains a \
+                     numbered focus Command",
+                    provider.name,
+                    snapshot.panels.len(),
+                )));
+            }
             Ok(snapshot) => {
                 reconcile_panel_navigation(provider, &snapshot);
                 provider.workspace_state = WorkspaceState::Ready(snapshot);
                 reconcile_detail_view(provider);
-                if self.state.focused_pane == FocusedPane::ResourcePanel(ResourcePanelId::new("")) {
+                if self.state.focused_pane == FocusedPane::FirstResourcePanel {
                     self.state.focused_pane = provider
                         .focused_resource_panel
                         .clone()
@@ -1045,7 +1060,9 @@ impl App {
             return;
         }
         let scope = match &self.state.focused_pane {
-            FocusedPane::ResourcePanel(_) => CommandScope::ResourceView,
+            FocusedPane::FirstResourcePanel | FocusedPane::ResourcePanel(_) => {
+                CommandScope::ResourceView
+            }
             FocusedPane::Details => CommandScope::Details,
             FocusedPane::Providers => return,
         };
@@ -1320,14 +1337,14 @@ impl App {
             .retain(|_, provider_id| provider_id != &previous_provider);
         self.state.active_provider =
             Some((active_provider as isize + delta).rem_euclid(provider_count as isize) as usize);
-        if matches!(&self.state.focused_pane, FocusedPane::ResourcePanel(_)) {
+        if matches!(
+            &self.state.focused_pane,
+            FocusedPane::FirstResourcePanel | FocusedPane::ResourcePanel(_)
+        ) {
             self.state.focused_pane = self.state.providers[self.state.active_provider.unwrap()]
                 .focused_resource_panel
                 .clone()
-                .map_or_else(
-                    || FocusedPane::ResourcePanel(ResourcePanelId::new("")),
-                    FocusedPane::ResourcePanel,
-                );
+                .map_or(FocusedPane::FirstResourcePanel, FocusedPane::ResourcePanel);
         }
         self.refresh_active_provider()
     }

@@ -8,7 +8,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::Color;
 use tokio::sync::{Notify, mpsc};
 use virtui::{
-    app::{App, AppEvent, AppState, FocusedPane},
+    app::{App, AppEvent, AppState, FocusedPane, WorkspaceState},
     cli::{CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec},
     command::{Command, CommandRegistry, CommandScope},
     docker::DockerWorkspace,
@@ -1877,6 +1877,29 @@ fn focus_has_a_non_colour_cue_on_every_pane() {
     app.invoke(Command::FocusProviders);
     let screen = render_to_text(app.state(), 80, 30);
     assert!(screen.starts_with("▶ [1] Providers"), "rendered:\n{screen}");
+}
+
+#[test]
+fn a_workspace_over_the_numbered_panel_capacity_is_refused() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let template = docker_multi_panel_snapshot().panels.remove(0);
+    let panels = (0..10)
+        .map(|index| {
+            let mut panel = template.clone();
+            panel.id = ResourcePanelId::new(format!("panel-{index}"));
+            panel.title = format!("Panel {index}");
+            panel
+        })
+        .collect();
+
+    app.update(refresh_completed(initial, Ok(WorkspaceSnapshot { panels })));
+
+    assert!(matches!(
+        &app.state().providers[0].workspace_state,
+        WorkspaceState::Error(error)
+            if error.message.contains("supports at most 9 Resource Panels")
+    ));
 }
 
 #[test]

@@ -41,12 +41,17 @@ pub fn render(state: &AppState, frame: &mut Frame<'_>) {
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(48), Constraint::Percentage(52)])
         .split(rows[1]);
+    let focused_resource_panel = match &state.focused_pane {
+        FocusedPane::ResourcePanel(panel_id) => Some(panel_id),
+        FocusedPane::Providers | FocusedPane::FirstResourcePanel | FocusedPane::Details => None,
+    };
     render_workspace_panel(
         provider,
-        match &state.focused_pane {
-            FocusedPane::ResourcePanel(panel_id) => Some(panel_id),
-            FocusedPane::Providers | FocusedPane::Details => None,
-        },
+        focused_resource_panel,
+        matches!(
+            &state.focused_pane,
+            FocusedPane::FirstResourcePanel | FocusedPane::ResourcePanel(_)
+        ),
         &state.hints.focus_resource_panels,
         frame,
         columns[0],
@@ -201,6 +206,7 @@ fn render_provider_bar(state: &AppState, frame: &mut Frame<'_>, area: Rect) {
 fn render_workspace_panel(
     provider: &ProviderState,
     focused_panel: Option<&crate::provider::ResourcePanelId>,
+    resource_focus: bool,
     resource_hints: &[Option<String>],
     frame: &mut Frame<'_>,
     area: Rect,
@@ -211,9 +217,9 @@ fn render_workspace_panel(
                 pane_title(
                     resource_hints.first().and_then(Option::as_deref),
                     "Resources",
-                    focused_panel.is_some(),
+                    resource_focus,
                 ),
-                focused_panel.is_some(),
+                resource_focus,
             )),
             area,
         ),
@@ -230,9 +236,9 @@ fn render_workspace_panel(
                 pane_title(
                     resource_hints.first().and_then(Option::as_deref),
                     "Error",
-                    focused_panel.is_some(),
+                    resource_focus,
                 ),
-                focused_panel.is_some(),
+                resource_focus,
             )),
             area,
         ),
@@ -243,9 +249,9 @@ fn render_workspace_panel(
                         pane_title(
                             resource_hints.first().and_then(Option::as_deref),
                             "Resources",
-                            focused_panel.is_some(),
+                            resource_focus,
                         ),
-                        focused_panel.is_some(),
+                        resource_focus,
                     )),
                     area,
                 );
