@@ -17,7 +17,7 @@ use virtui::{
     cli::{InteractiveRunner, ProcessError, ProcessFailure, ProcessSpec},
     provider::{
         DetailView, ProviderDiscovery, ProviderId, ProviderRequest, Resource, ResourceCommand,
-        ResourceId, ResourcePanel, ResourceState, WorkspaceSnapshot,
+        ResourceId, ResourcePanel, ResourcePanelId, ResourceState, WorkspaceSnapshot,
     },
     runtime::{ShellTerminal, handle_key, open_pending_shell},
     ui::render_to_text,
@@ -114,13 +114,14 @@ fn docker_discovery() -> ProviderDiscovery {
 fn running_container() -> WorkspaceSnapshot {
     WorkspaceSnapshot {
         panels: vec![ResourcePanel {
+            id: ResourcePanelId::new("containers"),
             title: "Containers".to_owned(),
             detail_views: vec![DetailView::new("logs", "Logs")],
             resources: vec![Resource {
                 id: ResourceId::new("container-a"),
                 name: "api".to_owned(),
                 status: Some("running".to_owned()),
-                state: ResourceState::Running,
+                state: Some(ResourceState::Running),
                 fields: vec![("Image".to_owned(), "nginx:1.27".to_owned())],
                 available_commands: vec![ResourceCommand::Stop],
                 shell: Some(ProcessSpec::new(
