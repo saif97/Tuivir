@@ -284,6 +284,11 @@ fn every_direct_focus_command_exposes_its_effective_hint() {
         Some(Command::FocusResourcePanel(1))
     );
     assert_eq!(
+        registry.resolve(CommandScope::ResourcePanel(1), key("j")),
+        Some(Command::SelectNext),
+        "generic Resource Panel Commands resolve in each distinct panel scope"
+    );
+    assert_eq!(
         registry.resolve(CommandScope::ProviderSelector, key("f6")),
         Some(Command::FocusDetails)
     );

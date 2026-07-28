@@ -310,7 +310,8 @@ pub struct AppState {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct KeyHints {
     pub focus_providers: Option<String>,
-    pub focus_resources: Option<String>,
+    pub focus_resource_panels: Vec<Option<String>>,
+    pub focus_details: Option<String>,
 }
 
 impl KeyHints {
@@ -319,8 +320,15 @@ impl KeyHints {
             focus_providers: registry
                 .first_key(Command::FocusProviders)
                 .map(|key| key.to_string()),
-            focus_resources: registry
-                .first_key(Command::FocusResourcePanel(0))
+            focus_resource_panels: (0..9)
+                .map(|index| {
+                    registry
+                        .first_key(Command::FocusResourcePanel(index))
+                        .map(|key| key.to_string())
+                })
+                .collect(),
+            focus_details: registry
+                .first_key(Command::FocusDetails)
                 .map(|key| key.to_string()),
         }
     }
@@ -511,7 +519,18 @@ impl App {
         } else {
             match &self.state.focused_pane {
                 FocusedPane::Providers => CommandScope::ProviderSelector,
-                FocusedPane::ResourcePanel(_) => CommandScope::ResourceView,
+                FocusedPane::ResourcePanel(panel_id) => self
+                    .state
+                    .active_provider
+                    .and_then(|active| self.state.providers.get(active))
+                    .and_then(|provider| match &provider.workspace_state {
+                        WorkspaceState::Ready(snapshot) => snapshot
+                            .panels
+                            .iter()
+                            .position(|panel| &panel.id == panel_id),
+                        WorkspaceState::Loading | WorkspaceState::Error(_) => None,
+                    })
+                    .map_or(CommandScope::ResourceView, CommandScope::ResourcePanel),
                 FocusedPane::Details => CommandScope::Details,
             }
         }

@@ -54,6 +54,8 @@ pub enum CommandScope {
     ProviderSelector,
     /// The Provider Workspace's resource view has focus.
     ResourceView,
+    /// One provider-ordered Resource Panel has focus.
+    ResourcePanel(usize),
     /// The Details pane has focus.
     Details,
     /// A Resource Command is waiting to be confirmed.
@@ -255,9 +257,13 @@ impl CommandRegistry {
     ///
     /// Unbound Commands are omitted: they are not controls the user has.
     pub fn in_scope(&self, scope: CommandScope) -> impl Iterator<Item = &EffectiveCommand> {
-        self.commands
-            .iter()
-            .filter(move |command| command.scopes.contains(&scope) && !command.keys.is_empty())
+        self.commands.iter().filter(move |command| {
+            command.scopes.iter().any(|registered| {
+                registered == &scope
+                    || (*registered == CommandScope::ResourceView
+                        && matches!(scope, CommandScope::ResourcePanel(_)))
+            }) && !command.keys.is_empty()
+        })
     }
 
     /// The preferred inline hint for `command`, or `None` when it is unbound.
