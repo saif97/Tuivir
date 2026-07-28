@@ -1863,16 +1863,22 @@ fn focus_has_a_non_colour_cue_on_every_pane() {
     ));
 
     let screen = render_to_text(app.state(), 80, 30);
-    assert!(screen.contains("▶ [2] Containers"), "rendered:\n{screen}");
+    assert!(
+        screen.contains("┏ ▶ [2] Containers"),
+        "the focused Resource Panel uses a thick border and title cue:\n{screen}"
+    );
 
     app.invoke(Command::FocusResourcePanel(1));
     let screen = render_to_text(app.state(), 80, 30);
-    assert!(screen.contains("▶ [3] Images"), "rendered:\n{screen}");
+    assert!(screen.contains("┏ ▶ [3] Images"), "rendered:\n{screen}");
     assert!(!screen.contains("▶ [2] Containers"));
 
     app.invoke(Command::FocusDetails);
     let screen = render_to_text(app.state(), 80, 30);
-    assert!(screen.contains("▶ [enter] Details"), "rendered:\n{screen}");
+    assert!(
+        screen.contains("┏ ▶ [enter] Details"),
+        "rendered:\n{screen}"
+    );
 
     app.invoke(Command::FocusProviders);
     let screen = render_to_text(app.state(), 80, 30);
