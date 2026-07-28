@@ -8,9 +8,9 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::Color;
 use tokio::sync::{Notify, mpsc};
 use virtui::{
-    app::{App, AppEvent, AppState},
+    app::{App, AppEvent, AppState, FocusedPane},
     cli::{CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec},
-    command::{Command, CommandRegistry},
+    command::{Command, CommandRegistry, CommandScope},
     docker::DockerWorkspace,
     provider::{
         DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderRequest, Resource,
@@ -446,7 +446,6 @@ fn stop_key_dispatches_for_a_running_container() {
         initial,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
     ));
-
     let (_, requests) = handle_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE),
@@ -1850,6 +1849,51 @@ fn only_the_first_resource_panel_advertises_the_focus_key() {
 }
 
 #[test]
+fn direct_focus_commands_target_each_resource_panel_and_details() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(docker_multi_panel_snapshot()),
+    ));
+
+    app.invoke(Command::FocusResourcePanel(1));
+    assert_eq!(
+        app.state().focused_pane,
+        FocusedPane::ResourcePanel(ResourcePanelId::new("images"))
+    );
+    assert_eq!(app.active_scope(), CommandScope::ResourceView);
+
+    app.invoke(Command::FocusDetails);
+    assert_eq!(app.state().focused_pane, FocusedPane::Details);
+    assert_eq!(app.active_scope(), CommandScope::Details);
+}
+
+#[test]
+fn focus_cycles_through_provider_order_and_wraps() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(docker_multi_panel_snapshot()),
+    ));
+
+    let expected = [
+        FocusedPane::ResourcePanel(ResourcePanelId::new("images")),
+        FocusedPane::Details,
+        FocusedPane::Providers,
+        FocusedPane::ResourcePanel(ResourcePanelId::new("containers")),
+    ];
+    for focused in expected {
+        app.invoke(Command::FocusNextPane);
+        assert_eq!(app.state().focused_pane, focused);
+    }
+
+    app.invoke(Command::FocusPreviousPane);
+    assert_eq!(app.state().focused_pane, FocusedPane::Providers);
+}
+
+#[test]
 fn selecting_an_image_routes_details_by_panel_and_resource() {
     let mut app = App::new();
     let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
@@ -1858,7 +1902,7 @@ fn selecting_an_image_routes_details_by_panel_and_resource() {
         Ok(docker_multi_panel_snapshot()),
     ));
 
-    let requests = app.invoke(Command::SelectNext);
+    let requests = app.invoke(Command::FocusResourcePanel(1));
 
     assert!(
         matches!(
@@ -1888,7 +1932,7 @@ fn stale_container_details_cannot_replace_selected_image_details() {
         initial,
         Ok(docker_multi_panel_snapshot()),
     )));
-    let image_request = detail_request(app.invoke(Command::SelectNext));
+    let image_request = detail_request(app.invoke(Command::FocusResourcePanel(1)));
     app.update(details_completed(
         image_request,
         Ok(ResourceDetails::from_lines(["selected image details"])),
@@ -1940,6 +1984,7 @@ fn moving_through_the_detail_views_loads_only_the_newly_visible_one() {
         initial,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
     ));
+    app.invoke(Command::FocusDetails);
 
     let (_, requests) = handle_key(
         &mut app,
@@ -2317,6 +2362,7 @@ fn scrolling_moves_through_a_long_detail_view_and_clamps_at_both_ends() {
         )),
     ));
     assert!(render_to_text(app.state(), 100, 24).contains("line-0"));
+    app.invoke(Command::FocusDetails);
 
     handle_key(
         &mut app,
@@ -2380,7 +2426,7 @@ fn moving_to_another_resource_starts_its_detail_view_at_the_top() {
 #[test]
 fn configured_detail_view_keys_change_dispatch_and_help_together() {
     let registry =
-        CommandRegistry::effective(&[("detail.view.next".to_owned(), vec!["tab".to_owned()])])
+        CommandRegistry::effective(&[("detail.view.next".to_owned(), vec!["f12".to_owned()])])
             .expect("a valid override");
     let mut app = App::with_registry(registry);
     let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
@@ -2389,7 +2435,8 @@ fn configured_detail_view_keys_change_dispatch_and_help_together() {
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
     ));
 
-    handle_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    app.invoke(Command::FocusDetails);
+    handle_key(&mut app, KeyEvent::new(KeyCode::F(12), KeyModifiers::NONE));
     assert!(render_to_text(app.state(), 100, 24).contains("Logs  [ Stats ]  Inspect"));
 
     handle_key(
@@ -2407,7 +2454,7 @@ fn configured_detail_view_keys_change_dispatch_and_help_together() {
     );
     let help = render_to_text(app.state(), 100, 30);
     assert!(
-        help.contains("tab  Next detail view"),
+        help.contains("f12  Next detail view"),
         "help follows the override:\n{help}"
     );
     assert!(
@@ -2787,7 +2834,7 @@ fn escape_does_not_quit_when_no_modal_is_open() {
 #[test]
 fn an_overridden_focus_key_renders_its_effective_hint() {
     let registry =
-        CommandRegistry::effective(&[("focus.providers".to_owned(), vec!["9".to_owned()])])
+        CommandRegistry::effective(&[("focus.providers".to_owned(), vec!["f10".to_owned()])])
             .expect("a valid override");
     let mut app = App::with_registry(registry);
     let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
@@ -2798,7 +2845,7 @@ fn an_overridden_focus_key_renders_its_effective_hint() {
 
     let screen = render_to_text(app.state(), 100, 24);
     assert!(
-        screen.starts_with("[9] Providers"),
+        screen.starts_with("[f10] Providers"),
         "the panel hint follows the effective binding:\n{screen}"
     );
     assert!(
@@ -2830,7 +2877,7 @@ fn an_unbound_focus_command_omits_its_inline_hint() {
 fn one_override_changes_dispatch_help_and_the_inline_hint_together() {
     let registry = CommandRegistry::effective(&[
         ("resource.restart".to_owned(), vec!["x".to_owned()]),
-        ("focus.providers".to_owned(), vec!["9".to_owned()]),
+        ("focus.providers".to_owned(), vec!["f10".to_owned()]),
     ])
     .expect("a valid override set");
     let mut app = App::with_registry(registry);
@@ -2842,7 +2889,7 @@ fn one_override_changes_dispatch_help_and_the_inline_hint_together() {
 
     // The inline hint follows the override.
     let screen = render_to_text(app.state(), 100, 24);
-    assert!(screen.starts_with("[9] Providers"), "rendered:\n{screen}");
+    assert!(screen.starts_with("[f10] Providers"), "rendered:\n{screen}");
 
     // Contextual help follows the override.
     handle_key(

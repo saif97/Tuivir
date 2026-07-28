@@ -8,7 +8,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
 };
 
-use crate::app::{AppState, DetailContent, FocusedPanel, ProviderState, WorkspaceState};
+use crate::app::{AppState, DetailContent, FocusedPane, ProviderState, WorkspaceState};
 use crate::provider::ResourceState;
 
 pub fn render(state: &AppState, frame: &mut Frame<'_>) {
@@ -43,7 +43,7 @@ pub fn render(state: &AppState, frame: &mut Frame<'_>) {
         .split(rows[1]);
     render_workspace_panel(
         provider,
-        state.focused_panel == FocusedPanel::Resources,
+        matches!(&state.focused_pane, FocusedPane::ResourcePanel(_)),
         state.hints.focus_resources.as_deref(),
         frame,
         columns[0],
@@ -166,7 +166,7 @@ fn render_provider_bar(state: &AppState, frame: &mut Frame<'_>, area: Rect) {
     let mut provider_spans = vec![
         Span::styled(
             providers_label,
-            panel_title_style(state.focused_panel == FocusedPanel::Providers),
+            panel_title_style(state.focused_pane == FocusedPane::Providers),
         ),
         Span::raw("  "),
     ];

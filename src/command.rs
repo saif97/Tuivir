@@ -54,6 +54,8 @@ pub enum CommandScope {
     ProviderSelector,
     /// The Provider Workspace's resource view has focus.
     ResourceView,
+    /// The Details pane has focus.
+    Details,
     /// A Resource Command is waiting to be confirmed.
     Confirmation,
     /// A failed Resource Command is being reported.
@@ -303,8 +305,14 @@ struct CommandDefinition {
 
 /// Every scope in which the user is working inside a Provider Workspace rather
 /// than answering a modal.
-const WORKSPACE: &[CommandScope] = &[CommandScope::ProviderSelector, CommandScope::ResourceView];
+const WORKSPACE: &[CommandScope] = &[
+    CommandScope::ProviderSelector,
+    CommandScope::ResourceView,
+    CommandScope::Details,
+];
+const SELECTABLE: &[CommandScope] = &[CommandScope::ProviderSelector, CommandScope::ResourceView];
 const RESOURCE_VIEW: &[CommandScope] = &[CommandScope::ResourceView];
+const DETAILS: &[CommandScope] = &[CommandScope::Details];
 /// Every modal scope. A modal replaces the workspace scope while it is open.
 const MODAL: &[CommandScope] = &[
     CommandScope::Confirmation,
@@ -328,6 +336,7 @@ const BUILTIN_COMMANDS: &[CommandDefinition] = &[
         scopes: &[
             CommandScope::ProviderSelector,
             CommandScope::ResourceView,
+            CommandScope::Details,
             CommandScope::HelpOverlay,
         ],
         default_keys: &["?"],
@@ -435,14 +444,14 @@ const BUILTIN_COMMANDS: &[CommandDefinition] = &[
         id: "selection.next",
         description: "Select next",
         command: Command::SelectNext,
-        scopes: WORKSPACE,
+        scopes: SELECTABLE,
         default_keys: &["j", "down"],
     },
     CommandDefinition {
         id: "selection.previous",
         description: "Select previous",
         command: Command::SelectPrevious,
-        scopes: WORKSPACE,
+        scopes: SELECTABLE,
         default_keys: &["k", "up"],
     },
     CommandDefinition {
@@ -479,28 +488,28 @@ const BUILTIN_COMMANDS: &[CommandDefinition] = &[
         id: "detail.view.next",
         description: "Next detail view",
         command: Command::NextDetailView,
-        scopes: RESOURCE_VIEW,
+        scopes: DETAILS,
         default_keys: &["l", "right"],
     },
     CommandDefinition {
         id: "detail.view.previous",
         description: "Previous detail view",
         command: Command::PreviousDetailView,
-        scopes: RESOURCE_VIEW,
+        scopes: DETAILS,
         default_keys: &["h", "left"],
     },
     CommandDefinition {
         id: "detail.scroll.down",
         description: "Scroll details down",
         command: Command::ScrollDetailsDown,
-        scopes: RESOURCE_VIEW,
+        scopes: DETAILS,
         default_keys: &["ctrl+d", "pagedown"],
     },
     CommandDefinition {
         id: "detail.scroll.up",
         description: "Scroll details up",
         command: Command::ScrollDetailsUp,
-        scopes: RESOURCE_VIEW,
+        scopes: DETAILS,
         default_keys: &["ctrl+u", "pageup"],
     },
     CommandDefinition {
