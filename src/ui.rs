@@ -334,12 +334,18 @@ fn render_resource_panel(
             panel.title.to_lowercase()
         )));
     }
-    let scroll = provider
+    let selected = provider
         .panel_navigation
         .iter()
         .find(|navigation| navigation.panel_id == panel.id)
-        .map_or(0, |navigation| navigation.scroll);
-    let mut state = ListState::default().with_offset(scroll);
+        .and_then(|navigation| navigation.selected_resource.as_ref())
+        .and_then(|selected| {
+            panel
+                .resources
+                .iter()
+                .position(|resource| &resource.id == selected)
+        });
+    let mut state = ListState::default().with_selected(selected);
     frame.render_stateful_widget(
         List::new(items).block(pane_block(
             pane_title(resources_hint, &panel.title, focused),

@@ -2702,6 +2702,25 @@ fn resource_navigation_changes_the_selected_details() {
 }
 
 #[test]
+fn resource_navigation_keeps_earlier_rows_visible_until_the_selection_leaves_the_viewport() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[
+            ("container-a", "api", "nginx:1.27"),
+            ("container-b", "worker", "alpine:3.21"),
+        ])),
+    ));
+
+    app.invoke(Command::SelectNext);
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(screen.contains("  api"), "rendered screen:\n{screen}");
+    assert!(screen.contains("> worker"), "rendered screen:\n{screen}");
+}
+
+#[test]
 fn automatic_and_manual_refreshes_do_not_overlap() {
     let mut app = App::new();
     let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
