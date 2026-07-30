@@ -504,7 +504,7 @@ async fn discovered_incus_workspace_renders_target_environment_and_instances() {
 
     let screen = render_to_text(app.state(), 100, 24);
     assert!(screen.contains("Incus"));
-    assert!(screen.contains("Target: local / production"));
+    assert!(screen.contains("[ Incus · local / production ]"));
     assert!(screen.contains("Instances"));
     assert!(screen.contains("api"));
     assert!(screen.contains("Running"));
@@ -540,7 +540,7 @@ async fn reachable_incus_without_instances_renders_a_distinct_empty_state() {
     app.update(refresh_completed(request, incus.refresh(&cli).await));
 
     let screen = render_to_text(app.state(), 100, 24);
-    assert!(screen.contains("Target: local / default"));
+    assert!(screen.contains("[ Incus · local / default ]"));
     assert!(screen.contains("No Incus instances found"));
     assert!(!screen.contains("unavailable"));
 }

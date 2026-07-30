@@ -15,7 +15,11 @@ pub enum Command {
     /// Refreshes the Active Workspace now rather than waiting for the clock.
     Refresh,
     FocusProviders,
-    FocusResources,
+    /// Focuses a Resource Panel by its zero-based provider-defined position.
+    FocusResourcePanel(usize),
+    FocusDetails,
+    FocusNextPane,
+    FocusPreviousPane,
     /// Moves the selection in whichever panel has focus.
     SelectNext,
     SelectPrevious,
@@ -50,6 +54,10 @@ pub enum CommandScope {
     ProviderSelector,
     /// The Provider Workspace's resource view has focus.
     ResourceView,
+    /// One provider-ordered Resource Panel has focus.
+    ResourcePanel(usize),
+    /// The Details pane has focus.
+    Details,
     /// A Resource Command is waiting to be confirmed.
     Confirmation,
     /// A failed Resource Command is being reported.
@@ -89,24 +97,32 @@ impl Default for CommandRegistry {
 impl CommandRegistry {
     /// The compiled defaults, before any configuration is layered over them.
     pub fn builtin() -> Self {
-        Self {
-            commands: BUILTIN_COMMANDS
+        let mut commands = BUILTIN_COMMANDS
+            .iter()
+            .map(effective_command)
+            .collect::<Vec<_>>();
+        let focus_position = commands
+            .iter()
+            .position(|registered| registered.command == Command::FocusProviders)
+            .expect("the Provider selector focus Command is registered")
+            + 1;
+        commands.splice(
+            focus_position..focus_position,
+            RESOURCE_PANEL_FOCUS_COMMANDS
                 .iter()
-                .map(|definition| EffectiveCommand {
+                .enumerate()
+                .map(|(index, definition)| EffectiveCommand {
                     id: definition.id,
                     description: definition.description,
-                    command: definition.command,
-                    scopes: definition.scopes,
-                    keys: definition
-                        .default_keys
-                        .iter()
-                        .map(|text| {
-                            Key::parse(text).expect("compiled default keys are representable")
-                        })
-                        .collect(),
-                })
-                .collect(),
-        }
+                    command: Command::FocusResourcePanel(index),
+                    scopes: WORKSPACE,
+                    keys: vec![
+                        Key::parse(definition.default_key)
+                            .expect("compiled Resource Panel focus keys are representable"),
+                    ],
+                }),
+        );
+        Self { commands }
     }
 
     /// Layers a `[keybindings]` table over the compiled defaults.
@@ -249,9 +265,13 @@ impl CommandRegistry {
     ///
     /// Unbound Commands are omitted: they are not controls the user has.
     pub fn in_scope(&self, scope: CommandScope) -> impl Iterator<Item = &EffectiveCommand> {
-        self.commands
-            .iter()
-            .filter(move |command| command.scopes.contains(&scope) && !command.keys.is_empty())
+        self.commands.iter().filter(move |command| {
+            command.scopes.iter().any(|registered| {
+                registered == &scope
+                    || (*registered == CommandScope::ResourceView
+                        && matches!(scope, CommandScope::ResourcePanel(_)))
+            }) && !command.keys.is_empty()
+        })
     }
 
     /// The preferred inline hint for `command`, or `None` when it is unbound.
@@ -260,6 +280,20 @@ impl CommandRegistry {
             .iter()
             .find(|registered| registered.command == command)
             .and_then(|registered| registered.keys.first().copied())
+    }
+}
+
+fn effective_command(definition: &CommandDefinition) -> EffectiveCommand {
+    EffectiveCommand {
+        id: definition.id,
+        description: definition.description,
+        command: definition.command,
+        scopes: definition.scopes,
+        keys: definition
+            .default_keys
+            .iter()
+            .map(|text| Key::parse(text).expect("compiled default keys are representable"))
+            .collect(),
     }
 }
 
@@ -297,10 +331,74 @@ struct CommandDefinition {
     default_keys: &'static [&'static str],
 }
 
+struct ResourcePanelFocusDefinition {
+    id: &'static str,
+    description: &'static str,
+    default_key: &'static str,
+}
+
+const RESOURCE_PANEL_FOCUS_COMMANDS: &[ResourcePanelFocusDefinition] = &[
+    ResourcePanelFocusDefinition {
+        id: "focus.resources",
+        description: "Focus first Resource Panel",
+        default_key: "2",
+    },
+    ResourcePanelFocusDefinition {
+        id: "focus.resources.2",
+        description: "Focus second Resource Panel",
+        default_key: "3",
+    },
+    ResourcePanelFocusDefinition {
+        id: "focus.resources.3",
+        description: "Focus third Resource Panel",
+        default_key: "4",
+    },
+    ResourcePanelFocusDefinition {
+        id: "focus.resources.4",
+        description: "Focus fourth Resource Panel",
+        default_key: "5",
+    },
+    ResourcePanelFocusDefinition {
+        id: "focus.resources.5",
+        description: "Focus fifth Resource Panel",
+        default_key: "6",
+    },
+    ResourcePanelFocusDefinition {
+        id: "focus.resources.6",
+        description: "Focus sixth Resource Panel",
+        default_key: "7",
+    },
+    ResourcePanelFocusDefinition {
+        id: "focus.resources.7",
+        description: "Focus seventh Resource Panel",
+        default_key: "8",
+    },
+    ResourcePanelFocusDefinition {
+        id: "focus.resources.8",
+        description: "Focus eighth Resource Panel",
+        default_key: "9",
+    },
+    ResourcePanelFocusDefinition {
+        id: "focus.resources.9",
+        description: "Focus ninth Resource Panel",
+        default_key: "0",
+    },
+];
+
+/// A Provider Workspace may expose at most this many Resource Panels so every
+/// one retains a single-key numbered focus Command and visible hint.
+pub const NUMBERED_RESOURCE_PANEL_CAPACITY: usize = RESOURCE_PANEL_FOCUS_COMMANDS.len();
+
 /// Every scope in which the user is working inside a Provider Workspace rather
 /// than answering a modal.
-const WORKSPACE: &[CommandScope] = &[CommandScope::ProviderSelector, CommandScope::ResourceView];
+const WORKSPACE: &[CommandScope] = &[
+    CommandScope::ProviderSelector,
+    CommandScope::ResourceView,
+    CommandScope::Details,
+];
+const SELECTABLE: &[CommandScope] = &[CommandScope::ProviderSelector, CommandScope::ResourceView];
 const RESOURCE_VIEW: &[CommandScope] = &[CommandScope::ResourceView];
+const DETAILS: &[CommandScope] = &[CommandScope::Details];
 /// Every modal scope. A modal replaces the workspace scope while it is open.
 const MODAL: &[CommandScope] = &[
     CommandScope::Confirmation,
@@ -324,6 +422,7 @@ const BUILTIN_COMMANDS: &[CommandDefinition] = &[
         scopes: &[
             CommandScope::ProviderSelector,
             CommandScope::ResourceView,
+            CommandScope::Details,
             CommandScope::HelpOverlay,
         ],
         default_keys: &["?"],
@@ -344,24 +443,38 @@ const BUILTIN_COMMANDS: &[CommandDefinition] = &[
         default_keys: &["1"],
     },
     CommandDefinition {
-        id: "focus.resources",
-        description: "Focus resources",
-        command: Command::FocusResources,
+        id: "focus.details",
+        description: "Focus Details",
+        command: Command::FocusDetails,
         scopes: WORKSPACE,
-        default_keys: &["2"],
+        default_keys: &["enter"],
+    },
+    CommandDefinition {
+        id: "focus.next",
+        description: "Focus next Pane",
+        command: Command::FocusNextPane,
+        scopes: WORKSPACE,
+        default_keys: &["tab"],
+    },
+    CommandDefinition {
+        id: "focus.previous",
+        description: "Focus previous Pane",
+        command: Command::FocusPreviousPane,
+        scopes: WORKSPACE,
+        default_keys: &["shift+tab"],
     },
     CommandDefinition {
         id: "selection.next",
         description: "Select next",
         command: Command::SelectNext,
-        scopes: WORKSPACE,
+        scopes: SELECTABLE,
         default_keys: &["j", "down"],
     },
     CommandDefinition {
         id: "selection.previous",
         description: "Select previous",
         command: Command::SelectPrevious,
-        scopes: WORKSPACE,
+        scopes: SELECTABLE,
         default_keys: &["k", "up"],
     },
     CommandDefinition {
@@ -398,28 +511,28 @@ const BUILTIN_COMMANDS: &[CommandDefinition] = &[
         id: "detail.view.next",
         description: "Next detail view",
         command: Command::NextDetailView,
-        scopes: RESOURCE_VIEW,
+        scopes: DETAILS,
         default_keys: &["l", "right"],
     },
     CommandDefinition {
         id: "detail.view.previous",
         description: "Previous detail view",
         command: Command::PreviousDetailView,
-        scopes: RESOURCE_VIEW,
+        scopes: DETAILS,
         default_keys: &["h", "left"],
     },
     CommandDefinition {
         id: "detail.scroll.down",
         description: "Scroll details down",
         command: Command::ScrollDetailsDown,
-        scopes: RESOURCE_VIEW,
+        scopes: DETAILS,
         default_keys: &["ctrl+d", "pagedown"],
     },
     CommandDefinition {
         id: "detail.scroll.up",
         description: "Scroll details up",
         command: Command::ScrollDetailsUp,
-        scopes: RESOURCE_VIEW,
+        scopes: DETAILS,
         default_keys: &["ctrl+u", "pageup"],
     },
     CommandDefinition {

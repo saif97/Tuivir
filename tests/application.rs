@@ -8,14 +8,14 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::Color;
 use tokio::sync::{Notify, mpsc};
 use virtui::{
-    app::{App, AppEvent, AppState},
+    app::{App, AppEvent, AppState, FocusedPane, WorkspaceState},
     cli::{CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec},
-    command::{Command, CommandRegistry},
+    command::{Command, CommandRegistry, CommandScope},
     docker::DockerWorkspace,
     provider::{
         DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderRequest, Resource,
         ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourcePanelId,
-        ResourceState, WorkspaceError, WorkspaceSnapshot,
+        ResourceState, ResourceTarget, WorkspaceError, WorkspaceSnapshot,
     },
     runtime::{ProviderRuntime, RefreshTimer, ShellControl, handle_key},
     ui::{render_foreground_colours, render_to_text},
@@ -446,7 +446,6 @@ fn stop_key_dispatches_for_a_running_container() {
         initial,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
     ));
-
     let (_, requests) = handle_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE),
@@ -609,7 +608,10 @@ fn returning_from_a_shell_refreshes_the_active_workspace_and_preserves_selection
 
     assert_eq!(
         app.state().providers[0].selected_resource,
-        Some(ResourceId::new("container-b"))
+        Some(ResourceTarget::new(
+            ResourcePanelId::new("containers"),
+            ResourceId::new("container-b")
+        ))
     );
 }
 
@@ -1316,7 +1318,7 @@ fn escape_cancels_delete_confirmation_without_dispatching() {
 }
 
 #[test]
-fn providers_render_in_one_row_above_the_full_width_workspace() {
+fn provider_bar_precedes_the_workspace_panes() {
     let mut app = App::new();
     let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
     app.update(refresh_completed(
@@ -1330,13 +1332,13 @@ fn providers_render_in_one_row_above_the_full_width_workspace() {
         lines
             .next()
             .expect("provider row")
-            .starts_with("[1] Providers  [ Docker ]")
+            .starts_with("[1] Providers  [ Docker · desktop-linux ]")
     );
     assert!(
         lines
             .next()
             .expect("workspace row")
-            .starts_with("┌ Docker ")
+            .starts_with("┏ ▶ [2] Containers")
     );
 }
 
@@ -1429,7 +1431,8 @@ fn bracket_keys_switch_the_active_workspace() {
     );
     assert_eq!(requests.len(), 1, "new Active Workspace is refreshed");
     assert!(
-        render_to_text(app.state(), 100, 24).starts_with("[1] Providers  Docker   [ Fixture ]")
+        render_to_text(app.state(), 100, 24)
+            .starts_with("[1] Providers  Docker   [ Fixture · local ]")
     );
 
     let (_, requests) = handle_key(
@@ -1440,7 +1443,8 @@ fn bracket_keys_switch_the_active_workspace() {
     // was abandoned on the way out.
     assert_eq!(requests.len(), 2, "unexpected requests: {requests:?}");
     assert!(
-        render_to_text(app.state(), 100, 24).starts_with("[1] Providers  [ Docker ]   Fixture")
+        render_to_text(app.state(), 100, 24)
+            .starts_with("[1] Providers  [ Docker · desktop-linux ]   Fixture")
     );
 }
 
@@ -1479,7 +1483,10 @@ fn numbered_provider_panel_activates_incus_and_requests_its_refresh() {
             ..
         } if provider_id == ProviderId::new("incus")
     ));
-    assert!(render_to_text(app.state(), 100, 24).starts_with("[1] Providers  Docker   [ Incus ]"));
+    assert!(
+        render_to_text(app.state(), 100, 24)
+            .starts_with("▶ [1] Providers  Docker   [ Incus · local / default ]")
+    );
 }
 
 #[test]
@@ -1502,7 +1509,7 @@ fn late_docker_result_cannot_replace_the_active_incus_workspace() {
     ));
 
     assert_eq!(render_to_text(app.state(), 100, 24), current_screen);
-    assert!(current_screen.contains("[ Incus ]"));
+    assert!(current_screen.contains("[ Incus · local / default ]"));
     assert!(current_screen.contains("gateway"));
     assert!(!current_screen.contains("nginx:1.27"));
 }
@@ -1651,6 +1658,10 @@ fn docker_multi_panel_snapshot() -> WorkspaceSnapshot {
                         ResourceCommand::Restart,
                         ResourceCommand::Delete,
                     ],
+                    shell: Some(ProcessSpec::new(
+                        "docker",
+                        &["exec", "-it", "shared-id", "/bin/sh"],
+                    )),
                 }],
             },
             ResourcePanel {
@@ -1669,6 +1680,7 @@ fn docker_multi_panel_snapshot() -> WorkspaceSnapshot {
                         ("Size".to_owned(), "192MB".to_owned()),
                     ],
                     available_commands: Vec::new(),
+                    shell: None,
                 }],
             },
         ],
@@ -1823,11 +1835,12 @@ fn docker_renders_every_provider_defined_resource_panel() {
     assert!(screen.contains("nginx:1.27"), "rendered:\n{screen}");
 }
 
-/// The focus key reaches the Resource Panes as a whole, so advertising it on
-/// every panel would promise each one a key of its own.
 #[test]
-fn only_the_first_resource_panel_advertises_the_focus_key() {
-    let mut app = App::new();
+fn every_resource_panel_advertises_its_effective_focus_key() {
+    let registry =
+        CommandRegistry::effective(&[("focus.resources.2".to_owned(), vec!["f7".to_owned()])])
+            .expect("a valid override");
+    let mut app = App::with_registry(registry);
     let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
     app.update(refresh_completed(
         initial,
@@ -1837,8 +1850,208 @@ fn only_the_first_resource_panel_advertises_the_focus_key() {
     let screen = render_to_text(app.state(), 80, 30);
 
     assert!(screen.contains("[2] Containers"), "rendered:\n{screen}");
-    assert!(screen.contains(" Images "), "rendered:\n{screen}");
-    assert!(!screen.contains("[2] Images"), "rendered:\n{screen}");
+    assert!(screen.contains("[f7] Images"), "rendered:\n{screen}");
+}
+
+#[test]
+fn focus_has_a_non_colour_cue_on_every_pane() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(docker_multi_panel_snapshot()),
+    ));
+
+    let screen = render_to_text(app.state(), 80, 30);
+    assert!(
+        screen.contains("┏ ▶ [2] Containers"),
+        "the focused Resource Panel uses a thick border and title cue:\n{screen}"
+    );
+
+    app.invoke(Command::FocusResourcePanel(1));
+    let screen = render_to_text(app.state(), 80, 30);
+    assert!(screen.contains("┏ ▶ [3] Images"), "rendered:\n{screen}");
+    assert!(!screen.contains("▶ [2] Containers"));
+
+    app.invoke(Command::FocusDetails);
+    let screen = render_to_text(app.state(), 80, 30);
+    assert!(
+        screen.contains("┏ ▶ [enter] Details"),
+        "rendered:\n{screen}"
+    );
+
+    app.invoke(Command::FocusProviders);
+    let screen = render_to_text(app.state(), 80, 30);
+    assert!(screen.starts_with("▶ [1] Providers"), "rendered:\n{screen}");
+}
+
+#[test]
+fn a_workspace_over_the_numbered_panel_capacity_is_refused() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let template = docker_multi_panel_snapshot().panels.remove(0);
+    let panels = (0..10)
+        .map(|index| {
+            let mut panel = template.clone();
+            panel.id = ResourcePanelId::new(format!("panel-{index}"));
+            panel.title = format!("Panel {index}");
+            panel
+        })
+        .collect();
+
+    app.update(refresh_completed(initial, Ok(WorkspaceSnapshot { panels })));
+
+    assert!(matches!(
+        &app.state().providers[0].workspace_state,
+        WorkspaceState::Error(error)
+            if error.message.contains("supports at most 9 Resource Panels")
+    ));
+}
+
+#[test]
+fn active_provider_and_target_environment_share_the_top_bar() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(docker_multi_panel_snapshot()),
+    ));
+
+    let screen = render_to_text(app.state(), 80, 30);
+    assert!(
+        screen.starts_with("[1] Providers  [ Docker · desktop-linux ]"),
+        "rendered:\n{screen}"
+    );
+    assert!(!screen.contains("Target:"));
+}
+
+#[test]
+fn resource_panel_scroll_is_restored_when_focus_returns() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let mut workspace = docker_multi_panel_snapshot();
+    for index in 1..12 {
+        let mut resource = workspace.panels[0].resources[0].clone();
+        resource.id = ResourceId::new(format!("container-{index}"));
+        resource.name = format!("worker-{index}");
+        workspace.panels[0].resources.push(resource);
+    }
+    app.update(refresh_completed(initial, Ok(workspace)));
+
+    for _ in 0..8 {
+        app.invoke(Command::SelectNext);
+    }
+    app.invoke(Command::FocusResourcePanel(1));
+    app.invoke(Command::FocusResourcePanel(0));
+
+    let screen = render_to_text(app.state(), 80, 12);
+    assert!(screen.contains("> worker-8"), "rendered:\n{screen}");
+    assert!(!screen.contains("> api"), "rendered:\n{screen}");
+}
+
+#[test]
+fn direct_focus_commands_target_each_resource_panel_and_details() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(docker_multi_panel_snapshot()),
+    ));
+
+    app.invoke(Command::FocusResourcePanel(1));
+    assert_eq!(
+        app.state().focused_pane,
+        FocusedPane::ResourcePanel(ResourcePanelId::new("images"))
+    );
+    assert_eq!(app.active_scope(), CommandScope::ResourcePanel(1));
+
+    app.invoke(Command::FocusDetails);
+    assert_eq!(app.state().focused_pane, FocusedPane::Details);
+    assert_eq!(app.active_scope(), CommandScope::Details);
+}
+
+#[test]
+fn focus_cycles_through_provider_order_and_wraps() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(docker_multi_panel_snapshot()),
+    ));
+
+    let expected = [
+        FocusedPane::ResourcePanel(ResourcePanelId::new("images")),
+        FocusedPane::Details,
+        FocusedPane::Providers,
+        FocusedPane::ResourcePanel(ResourcePanelId::new("containers")),
+    ];
+    for focused in expected {
+        app.invoke(Command::FocusNextPane);
+        assert_eq!(app.state().focused_pane, focused);
+    }
+
+    app.invoke(Command::FocusPreviousPane);
+    assert_eq!(app.state().focused_pane, FocusedPane::Providers);
+}
+
+#[test]
+fn every_workspace_and_resource_panel_restores_its_navigation_state() {
+    let mut app = App::new();
+    let docker_refresh =
+        refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let mut docker_snapshot = docker_multi_panel_snapshot();
+    for (panel_index, suffix) in [(0, "worker"), (1, "alpine:3.20")] {
+        let mut second = docker_snapshot.panels[panel_index].resources[0].clone();
+        second.id = ResourceId::new(format!("second-{panel_index}"));
+        second.name = suffix.to_owned();
+        docker_snapshot.panels[panel_index].resources.push(second);
+    }
+    app.update(refresh_completed(docker_refresh, Ok(docker_snapshot)));
+
+    app.invoke(Command::SelectNext);
+    app.invoke(Command::FocusResourcePanel(1));
+    app.invoke(Command::SelectNext);
+    app.update(AppEvent::ProviderDiscovered(incus_discovery()));
+    let incus_refresh = refresh_request(app.invoke(Command::NextWorkspace));
+    app.update(refresh_completed(
+        incus_refresh,
+        Ok(incus_snapshot(&[("instance-a", "gateway", "Running")])),
+    ));
+
+    app.invoke(Command::PreviousWorkspace);
+
+    let docker = &app.state().providers[0];
+    assert_eq!(
+        docker.focused_resource_panel,
+        Some(ResourcePanelId::new("images"))
+    );
+    assert_eq!(
+        app.state().focused_pane,
+        FocusedPane::ResourcePanel(ResourcePanelId::new("images"))
+    );
+    assert_eq!(
+        docker
+            .panel_navigation
+            .iter()
+            .map(|panel| (
+                &panel.panel_id,
+                panel.selected_resource.as_ref(),
+                panel.scroll
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                &ResourcePanelId::new("containers"),
+                Some(&ResourceId::new("second-0")),
+                1,
+            ),
+            (
+                &ResourcePanelId::new("images"),
+                Some(&ResourceId::new("second-1")),
+                1,
+            ),
+        ]
+    );
 }
 
 #[test]
@@ -1850,7 +2063,7 @@ fn selecting_an_image_routes_details_by_panel_and_resource() {
         Ok(docker_multi_panel_snapshot()),
     ));
 
-    let requests = app.invoke(Command::SelectNext);
+    let requests = app.invoke(Command::FocusResourcePanel(1));
 
     assert!(
         matches!(
@@ -1880,7 +2093,7 @@ fn stale_container_details_cannot_replace_selected_image_details() {
         initial,
         Ok(docker_multi_panel_snapshot()),
     )));
-    let image_request = detail_request(app.invoke(Command::SelectNext));
+    let image_request = detail_request(app.invoke(Command::FocusResourcePanel(1)));
     app.update(details_completed(
         image_request,
         Ok(ResourceDetails::from_lines(["selected image details"])),
@@ -1932,6 +2145,7 @@ fn moving_through_the_detail_views_loads_only_the_newly_visible_one() {
         initial,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
     ));
+    app.invoke(Command::FocusDetails);
 
     let (_, requests) = handle_key(
         &mut app,
@@ -2309,6 +2523,7 @@ fn scrolling_moves_through_a_long_detail_view_and_clamps_at_both_ends() {
         )),
     ));
     assert!(render_to_text(app.state(), 100, 24).contains("line-0"));
+    app.invoke(Command::FocusDetails);
 
     handle_key(
         &mut app,
@@ -2372,7 +2587,7 @@ fn moving_to_another_resource_starts_its_detail_view_at_the_top() {
 #[test]
 fn configured_detail_view_keys_change_dispatch_and_help_together() {
     let registry =
-        CommandRegistry::effective(&[("detail.view.next".to_owned(), vec!["tab".to_owned()])])
+        CommandRegistry::effective(&[("detail.view.next".to_owned(), vec!["f12".to_owned()])])
             .expect("a valid override");
     let mut app = App::with_registry(registry);
     let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
@@ -2381,7 +2596,8 @@ fn configured_detail_view_keys_change_dispatch_and_help_together() {
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
     ));
 
-    handle_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    app.invoke(Command::FocusDetails);
+    handle_key(&mut app, KeyEvent::new(KeyCode::F(12), KeyModifiers::NONE));
     assert!(render_to_text(app.state(), 100, 24).contains("Logs  [ Stats ]  Inspect"));
 
     handle_key(
@@ -2399,7 +2615,7 @@ fn configured_detail_view_keys_change_dispatch_and_help_together() {
     );
     let help = render_to_text(app.state(), 100, 30);
     assert!(
-        help.contains("tab  Next detail view"),
+        help.contains("f12  Next detail view"),
         "help follows the override:\n{help}"
     );
     assert!(
@@ -2483,6 +2699,25 @@ fn resource_navigation_changes_the_selected_details() {
     app.invoke(Command::SelectPrevious);
     let api = render_to_text(app.state(), 100, 24);
     assert!(api.contains("Image: nginx:1.27"));
+}
+
+#[test]
+fn resource_navigation_keeps_earlier_rows_visible_until_the_selection_leaves_the_viewport() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[
+            ("container-a", "api", "nginx:1.27"),
+            ("container-b", "worker", "alpine:3.21"),
+        ])),
+    ));
+
+    app.invoke(Command::SelectNext);
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(screen.contains("  api"), "rendered screen:\n{screen}");
+    assert!(screen.contains("> worker"), "rendered screen:\n{screen}");
 }
 
 #[test]
@@ -2779,7 +3014,7 @@ fn escape_does_not_quit_when_no_modal_is_open() {
 #[test]
 fn an_overridden_focus_key_renders_its_effective_hint() {
     let registry =
-        CommandRegistry::effective(&[("focus.providers".to_owned(), vec!["9".to_owned()])])
+        CommandRegistry::effective(&[("focus.providers".to_owned(), vec!["f10".to_owned()])])
             .expect("a valid override");
     let mut app = App::with_registry(registry);
     let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
@@ -2790,7 +3025,7 @@ fn an_overridden_focus_key_renders_its_effective_hint() {
 
     let screen = render_to_text(app.state(), 100, 24);
     assert!(
-        screen.starts_with("[9] Providers"),
+        screen.starts_with("[f10] Providers"),
         "the panel hint follows the effective binding:\n{screen}"
     );
     assert!(
@@ -2822,7 +3057,7 @@ fn an_unbound_focus_command_omits_its_inline_hint() {
 fn one_override_changes_dispatch_help_and_the_inline_hint_together() {
     let registry = CommandRegistry::effective(&[
         ("resource.restart".to_owned(), vec!["x".to_owned()]),
-        ("focus.providers".to_owned(), vec!["9".to_owned()]),
+        ("focus.providers".to_owned(), vec!["f10".to_owned()]),
     ])
     .expect("a valid override set");
     let mut app = App::with_registry(registry);
@@ -2834,7 +3069,7 @@ fn one_override_changes_dispatch_help_and_the_inline_hint_together() {
 
     // The inline hint follows the override.
     let screen = render_to_text(app.state(), 100, 24);
-    assert!(screen.starts_with("[9] Providers"), "rendered:\n{screen}");
+    assert!(screen.starts_with("[f10] Providers"), "rendered:\n{screen}");
 
     // Contextual help follows the override.
     handle_key(

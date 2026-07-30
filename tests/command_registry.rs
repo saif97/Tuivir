@@ -236,7 +236,23 @@ fn shell_focus_and_navigation_defaults_resolve_in_their_own_scopes() {
         (CommandScope::ResourceView, "?", Command::ToggleHelp),
         (CommandScope::ResourceView, "ctrl+r", Command::Refresh),
         (CommandScope::ResourceView, "1", Command::FocusProviders),
-        (CommandScope::ResourceView, "2", Command::FocusResources),
+        (
+            CommandScope::ResourceView,
+            "2",
+            Command::FocusResourcePanel(0),
+        ),
+        (
+            CommandScope::ResourceView,
+            "3",
+            Command::FocusResourcePanel(1),
+        ),
+        (CommandScope::ResourceView, "enter", Command::FocusDetails),
+        (CommandScope::ResourceView, "tab", Command::FocusNextPane),
+        (
+            CommandScope::ResourceView,
+            "shift+tab",
+            Command::FocusPreviousPane,
+        ),
         (CommandScope::ResourceView, "j", Command::SelectNext),
         (CommandScope::ResourceView, "down", Command::SelectNext),
         (CommandScope::ResourceView, "k", Command::SelectPrevious),
@@ -252,6 +268,30 @@ fn shell_focus_and_navigation_defaults_resolve_in_their_own_scopes() {
             "{text} in {scope:?} should invoke {command:?}"
         );
     }
+}
+
+#[test]
+fn every_direct_focus_command_exposes_its_effective_hint() {
+    let registry = effective(&[("focus.resources.2", &["f7"]), ("focus.details", &["f6"])]);
+
+    assert_eq!(
+        registry.first_key(Command::FocusResourcePanel(1)),
+        Some(key("f7"))
+    );
+    assert_eq!(registry.first_key(Command::FocusDetails), Some(key("f6")));
+    assert_eq!(
+        registry.resolve(CommandScope::ProviderSelector, key("f7")),
+        Some(Command::FocusResourcePanel(1))
+    );
+    assert_eq!(
+        registry.resolve(CommandScope::ResourcePanel(1), key("j")),
+        Some(Command::SelectNext),
+        "generic Resource Panel Commands resolve in each distinct panel scope"
+    );
+    assert_eq!(
+        registry.resolve(CommandScope::ProviderSelector, key("f6")),
+        Some(Command::FocusDetails)
+    );
 }
 
 /// Fast navigation moves a resource list; the Provider selector is short enough

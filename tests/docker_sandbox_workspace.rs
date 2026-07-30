@@ -433,7 +433,7 @@ async fn discovered_docker_sandbox_renders_target_environment_and_sandboxes() {
 
     let screen = render_to_text(app.state(), 100, 24);
     assert!(screen.contains("Docker Sandbox"), "{screen}");
-    assert!(screen.contains("Target: v0.37.0"), "{screen}");
+    assert!(screen.contains("[ Docker Sandbox · v0.37.0 ]"), "{screen}");
     assert!(screen.contains("Sandboxes"), "{screen}");
     assert!(screen.contains("claude-virtui"), "{screen}");
     assert!(screen.contains("running"), "{screen}");
@@ -467,7 +467,7 @@ async fn reachable_docker_sandbox_without_sandboxes_renders_a_distinct_empty_sta
     app.update(refresh_completed(request, sandboxes.refresh(&cli).await));
 
     let screen = render_to_text(app.state(), 100, 24);
-    assert!(screen.contains("Target: v0.37.0"), "{screen}");
+    assert!(screen.contains("[ Docker Sandbox · v0.37.0 ]"), "{screen}");
     assert!(
         screen.contains("No Docker Sandbox sandboxes found"),
         "{screen}"

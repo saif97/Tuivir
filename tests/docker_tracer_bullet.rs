@@ -246,10 +246,13 @@ async fn docker_maps_every_container_state_into_the_shared_vocabulary() {
 /// operation nowhere, which is how an unsupported shell stays absent.
 #[tokio::test]
 async fn only_a_running_container_carries_an_interactive_shell() {
-    let cli = FixtureCli::new([(
-        container_ls(),
-        success(include_str!("fixtures/docker/mixed-state-containers.jsonl")),
-    )]);
+    let cli = FixtureCli::new([
+        (
+            container_ls(),
+            success(include_str!("fixtures/docker/mixed-state-containers.jsonl")),
+        ),
+        (image_ls(), success("")),
+    ]);
 
     let snapshot = DockerWorkspace
         .refresh(&cli)
@@ -813,7 +816,7 @@ async fn discovered_docker_workspace_renders_target_environment_and_containers()
     let screen = render_to_text(app.state(), 100, 24);
     assert!(screen.contains("Providers"));
     assert!(screen.contains("Docker"));
-    assert!(screen.contains("Target: desktop-linux"));
+    assert!(screen.contains("[ Docker · desktop-linux ]"));
     assert!(screen.contains("Containers"), "rendered screen:\n{screen}");
     assert!(screen.contains("api"));
     assert!(screen.contains("nginx:1.27"));
@@ -856,7 +859,7 @@ async fn reachable_docker_without_containers_renders_a_distinct_empty_state() {
     app.update(refresh_completed(request, docker.refresh(&cli).await));
 
     let screen = render_to_text(app.state(), 100, 24);
-    assert!(screen.contains("Target: colima"));
+    assert!(screen.contains("[ Docker · colima ]"));
     assert!(screen.contains("No Docker containers found"));
     assert!(!screen.contains("unavailable"));
 }
@@ -960,7 +963,7 @@ async fn failed_container_refresh_identifies_docker_command_and_target() {
     app.update(refresh_completed(request, docker.refresh(&cli).await));
 
     let screen = render_to_text(app.state(), 140, 24);
-    assert!(screen.contains("Target: desktop-linux"));
+    assert!(screen.contains("[ Docker · desktop-linux ]"));
     assert!(screen.contains("permission denied connecting to Docker socket"));
     assert!(screen.contains("Run `docker"));
     assert!(screen.contains("container ls --all`"));

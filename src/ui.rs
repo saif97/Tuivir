@@ -5,10 +5,10 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph},
 };
 
-use crate::app::{AppState, DetailContent, FocusedPanel, ProviderState, WorkspaceState};
+use crate::app::{AppState, DetailContent, FocusedPane, ProviderState, WorkspaceState};
 use crate::provider::ResourceState;
 
 pub fn render(state: &AppState, frame: &mut Frame<'_>) {
@@ -41,14 +41,28 @@ pub fn render(state: &AppState, frame: &mut Frame<'_>) {
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(48), Constraint::Percentage(52)])
         .split(rows[1]);
+    let focused_resource_panel = match &state.focused_pane {
+        FocusedPane::ResourcePanel(panel_id) => Some(panel_id),
+        FocusedPane::Providers | FocusedPane::FirstResourcePanel | FocusedPane::Details => None,
+    };
     render_workspace_panel(
         provider,
-        state.focused_panel == FocusedPanel::Resources,
-        state.hints.focus_resources.as_deref(),
+        focused_resource_panel,
+        matches!(
+            &state.focused_pane,
+            FocusedPane::FirstResourcePanel | FocusedPane::ResourcePanel(_)
+        ),
+        &state.hints.focus_resource_panels,
         frame,
         columns[0],
     );
-    render_details_panel(provider, frame, columns[1]);
+    render_details_panel(
+        provider,
+        state.focused_pane == FocusedPane::Details,
+        state.hints.focus_details.as_deref(),
+        frame,
+        columns[1],
+    );
 
     if let Some(help) = &state.help_overlay {
         let area = centered_rect(42, (help.entries.len() as u16 + 2).max(4), frame.area());
@@ -159,14 +173,17 @@ fn render_running_command_status(state: &AppState, frame: &mut Frame<'_>, area: 
 }
 
 fn render_provider_bar(state: &AppState, frame: &mut Frame<'_>, area: Rect) {
-    let providers_label = match &state.hints.focus_providers {
+    let mut providers_label = match &state.hints.focus_providers {
         Some(key) => format!("[{key}] Providers"),
         None => "Providers".to_owned(),
     };
+    if state.focused_pane == FocusedPane::Providers {
+        providers_label = format!("▶ {providers_label}");
+    }
     let mut provider_spans = vec![
         Span::styled(
             providers_label,
-            panel_title_style(state.focused_panel == FocusedPanel::Providers),
+            panel_title_style(state.focused_pane == FocusedPane::Providers),
         ),
         Span::raw("  "),
     ];
@@ -176,7 +193,7 @@ fn render_provider_bar(state: &AppState, frame: &mut Frame<'_>, area: Rect) {
         }
         if Some(index) == state.active_provider {
             provider_spans.push(Span::styled(
-                format!("[ {} ]", provider.name),
+                format!("[ {} · {} ]", provider.name, provider.target_environment),
                 Style::default().add_modifier(Modifier::BOLD),
             ));
         } else {
@@ -188,34 +205,23 @@ fn render_provider_bar(state: &AppState, frame: &mut Frame<'_>, area: Rect) {
 
 fn render_workspace_panel(
     provider: &ProviderState,
-    focused: bool,
-    resources_hint: Option<&str>,
+    focused_panel: Option<&crate::provider::ResourcePanelId>,
+    resource_focus: bool,
+    resource_hints: &[Option<String>],
     frame: &mut Frame<'_>,
     area: Rect,
 ) {
-    let title_style = panel_title_style(focused);
-    let workspace_rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(1)])
-        .split(area);
-    frame.render_widget(
-        Paragraph::new(format!("Target: {}", provider.target_environment)).block(
-            Block::default()
-                .title(format!(" {} ", provider.name))
-                .borders(Borders::ALL),
-        ),
-        workspace_rows[0],
-    );
-
     match &provider.workspace_state {
         WorkspaceState::Loading => frame.render_widget(
-            Paragraph::new("Refreshing…").block(
-                Block::default()
-                    .title(workspace_panel_title(resources_hint, "Resources"))
-                    .title_style(title_style)
-                    .borders(Borders::ALL),
-            ),
-            workspace_rows[1],
+            Paragraph::new("Refreshing…").block(pane_block(
+                pane_title(
+                    resource_hints.first().and_then(Option::as_deref),
+                    "Resources",
+                    resource_focus,
+                ),
+                resource_focus,
+            )),
+            area,
         ),
         WorkspaceState::Error(error) => frame.render_widget(
             Paragraph::new(vec![
@@ -226,24 +232,28 @@ fn render_workspace_panel(
                 Line::from(error.message.as_str()),
             ])
             .wrap(ratatui::widgets::Wrap { trim: true })
-            .block(
-                Block::default()
-                    .title(workspace_panel_title(resources_hint, "Error"))
-                    .title_style(title_style)
-                    .borders(Borders::ALL),
-            ),
-            workspace_rows[1],
+            .block(pane_block(
+                pane_title(
+                    resource_hints.first().and_then(Option::as_deref),
+                    "Error",
+                    resource_focus,
+                ),
+                resource_focus,
+            )),
+            area,
         ),
         WorkspaceState::Ready(snapshot) => {
             if snapshot.panels.is_empty() {
                 frame.render_widget(
-                    Paragraph::new("No Resource Panels available").block(
-                        Block::default()
-                            .title(workspace_panel_title(resources_hint, "Resources"))
-                            .title_style(title_style)
-                            .borders(Borders::ALL),
-                    ),
-                    workspace_rows[1],
+                    Paragraph::new("No Resource Panels available").block(pane_block(
+                        pane_title(
+                            resource_hints.first().and_then(Option::as_deref),
+                            "Resources",
+                            resource_focus,
+                        ),
+                        resource_focus,
+                    )),
+                    area,
                 );
                 return;
             }
@@ -260,18 +270,22 @@ fn render_workspace_panel(
                         .map(|panel| Constraint::Fill(panel.resources.len().max(1) as u16))
                         .collect::<Vec<_>>(),
                 )
-                .split(workspace_rows[1]);
-            // The focus key reaches the Resource Panes as a whole, so only the
-            // first panel advertises it; repeating it would promise each panel
-            // its own key.
+                .split(area);
             for (index, (panel, area)) in snapshot
                 .panels
                 .iter()
                 .zip(panel_areas.iter().copied())
                 .enumerate()
             {
-                let hint = if index == 0 { resources_hint } else { None };
-                render_resource_panel(provider, panel, hint, title_style, frame, area);
+                let focused = focused_panel == Some(&panel.id);
+                render_resource_panel(
+                    provider,
+                    panel,
+                    resource_hints.get(index).and_then(Option::as_deref),
+                    focused,
+                    frame,
+                    area,
+                );
             }
         }
     }
@@ -281,7 +295,7 @@ fn render_resource_panel(
     provider: &ProviderState,
     panel: &crate::provider::ResourcePanel,
     resources_hint: Option<&str>,
-    title_style: Style,
+    focused: bool,
     frame: &mut Frame<'_>,
     area: Rect,
 ) {
@@ -292,8 +306,9 @@ fn render_resource_panel(
         .resources
         .iter()
         .map(|resource| {
-            let marker = if provider.selected_resource.as_ref().is_some_and(|selected| {
-                selected.panel_id == panel.id && selected.resource_id == resource.id
+            let marker = if provider.panel_navigation.iter().any(|navigation| {
+                navigation.panel_id == panel.id
+                    && navigation.selected_resource.as_ref() == Some(&resource.id)
             }) {
                 ">"
             } else {
@@ -319,14 +334,25 @@ fn render_resource_panel(
             panel.title.to_lowercase()
         )));
     }
-    frame.render_widget(
-        List::new(items).block(
-            Block::default()
-                .title(workspace_panel_title(resources_hint, &panel.title))
-                .title_style(title_style)
-                .borders(Borders::ALL),
-        ),
+    let selected = provider
+        .panel_navigation
+        .iter()
+        .find(|navigation| navigation.panel_id == panel.id)
+        .and_then(|navigation| navigation.selected_resource.as_ref())
+        .and_then(|selected| {
+            panel
+                .resources
+                .iter()
+                .position(|resource| &resource.id == selected)
+        });
+    let mut state = ListState::default().with_selected(selected);
+    frame.render_stateful_widget(
+        List::new(items).block(pane_block(
+            pane_title(resources_hint, &panel.title, focused),
+            focused,
+        )),
         area,
+        &mut state,
     );
 }
 
@@ -359,14 +385,38 @@ fn panel_title_style(focused: bool) -> Style {
 
 /// Builds a workspace panel title that prefixes the focus key, or shows only the
 /// label when the focus Command is unbound.
-fn workspace_panel_title(resources_hint: Option<&str>, label: &str) -> String {
-    match resources_hint {
+fn pane_title(hint: Option<&str>, label: &str, focused: bool) -> String {
+    let title = match hint {
         Some(key) => format!(" [{key}] {label} "),
         None => format!(" {label} "),
+    };
+    if focused {
+        format!(" ▶{title}")
+    } else {
+        title
     }
 }
 
-fn render_details_panel(provider: &ProviderState, frame: &mut Frame<'_>, area: Rect) {
+fn pane_block(title: String, focused: bool) -> Block<'static> {
+    Block::default()
+        .title(title)
+        .title_style(panel_title_style(focused))
+        .border_style(panel_title_style(focused))
+        .border_type(if focused {
+            BorderType::Thick
+        } else {
+            BorderType::Plain
+        })
+        .borders(Borders::ALL)
+}
+
+fn render_details_panel(
+    provider: &ProviderState,
+    focused: bool,
+    details_hint: Option<&str>,
+    frame: &mut Frame<'_>,
+    area: Rect,
+) {
     let summary = match &provider.workspace_state {
         WorkspaceState::Ready(snapshot) => provider
             .selected_resource
@@ -389,7 +439,7 @@ fn render_details_panel(provider: &ProviderState, frame: &mut Frame<'_>, area: R
         _ => vec![Line::from("No details available")],
     };
 
-    let block = Block::default().title(" Details ").borders(Borders::ALL);
+    let block = pane_block(pane_title(details_hint, "Details", focused), focused);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 

@@ -182,6 +182,7 @@ impl ProviderWorkspace for DockerWorkspace {
                             ("Size".to_owned(), row.size),
                         ],
                         available_commands: Vec::new(),
+                        shell: None,
                     })
                 })
                 .collect::<Result<Vec<_>, WorkspaceError>>()?;

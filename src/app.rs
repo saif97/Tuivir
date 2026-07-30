@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::cli::{ProcessError, ProcessSpec};
-use crate::command::{Command, CommandRegistry, CommandScope};
+use crate::command::{Command, CommandRegistry, CommandScope, NUMBERED_RESOURCE_PANEL_CAPACITY};
 use crate::keys::Key;
 use crate::provider::{
     DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderRequest, ProviderRequestId,
@@ -58,11 +58,27 @@ pub enum AppEvent {
     },
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum FocusedPanel {
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum FocusedPane {
     Providers,
-    #[default]
-    Resources,
+    /// Resource focus requested before the Active Workspace has a snapshot.
+    FirstResourcePanel,
+    ResourcePanel(ResourcePanelId),
+    Details,
+}
+
+impl Default for FocusedPane {
+    fn default() -> Self {
+        Self::FirstResourcePanel
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResourcePanelNavigation {
+    pub panel_id: ResourcePanelId,
+    pub selected_resource: Option<ResourceId>,
+    /// The first Resource row on screen.
+    pub scroll: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -80,6 +96,15 @@ pub struct ProviderState {
     pub name: String,
     pub target_environment: String,
     pub workspace_state: WorkspaceState,
+    /// The Resource Panel this Provider Workspace returns to when Resource
+    /// focus comes back from another Pane or Provider Workspace.
+    pub focused_resource_panel: Option<ResourcePanelId>,
+    /// Selection and scroll owned independently by every Resource Panel.
+    pub panel_navigation: Vec<ResourcePanelNavigation>,
+    /// The selected Resource in `focused_resource_panel`.
+    ///
+    /// Kept as a projection for request and detail routing; the panel-local
+    /// records above are the navigation source of truth.
     pub selected_resource: Option<ResourceTarget>,
     /// Which of the selected Resource's provider-native views is visible.
     ///
@@ -189,10 +214,71 @@ fn reconcile_detail_view(provider: &mut ProviderState) {
     }
 }
 
+fn reconcile_panel_navigation(provider: &mut ProviderState, snapshot: &WorkspaceSnapshot) {
+    let previous = std::mem::take(&mut provider.panel_navigation);
+    provider.panel_navigation = snapshot
+        .panels
+        .iter()
+        .map(|panel| {
+            let remembered = previous
+                .iter()
+                .find(|navigation| navigation.panel_id == panel.id);
+            let selected_resource = remembered
+                .and_then(|navigation| navigation.selected_resource.as_ref())
+                .filter(|selected| {
+                    panel
+                        .resources
+                        .iter()
+                        .any(|resource| &resource.id == *selected)
+                })
+                .cloned()
+                .or_else(|| panel.resources.first().map(|resource| resource.id.clone()));
+            let selected_index = selected_resource
+                .as_ref()
+                .and_then(|selected| {
+                    panel
+                        .resources
+                        .iter()
+                        .position(|resource| &resource.id == selected)
+                })
+                .unwrap_or(0);
+            ResourcePanelNavigation {
+                panel_id: panel.id.clone(),
+                selected_resource,
+                scroll: remembered
+                    .map_or(0, |navigation| navigation.scroll)
+                    .min(selected_index),
+            }
+        })
+        .collect();
+
+    let focused_still_exists = provider
+        .focused_resource_panel
+        .as_ref()
+        .is_some_and(|focused| snapshot.panel(focused).is_some());
+    if !focused_still_exists {
+        provider.focused_resource_panel = snapshot.panels.first().map(|panel| panel.id.clone());
+    }
+    provider.selected_resource = provider
+        .focused_resource_panel
+        .as_ref()
+        .and_then(|panel_id| {
+            provider
+                .panel_navigation
+                .iter()
+                .find(|navigation| &navigation.panel_id == panel_id)
+                .and_then(|navigation| {
+                    navigation.selected_resource.as_ref().map(|resource_id| {
+                        ResourceTarget::new(panel_id.clone(), resource_id.clone())
+                    })
+                })
+        });
+}
+
 #[derive(Default)]
 pub struct AppState {
     pub providers: Vec<ProviderState>,
-    pub focused_panel: FocusedPanel,
+    pub focused_pane: FocusedPane,
     /// Index into `providers` of the currently active provider — the one
     /// whose Provider Workspace is visible and being refreshed.
     ///
@@ -226,7 +312,8 @@ pub struct AppState {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct KeyHints {
     pub focus_providers: Option<String>,
-    pub focus_resources: Option<String>,
+    pub focus_resource_panels: Vec<Option<String>>,
+    pub focus_details: Option<String>,
 }
 
 impl KeyHints {
@@ -235,8 +322,15 @@ impl KeyHints {
             focus_providers: registry
                 .first_key(Command::FocusProviders)
                 .map(|key| key.to_string()),
-            focus_resources: registry
-                .first_key(Command::FocusResources)
+            focus_resource_panels: (0..NUMBERED_RESOURCE_PANEL_CAPACITY)
+                .map(|index| {
+                    registry
+                        .first_key(Command::FocusResourcePanel(index))
+                        .map(|key| key.to_string())
+                })
+                .collect(),
+            focus_details: registry
+                .first_key(Command::FocusDetails)
                 .map(|key| key.to_string()),
         }
     }
@@ -425,9 +519,22 @@ impl App {
         } else if self.state.help_overlay.is_some() {
             CommandScope::HelpOverlay
         } else {
-            match self.state.focused_panel {
-                FocusedPanel::Providers => CommandScope::ProviderSelector,
-                FocusedPanel::Resources => CommandScope::ResourceView,
+            match &self.state.focused_pane {
+                FocusedPane::Providers => CommandScope::ProviderSelector,
+                FocusedPane::FirstResourcePanel => CommandScope::ResourceView,
+                FocusedPane::ResourcePanel(panel_id) => self
+                    .state
+                    .active_provider
+                    .and_then(|active| self.state.providers.get(active))
+                    .and_then(|provider| match &provider.workspace_state {
+                        WorkspaceState::Ready(snapshot) => snapshot
+                            .panels
+                            .iter()
+                            .position(|panel| &panel.id == panel_id),
+                        WorkspaceState::Loading | WorkspaceState::Error(_) => None,
+                    })
+                    .map_or(CommandScope::ResourceView, CommandScope::ResourcePanel),
+                FocusedPane::Details => CommandScope::Details,
             }
         }
     }
@@ -461,11 +568,23 @@ impl App {
             }
             Command::Refresh => self.refresh_active_provider(),
             Command::FocusProviders => {
-                self.state.focused_panel = FocusedPanel::Providers;
+                self.state.focused_pane = FocusedPane::Providers;
                 Vec::new()
             }
-            Command::FocusResources => {
-                self.state.focused_panel = FocusedPanel::Resources;
+            Command::FocusResourcePanel(index) => {
+                self.focus_resource_panel(index);
+                Vec::new()
+            }
+            Command::FocusDetails => {
+                self.state.focused_pane = FocusedPane::Details;
+                Vec::new()
+            }
+            Command::FocusNextPane => {
+                self.cycle_focus(1);
+                Vec::new()
+            }
+            Command::FocusPreviousPane => {
+                self.cycle_focus(-1);
                 Vec::new()
             }
             Command::SelectNext => self.select_by_focus(1),
@@ -511,12 +630,13 @@ impl App {
 
     /// Moves the selection in whichever panel has focus.
     fn select_by_focus(&mut self, delta: isize) -> Vec<ProviderRequest> {
-        match self.state.focused_panel {
-            FocusedPanel::Providers => self.move_provider_selection(delta),
-            FocusedPanel::Resources => {
+        match &self.state.focused_pane {
+            FocusedPane::Providers => self.move_provider_selection(delta),
+            FocusedPane::FirstResourcePanel | FocusedPane::ResourcePanel(_) => {
                 self.move_resource_selection(delta);
                 Vec::new()
             }
+            FocusedPane::Details => Vec::new(),
         }
     }
 
@@ -555,6 +675,8 @@ impl App {
             name: discovery.name,
             target_environment: discovery.target_environment,
             workspace_state: initial_workspace_state,
+            focused_resource_panel: None,
+            panel_navigation: Vec::new(),
             selected_resource: None,
             selected_detail_view: None,
             details: None,
@@ -588,19 +710,28 @@ impl App {
             return Vec::new();
         };
         match result {
+            Ok(snapshot) if snapshot.panels.len() > NUMBERED_RESOURCE_PANEL_CAPACITY => {
+                provider.panel_navigation.clear();
+                provider.focused_resource_panel = None;
+                provider.selected_resource = None;
+                provider.workspace_state = WorkspaceState::Error(WorkspaceError::new(format!(
+                    "{} returned {} Resource Panels; Virtui supports at most \
+                     {NUMBERED_RESOURCE_PANEL_CAPACITY} Resource Panels so each retains a \
+                     numbered focus Command",
+                    provider.name,
+                    snapshot.panels.len(),
+                )));
+            }
             Ok(snapshot) => {
-                let selected_still_exists =
-                    provider.selected_resource.as_ref().is_some_and(|selected| {
-                        snapshot
-                            .resource(&selected.panel_id, &selected.resource_id)
-                            .is_some()
-                    });
-                if !selected_still_exists {
-                    provider.selected_resource =
-                        snapshot.targets().next().map(|(target, _)| target);
-                }
+                reconcile_panel_navigation(provider, &snapshot);
                 provider.workspace_state = WorkspaceState::Ready(snapshot);
                 reconcile_detail_view(provider);
+                if self.state.focused_pane == FocusedPane::FirstResourcePanel {
+                    self.state.focused_pane = provider
+                        .focused_resource_panel
+                        .clone()
+                        .map_or(FocusedPane::Providers, FocusedPane::ResourcePanel);
+                }
             }
             Err(error) => provider.workspace_state = WorkspaceState::Error(error),
         }
@@ -928,20 +1059,39 @@ impl App {
         if self.state.help_overlay.take().is_some() {
             return;
         }
-        if self.state.focused_panel != FocusedPanel::Resources {
-            return;
-        }
+        let scope = match &self.state.focused_pane {
+            FocusedPane::FirstResourcePanel | FocusedPane::ResourcePanel(_) => {
+                CommandScope::ResourceView
+            }
+            FocusedPane::Details => CommandScope::Details,
+            FocusedPane::Providers => return,
+        };
         let Some(resource) = self.selected_resource() else {
             return;
         };
         let target = resource.name.clone();
         let available_commands = resource.available_commands.clone();
         let offers_a_shell = resource.shell.is_some();
+        let panel_count = self
+            .state
+            .active_provider
+            .and_then(|active| self.state.providers.get(active))
+            .and_then(|provider| match &provider.workspace_state {
+                WorkspaceState::Ready(snapshot) => Some(snapshot.panels.len()),
+                WorkspaceState::Loading | WorkspaceState::Error(_) => None,
+            })
+            .unwrap_or(0);
         self.state.help_overlay = Some(HelpOverlay {
             target,
             entries: self
                 .commands
-                .in_scope(CommandScope::ResourceView)
+                .in_scope(scope)
+                .filter(|registered| {
+                    !matches!(
+                        registered.command,
+                        Command::FocusResourcePanel(index) if index >= panel_count
+                    )
+                })
                 .map(|registered| HelpEntry {
                     key: registered
                         .keys
@@ -996,6 +1146,77 @@ impl App {
         vec![self.start_refresh(provider_id)]
     }
 
+    fn focus_resource_panel(&mut self, index: usize) {
+        let Some(provider) = self
+            .state
+            .active_provider
+            .and_then(|active| self.state.providers.get_mut(active))
+        else {
+            return;
+        };
+        let WorkspaceState::Ready(snapshot) = &provider.workspace_state else {
+            return;
+        };
+        let Some(panel_id) = snapshot.panels.get(index).map(|panel| panel.id.clone()) else {
+            return;
+        };
+        provider.focused_resource_panel = Some(panel_id.clone());
+        provider.selected_resource = provider
+            .panel_navigation
+            .iter()
+            .find(|navigation| navigation.panel_id == panel_id)
+            .and_then(|navigation| {
+                navigation
+                    .selected_resource
+                    .as_ref()
+                    .map(|resource_id| ResourceTarget::new(panel_id.clone(), resource_id.clone()))
+            });
+        reconcile_detail_view(provider);
+        self.state.focused_pane = FocusedPane::ResourcePanel(panel_id);
+    }
+
+    fn cycle_focus(&mut self, delta: isize) {
+        let mut panes = vec![FocusedPane::Providers];
+        if let Some(provider) = self
+            .state
+            .active_provider
+            .and_then(|active| self.state.providers.get(active))
+            && let WorkspaceState::Ready(snapshot) = &provider.workspace_state
+        {
+            panes.extend(
+                snapshot
+                    .panels
+                    .iter()
+                    .map(|panel| FocusedPane::ResourcePanel(panel.id.clone())),
+            );
+            panes.push(FocusedPane::Details);
+        }
+        let current = panes
+            .iter()
+            .position(|pane| pane == &self.state.focused_pane)
+            .unwrap_or(0);
+        let next = (current as isize + delta).rem_euclid(panes.len() as isize) as usize;
+        match panes[next].clone() {
+            FocusedPane::ResourcePanel(panel_id) => {
+                if let Some(index) = self
+                    .state
+                    .active_provider
+                    .and_then(|active| self.state.providers.get(active))
+                    .and_then(|provider| match &provider.workspace_state {
+                        WorkspaceState::Ready(snapshot) => snapshot
+                            .panels
+                            .iter()
+                            .position(|panel| panel.id == panel_id),
+                        WorkspaceState::Loading | WorkspaceState::Error(_) => None,
+                    })
+                {
+                    self.focus_resource_panel(index);
+                }
+            }
+            focused => self.state.focused_pane = focused,
+        }
+    }
+
     fn move_resource_selection(&mut self, delta: isize) {
         let Some(active_provider) = self.state.active_provider else {
             return;
@@ -1006,20 +1227,47 @@ impl App {
         let WorkspaceState::Ready(snapshot) = &provider.workspace_state else {
             return;
         };
-        let resources = snapshot.targets().collect::<Vec<_>>();
-        let Some(current) = provider
-            .selected_resource
-            .as_ref()
-            .and_then(|selected| resources.iter().position(|(target, _)| target == selected))
+        let Some(panel_id) = provider.focused_resource_panel.clone() else {
+            return;
+        };
+        let Some(panel) = snapshot.panel(&panel_id) else {
+            return;
+        };
+        let Some(navigation) = provider
+            .panel_navigation
+            .iter_mut()
+            .find(|navigation| navigation.panel_id == panel_id)
         else {
-            provider.selected_resource = resources.first().map(|(target, _)| target.clone());
+            return;
+        };
+        let Some(current) = navigation.selected_resource.as_ref().and_then(|selected| {
+            panel
+                .resources
+                .iter()
+                .position(|resource| &resource.id == selected)
+        }) else {
+            navigation.selected_resource =
+                panel.resources.first().map(|resource| resource.id.clone());
+            navigation.scroll = 0;
+            provider.selected_resource = navigation
+                .selected_resource
+                .as_ref()
+                .map(|resource_id| ResourceTarget::new(panel_id, resource_id.clone()));
             reconcile_detail_view(provider);
             return;
         };
         let next = current
             .saturating_add_signed(delta)
-            .min(resources.len().saturating_sub(1));
-        provider.selected_resource = resources.get(next).map(|(target, _)| target.clone());
+            .min(panel.resources.len().saturating_sub(1));
+        navigation.selected_resource = panel
+            .resources
+            .get(next)
+            .map(|resource| resource.id.clone());
+        navigation.scroll = next;
+        provider.selected_resource = navigation
+            .selected_resource
+            .as_ref()
+            .map(|resource_id| ResourceTarget::new(panel_id, resource_id.clone()));
         reconcile_detail_view(provider);
     }
 
@@ -1089,6 +1337,15 @@ impl App {
             .retain(|_, provider_id| provider_id != &previous_provider);
         self.state.active_provider =
             Some((active_provider as isize + delta).rem_euclid(provider_count as isize) as usize);
+        if matches!(
+            &self.state.focused_pane,
+            FocusedPane::FirstResourcePanel | FocusedPane::ResourcePanel(_)
+        ) {
+            self.state.focused_pane = self.state.providers[self.state.active_provider.unwrap()]
+                .focused_resource_panel
+                .clone()
+                .map_or(FocusedPane::FirstResourcePanel, FocusedPane::ResourcePanel);
+        }
         self.refresh_active_provider()
     }
 }
