@@ -75,6 +75,14 @@ impl fmt::Display for ProviderVersion {
 /// from overwriting newer application state.
 pub struct ProviderRequestId(pub(crate) u64);
 
+impl ProviderRequestId {
+    /// Reconstructs an application-allocated request identity at a state seam.
+    /// The application remains responsible for choosing unique values.
+    pub fn new(value: u64) -> Self {
+        Self(value)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ResourceCommand {
     Start,

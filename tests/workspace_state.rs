@@ -1,9 +1,9 @@
 use virtui::{
     provider::{
-        DetailView, ProviderDiscovery, ProviderId, Resource, ResourceId, ResourcePanel,
-        ResourcePanelId, TargetEnvironment, WorkspaceSnapshot,
+        DetailView, ProviderDiscovery, ProviderId, ProviderRequestId, Resource, ResourceDetails,
+        ResourceId, ResourcePanel, ResourcePanelId, TargetEnvironment, WorkspaceSnapshot,
     },
-    workspace::{ProviderWorkspaceState, WorkspaceLoadState},
+    workspace::{DetailContent, ProviderWorkspaceState, WorkspaceLoadState},
 };
 
 fn resource(id: &str, name: &str) -> Resource {
@@ -161,5 +161,44 @@ fn moving_the_detail_view_wraps_through_the_focused_panels_views() {
             .selected_detail_view
             .map(|view| view.title.as_str()),
         Some("Inspect")
+    );
+}
+
+#[test]
+fn a_detail_result_is_accepted_only_for_the_still_visible_resource_and_view() {
+    let mut snapshot = snapshot();
+    snapshot.panels[0]
+        .resources
+        .push(resource("container-b", "worker"));
+    let mut workspace = workspace();
+    workspace.reconcile_snapshot(snapshot);
+    let stale = workspace
+        .start_visible_detail_load(ProviderRequestId::new(1))
+        .expect("the selected Resource offers Logs");
+
+    workspace.move_resource_selection(1);
+    let current = workspace
+        .start_visible_detail_load(ProviderRequestId::new(2))
+        .expect("the newly selected Resource needs Logs");
+    workspace.complete_detail_load(stale.completion(Ok(ResourceDetails::from_lines(["stale"]))));
+
+    let WorkspaceLoadState::Ready(snapshot) = workspace.load_state() else {
+        panic!("the reconciled workspace is ready");
+    };
+    let details = workspace
+        .view(snapshot)
+        .details
+        .expect("the current detail remains visible");
+    assert_eq!(details.resource_name, "worker");
+    assert_eq!(details.content, &DetailContent::Loading);
+
+    workspace.complete_detail_load(current.completion(Ok(ResourceDetails::from_lines(["fresh"]))));
+    let WorkspaceLoadState::Ready(snapshot) = workspace.load_state() else {
+        panic!("the reconciled workspace is ready");
+    };
+    let details = workspace.view(snapshot).details.expect("loaded details");
+    assert_eq!(
+        details.content,
+        &DetailContent::Ready(ResourceDetails::from_lines(["fresh"]))
     );
 }
