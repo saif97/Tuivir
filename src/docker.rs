@@ -7,7 +7,7 @@ use crate::{
     provider::{
         DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderWorkspace, Resource,
         ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourcePanelId,
-        ResourceState, WorkspaceError, WorkspaceSnapshot, provider_cli_error,
+        ResourceState, TargetEnvironment, WorkspaceError, WorkspaceSnapshot, provider_cli_error,
     },
 };
 
@@ -73,7 +73,8 @@ impl ProviderWorkspace for DockerWorkspace {
                 Ok(output) => Some(ProviderDiscovery {
                     id: self.id(),
                     name: PROVIDER_NAME.to_owned(),
-                    target_environment: output.stdout.trim().to_owned(),
+                    target_environment: TargetEnvironment::new(output.stdout.trim()),
+                    version: None,
                     error: None,
                 }),
             }
@@ -370,7 +371,8 @@ fn discovery_with_error(message: impl Into<String>) -> ProviderDiscovery {
     ProviderDiscovery {
         id: ProviderId::new(PROVIDER_ID),
         name: PROVIDER_NAME.to_owned(),
-        target_environment: "unavailable".to_owned(),
+        target_environment: TargetEnvironment::new("unavailable"),
+        version: None,
         error: Some(WorkspaceError::with_help(
             message,
             "Run `docker context show` to verify the selected context and ensure Docker is running.",

@@ -15,7 +15,7 @@ use virtui::{
     provider::{
         DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderRequest, Resource,
         ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourcePanelId,
-        ResourceState, ResourceTarget, WorkspaceError, WorkspaceSnapshot,
+        ResourceState, ResourceTarget, TargetEnvironment, WorkspaceError, WorkspaceSnapshot,
     },
     runtime::{ProviderRuntime, RefreshTimer, ShellControl, handle_key},
     ui::{render_foreground_colours, render_to_text},
@@ -48,7 +48,8 @@ fn docker_discovery() -> ProviderDiscovery {
     ProviderDiscovery {
         id: ProviderId::new("docker"),
         name: "Docker".to_owned(),
-        target_environment: "desktop-linux".to_owned(),
+        target_environment: TargetEnvironment::new("desktop-linux"),
+        version: None,
         error: None,
     }
 }
@@ -57,7 +58,8 @@ fn fixture_discovery() -> ProviderDiscovery {
     ProviderDiscovery {
         id: ProviderId::new("fixture"),
         name: "Fixture".to_owned(),
-        target_environment: "local".to_owned(),
+        target_environment: TargetEnvironment::new("local"),
+        version: None,
         error: None,
     }
 }
@@ -66,7 +68,8 @@ fn incus_discovery() -> ProviderDiscovery {
     ProviderDiscovery {
         id: ProviderId::new("incus"),
         name: "Incus".to_owned(),
-        target_environment: "local / default".to_owned(),
+        target_environment: TargetEnvironment::new("local / default"),
+        version: None,
         error: None,
     }
 }

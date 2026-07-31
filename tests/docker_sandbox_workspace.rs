@@ -6,8 +6,9 @@ use virtui::{
     command::Command,
     docker_sandbox::DockerSandboxWorkspace,
     provider::{
-        DetailViewId, ProviderId, ProviderRequest, ProviderWorkspace, ResourceCommand, ResourceId,
-        ResourcePanelId, ResourceState, WorkspaceError, WorkspaceSnapshot,
+        DetailViewId, ProviderId, ProviderRequest, ProviderVersion, ProviderWorkspace,
+        ResourceCommand, ResourceId, ResourcePanelId, ResourceState, TargetEnvironment,
+        WorkspaceError, WorkspaceSnapshot,
     },
     runtime::ProviderRuntime,
     ui::render_to_text,
@@ -16,10 +17,10 @@ use virtui::{
 mod common;
 use common::{FixtureCli, failure, success};
 
-/// `sbx version` reports a version and a build commit on one line; only the
-/// version identifies the Target Environment.
+/// `sbx version` describes the installed Provider; it does not identify which
+/// Target Environment its daemon currently operates.
 #[tokio::test]
-async fn an_installed_docker_sandbox_reports_the_sbx_version_as_its_target_environment() {
+async fn docker_sandbox_keeps_provider_version_separate_from_its_target_environment() {
     let cli = FixtureCli::new([
         (
             ProcessSpec::new("sbx", &["version"]),
@@ -38,7 +39,11 @@ async fn an_installed_docker_sandbox_reports_the_sbx_version_as_its_target_envir
 
     assert_eq!(discovered.id, ProviderId::new("docker-sandbox"));
     assert_eq!(discovered.name, "Docker Sandbox");
-    assert_eq!(discovered.target_environment, "v0.37.0");
+    assert_eq!(
+        discovered.target_environment,
+        TargetEnvironment::new("local")
+    );
+    assert_eq!(discovered.version, Some(ProviderVersion::new("v0.37.0")));
     assert_eq!(discovered.error, None);
 }
 
@@ -433,7 +438,7 @@ async fn discovered_docker_sandbox_renders_target_environment_and_sandboxes() {
 
     let screen = render_to_text(app.state(), 100, 24);
     assert!(screen.contains("Docker Sandbox"), "{screen}");
-    assert!(screen.contains("[ Docker Sandbox · v0.37.0 ]"), "{screen}");
+    assert!(screen.contains("[ Docker Sandbox · local ]"), "{screen}");
     assert!(screen.contains("Sandboxes"), "{screen}");
     assert!(screen.contains("claude-virtui"), "{screen}");
     assert!(screen.contains("running"), "{screen}");
@@ -467,7 +472,7 @@ async fn reachable_docker_sandbox_without_sandboxes_renders_a_distinct_empty_sta
     app.update(refresh_completed(request, sandboxes.refresh(&cli).await));
 
     let screen = render_to_text(app.state(), 100, 24);
-    assert!(screen.contains("[ Docker Sandbox · v0.37.0 ]"), "{screen}");
+    assert!(screen.contains("[ Docker Sandbox · local ]"), "{screen}");
     assert!(
         screen.contains("No Docker Sandbox sandboxes found"),
         "{screen}"
@@ -504,7 +509,8 @@ async fn runtime_with_builtin_providers_discovers_installed_docker_sandbox() {
     assert_eq!(discovered.len(), 1);
     assert_eq!(discovered[0].id, ProviderId::new("docker-sandbox"));
     assert_eq!(discovered[0].name, "Docker Sandbox");
-    assert_eq!(discovered[0].target_environment, "v0.37.0");
+    assert_eq!(discovered[0].target_environment, "local");
+    assert_eq!(discovered[0].version, Some(ProviderVersion::new("v0.37.0")));
 }
 
 /// Closes the loop #29 asks for: an invoked Command, through the confirmation

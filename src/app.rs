@@ -5,8 +5,8 @@ use crate::command::{Command, CommandRegistry, CommandScope, NUMBERED_RESOURCE_P
 use crate::keys::Key;
 use crate::provider::{
     DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderRequest, ProviderRequestId,
-    Resource, ResourceCommand, ResourceDetails, ResourceId, ResourcePanelId, ResourceState,
-    ResourceTarget, WorkspaceError, WorkspaceSnapshot,
+    ProviderVersion, Resource, ResourceCommand, ResourceDetails, ResourceId, ResourcePanelId,
+    ResourceState, ResourceTarget, TargetEnvironment, WorkspaceError, WorkspaceSnapshot,
 };
 
 /// Facts the application receives: provider discovery, the refresh clock, and
@@ -94,7 +94,8 @@ pub enum WorkspaceState {
 pub struct ProviderState {
     pub id: ProviderId,
     pub name: String,
-    pub target_environment: String,
+    pub target_environment: TargetEnvironment,
+    pub version: Option<ProviderVersion>,
     pub workspace_state: WorkspaceState,
     /// The Resource Panel this Provider Workspace returns to when Resource
     /// focus comes back from another Pane or Provider Workspace.
@@ -674,6 +675,7 @@ impl App {
             id: discovery.id,
             name: discovery.name,
             target_environment: discovery.target_environment,
+            version: discovery.version,
             workspace_state: initial_workspace_state,
             focused_resource_panel: None,
             panel_navigation: Vec::new(),
