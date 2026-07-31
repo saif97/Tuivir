@@ -255,6 +255,20 @@ impl ProviderWorkspaceState {
         };
     }
 
+    /// Moves the first visible detail line without scrolling beyond content.
+    pub fn scroll_details(&mut self, delta: isize) {
+        let Some(details) = self.details.as_mut() else {
+            return;
+        };
+        let last_line = match &details.content {
+            DetailContent::Ready(loaded) => loaded.lines.len().saturating_sub(1),
+            DetailContent::Loading | DetailContent::Error(_) => 0,
+        };
+        details.scroll = (details.scroll as usize)
+            .saturating_add_signed(delta)
+            .min(last_line) as u16;
+    }
+
     /// Replaces Provider data while preserving every still-valid presentation
     /// choice by stable Provider identity.
     pub fn reconcile_snapshot(&mut self, snapshot: WorkspaceSnapshot) {

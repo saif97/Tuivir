@@ -202,3 +202,30 @@ fn a_detail_result_is_accepted_only_for_the_still_visible_resource_and_view() {
         &DetailContent::Ready(ResourceDetails::from_lines(["fresh"]))
     );
 }
+
+#[test]
+fn scrolling_details_clamps_to_the_visible_detail_content() {
+    let mut workspace = workspace();
+    workspace.reconcile_snapshot(snapshot());
+    let load = workspace
+        .start_visible_detail_load(ProviderRequestId::new(1))
+        .expect("the selected Resource offers Logs");
+    workspace.complete_detail_load(load.completion(Ok(ResourceDetails::from_lines(
+        (0..15).map(|line| format!("line {line}")),
+    ))));
+
+    workspace.scroll_details(100);
+
+    let WorkspaceLoadState::Ready(snapshot) = workspace.load_state() else {
+        panic!("the reconciled workspace is ready");
+    };
+    assert_eq!(
+        workspace.view(snapshot).details.expect("details").scroll,
+        14
+    );
+    workspace.scroll_details(-100);
+    let WorkspaceLoadState::Ready(snapshot) = workspace.load_state() else {
+        panic!("the reconciled workspace is ready");
+    };
+    assert_eq!(workspace.view(snapshot).details.expect("details").scroll, 0);
+}
