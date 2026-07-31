@@ -138,3 +138,28 @@ fn moving_resource_selection_updates_only_the_focused_panels_navigation() {
         Some(&ResourceId::new("image-a"))
     );
 }
+
+#[test]
+fn moving_the_detail_view_wraps_through_the_focused_panels_views() {
+    let mut snapshot = snapshot();
+    snapshot.panels[0].detail_views = vec![
+        DetailView::new("logs", "Logs"),
+        DetailView::new("stats", "Stats"),
+        DetailView::new("inspect", "Inspect"),
+    ];
+    let mut workspace = workspace();
+    workspace.reconcile_snapshot(snapshot);
+
+    workspace.move_detail_view(-1);
+
+    let WorkspaceLoadState::Ready(snapshot) = workspace.load_state() else {
+        panic!("the reconciled workspace is ready");
+    };
+    assert_eq!(
+        workspace
+            .view(snapshot)
+            .selected_detail_view
+            .map(|view| view.title.as_str()),
+        Some("Inspect")
+    );
+}

@@ -122,6 +122,35 @@ impl ProviderWorkspaceState {
         navigation.scroll = next;
     }
 
+    /// Moves through the focused panel's Detail Views as a ring.
+    pub fn move_detail_view(&mut self, delta: isize) {
+        let WorkspaceLoadState::Ready(snapshot) = &self.load_state else {
+            return;
+        };
+        let Some(panel_id) = self.focused_resource_panel.as_ref() else {
+            return;
+        };
+        let Some(panel) = snapshot.panel(panel_id) else {
+            return;
+        };
+        if panel.detail_views.is_empty() {
+            return;
+        }
+        let current = self
+            .selected_detail_view
+            .as_ref()
+            .and_then(|selected| {
+                panel
+                    .detail_views
+                    .iter()
+                    .position(|view| &view.id == selected)
+            })
+            .unwrap_or(0);
+        let next =
+            (current as isize + delta).rem_euclid(panel.detail_views.len() as isize) as usize;
+        self.selected_detail_view = panel.detail_views.get(next).map(|view| view.id.clone());
+    }
+
     /// Replaces Provider data while preserving every still-valid presentation
     /// choice by stable Provider identity.
     pub fn reconcile_snapshot(&mut self, snapshot: WorkspaceSnapshot) {
