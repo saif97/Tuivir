@@ -33,7 +33,7 @@ A provider-defined Pane containing one kind of Resource, such as Docker Containe
 _Avoid_: Resource pane, resource list
 
 **Target Environment**:
-The Docker context or Incus remote and project already selected through the provider's CLI configuration.
+The environment already selected through a Provider's CLI configuration, such as a Docker context or an Incus remote and project. Some Providers do not select one.
 _Avoid_: Cluster, server, connection
 
 **Command**:
