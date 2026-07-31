@@ -81,3 +81,30 @@ fn reconciling_the_first_snapshot_projects_one_coherent_workspace_view() {
         Some("Logs")
     );
 }
+
+#[test]
+fn focusing_a_resource_panel_restores_that_panels_selection_and_detail_view() {
+    let mut workspace = workspace();
+    workspace.reconcile_snapshot(snapshot());
+
+    assert!(workspace.focus_resource_panel(&ResourcePanelId::new("images")));
+
+    let WorkspaceLoadState::Ready(snapshot) = workspace.load_state() else {
+        panic!("the reconciled workspace is ready");
+    };
+    let view = workspace.view(snapshot);
+    assert_eq!(
+        view.focused_resource_panel,
+        Some(&ResourcePanelId::new("images"))
+    );
+    assert_eq!(
+        view.selected_resource
+            .map(|resource| resource.name.as_str()),
+        Some("alpine")
+    );
+    assert_eq!(
+        view.selected_detail_view.map(|view| view.title.as_str()),
+        Some("Inspect")
+    );
+    assert!(!workspace.focus_resource_panel(&ResourcePanelId::new("missing")));
+}

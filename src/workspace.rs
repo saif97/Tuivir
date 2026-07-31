@@ -57,6 +57,31 @@ impl ProviderWorkspaceState {
         &self.load_state
     }
 
+    /// Focuses an existing Resource Panel and restores its remembered Resource
+    /// selection. A stale panel identity changes nothing.
+    pub fn focus_resource_panel(&mut self, panel_id: &ResourcePanelId) -> bool {
+        let WorkspaceLoadState::Ready(snapshot) = &self.load_state else {
+            return false;
+        };
+        let Some(panel) = snapshot.panel(panel_id) else {
+            return false;
+        };
+        let offered = panel
+            .detail_views
+            .iter()
+            .map(|view| view.id.clone())
+            .collect::<Vec<_>>();
+        self.focused_resource_panel = Some(panel_id.clone());
+        let still_offered = self
+            .selected_detail_view
+            .as_ref()
+            .is_some_and(|selected| offered.contains(selected));
+        if !still_offered {
+            self.selected_detail_view = offered.into_iter().next();
+        }
+        true
+    }
+
     /// Replaces Provider data while preserving every still-valid presentation
     /// choice by stable Provider identity.
     pub fn reconcile_snapshot(&mut self, snapshot: WorkspaceSnapshot) {
