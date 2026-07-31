@@ -108,3 +108,33 @@ fn focusing_a_resource_panel_restores_that_panels_selection_and_detail_view() {
     );
     assert!(!workspace.focus_resource_panel(&ResourcePanelId::new("missing")));
 }
+
+#[test]
+fn moving_resource_selection_updates_only_the_focused_panels_navigation() {
+    let mut snapshot = snapshot();
+    snapshot.panels[0]
+        .resources
+        .push(resource("container-b", "worker"));
+    let mut workspace = workspace();
+    workspace.reconcile_snapshot(snapshot);
+
+    workspace.move_resource_selection(1);
+    assert!(workspace.focus_resource_panel(&ResourcePanelId::new("images")));
+    workspace.move_resource_selection(1);
+    assert!(workspace.focus_resource_panel(&ResourcePanelId::new("containers")));
+
+    let WorkspaceLoadState::Ready(snapshot) = workspace.load_state() else {
+        panic!("the reconciled workspace is ready");
+    };
+    let view = workspace.view(snapshot);
+    assert_eq!(
+        view.selected_resource
+            .map(|resource| resource.name.as_str()),
+        Some("worker")
+    );
+    assert_eq!(view.panels[0].scroll, 1);
+    assert_eq!(
+        view.panels[1].selected_resource,
+        Some(&ResourceId::new("image-a"))
+    );
+}

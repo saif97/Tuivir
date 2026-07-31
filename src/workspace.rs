@@ -82,6 +82,46 @@ impl ProviderWorkspaceState {
         true
     }
 
+    /// Moves the selected Resource within the focused panel and clamps at its
+    /// ends. Every other panel keeps its own selection and scroll.
+    pub fn move_resource_selection(&mut self, delta: isize) {
+        let WorkspaceLoadState::Ready(snapshot) = &self.load_state else {
+            return;
+        };
+        let Some(panel_id) = self.focused_resource_panel.as_ref() else {
+            return;
+        };
+        let Some(panel) = snapshot.panel(panel_id) else {
+            return;
+        };
+        let Some(navigation) = self
+            .panel_navigation
+            .iter_mut()
+            .find(|navigation| &navigation.panel_id == panel_id)
+        else {
+            return;
+        };
+        let Some(current) = navigation.selected_resource.as_ref().and_then(|selected| {
+            panel
+                .resources
+                .iter()
+                .position(|resource| &resource.id == selected)
+        }) else {
+            navigation.selected_resource =
+                panel.resources.first().map(|resource| resource.id.clone());
+            navigation.scroll = 0;
+            return;
+        };
+        let next = current
+            .saturating_add_signed(delta)
+            .min(panel.resources.len().saturating_sub(1));
+        navigation.selected_resource = panel
+            .resources
+            .get(next)
+            .map(|resource| resource.id.clone());
+        navigation.scroll = next;
+    }
+
     /// Replaces Provider data while preserving every still-valid presentation
     /// choice by stable Provider identity.
     pub fn reconcile_snapshot(&mut self, snapshot: WorkspaceSnapshot) {
