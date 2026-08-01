@@ -142,6 +142,25 @@ impl ProviderWorkspaceState {
         self.focused_resource_panel.as_ref()
     }
 
+    pub fn focused_resource_panel_index(&self) -> Option<usize> {
+        let WorkspaceLoadState::Ready(snapshot) = &self.load_state else {
+            return None;
+        };
+        let focused = self.focused_resource_panel.as_ref()?;
+        snapshot
+            .panels
+            .iter()
+            .position(|panel| &panel.id == focused)
+    }
+
+    /// Returns the number of Resource Panels when the workspace is ready.
+    pub fn resource_panel_count(&self) -> Option<usize> {
+        match &self.load_state {
+            WorkspaceLoadState::Ready(snapshot) => Some(snapshot.panels.len()),
+            WorkspaceLoadState::Loading | WorkspaceLoadState::Error(_) => None,
+        }
+    }
+
     /// Records a transient refresh failure while retaining stable presentation
     /// choices for the next successful reconciliation.
     pub fn record_load_error(&mut self, error: WorkspaceError) {
@@ -198,6 +217,17 @@ impl ProviderWorkspaceState {
             self.invalidate_pending_detail();
         }
         true
+    }
+
+    /// Focuses one Resource Panel by its Provider-defined order.
+    pub fn focus_resource_panel_at(&mut self, index: usize) -> bool {
+        let panel_id = match &self.load_state {
+            WorkspaceLoadState::Ready(snapshot) => {
+                snapshot.panels.get(index).map(|panel| panel.id.clone())
+            }
+            WorkspaceLoadState::Loading | WorkspaceLoadState::Error(_) => None,
+        };
+        panel_id.is_some_and(|panel_id| self.focus_resource_panel(&panel_id))
     }
 
     /// Moves the selected Resource within the focused panel and clamps at its

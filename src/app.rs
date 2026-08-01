@@ -59,13 +59,12 @@ pub enum AppEvent {
     },
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum FocusedPane {
     Providers,
-    /// Resource focus requested before the Active Workspace has a snapshot.
+    /// The focused Resource Panel is owned by the Active Workspace.
     #[default]
-    FirstResourcePanel,
-    ResourcePanel(ResourcePanelId),
+    Resources,
     Details,
 }
 
@@ -319,18 +318,11 @@ impl App {
         } else {
             match &self.state.focused_pane {
                 FocusedPane::Providers => CommandScope::ProviderSelector,
-                FocusedPane::FirstResourcePanel => CommandScope::ResourceView,
-                FocusedPane::ResourcePanel(panel_id) => self
+                FocusedPane::Resources => self
                     .state
                     .active_provider
                     .and_then(|active| self.state.providers.get(active))
-                    .and_then(|provider| match provider.load_state() {
-                        WorkspaceLoadState::Ready(snapshot) => snapshot
-                            .panels
-                            .iter()
-                            .position(|panel| &panel.id == panel_id),
-                        WorkspaceLoadState::Loading | WorkspaceLoadState::Error(_) => None,
-                    })
+                    .and_then(ProviderWorkspaceState::focused_resource_panel_index)
                     .map_or(CommandScope::ResourceView, CommandScope::ResourcePanel),
                 FocusedPane::Details => CommandScope::Details,
             }
@@ -430,7 +422,7 @@ impl App {
     fn select_by_focus(&mut self, delta: isize) -> Vec<ProviderRequest> {
         match &self.state.focused_pane {
             FocusedPane::Providers => self.move_provider_selection(delta),
-            FocusedPane::FirstResourcePanel | FocusedPane::ResourcePanel(_) => {
+            FocusedPane::Resources => {
                 self.move_resource_selection(delta);
                 Vec::new()
             }
@@ -507,12 +499,6 @@ impl App {
             }
             Ok(snapshot) => {
                 provider.reconcile_snapshot(snapshot);
-                if self.state.focused_pane == FocusedPane::FirstResourcePanel {
-                    self.state.focused_pane = provider
-                        .focused_resource_panel()
-                        .cloned()
-                        .map_or(FocusedPane::Providers, FocusedPane::ResourcePanel);
-                }
             }
             Err(error) => provider.record_load_error(error),
         }
@@ -780,9 +766,7 @@ impl App {
             return;
         }
         let scope = match &self.state.focused_pane {
-            FocusedPane::FirstResourcePanel | FocusedPane::ResourcePanel(_) => {
-                CommandScope::ResourceView
-            }
+            FocusedPane::Resources => CommandScope::ResourceView,
             FocusedPane::Details => CommandScope::Details,
             FocusedPane::Providers => return,
         };
@@ -874,59 +858,37 @@ impl App {
         else {
             return;
         };
-        let panel_id = match provider.load_state() {
-            WorkspaceLoadState::Ready(snapshot) => {
-                snapshot.panels.get(index).map(|panel| panel.id.clone())
-            }
-            WorkspaceLoadState::Loading | WorkspaceLoadState::Error(_) => None,
-        };
-        let Some(panel_id) = panel_id else {
-            return;
-        };
-        if provider.focus_resource_panel(&panel_id) {
-            self.state.focused_pane = FocusedPane::ResourcePanel(panel_id);
+        if provider.focus_resource_panel_at(index) {
+            self.state.focused_pane = FocusedPane::Resources;
         }
     }
 
     fn cycle_focus(&mut self, delta: isize) {
-        let mut panes = vec![FocusedPane::Providers];
-        if let Some(provider) = self
+        let Some(provider) = self
             .state
             .active_provider
             .and_then(|active| self.state.providers.get(active))
-            && let WorkspaceLoadState::Ready(snapshot) = provider.load_state()
-        {
-            panes.extend(
-                snapshot
-                    .panels
-                    .iter()
-                    .map(|panel| FocusedPane::ResourcePanel(panel.id.clone())),
-            );
-            panes.push(FocusedPane::Details);
-        }
-        let current = panes
-            .iter()
-            .position(|pane| pane == &self.state.focused_pane)
-            .unwrap_or(0);
-        let next = (current as isize + delta).rem_euclid(panes.len() as isize) as usize;
-        match panes[next].clone() {
-            FocusedPane::ResourcePanel(panel_id) => {
-                if let Some(index) = self
-                    .state
-                    .active_provider
-                    .and_then(|active| self.state.providers.get(active))
-                    .and_then(|provider| match provider.load_state() {
-                        WorkspaceLoadState::Ready(snapshot) => snapshot
-                            .panels
-                            .iter()
-                            .position(|panel| panel.id == panel_id),
-                        WorkspaceLoadState::Loading | WorkspaceLoadState::Error(_) => None,
-                    })
-                {
-                    self.focus_resource_panel(index);
-                }
-            }
-            focused => self.state.focused_pane = focused,
+        else {
+            self.state.focused_pane = FocusedPane::Providers;
+            return;
+        };
+        let Some(panel_count) = provider.resource_panel_count() else {
+            self.state.focused_pane = FocusedPane::Providers;
+            return;
+        };
+        let current = match self.state.focused_pane {
+            FocusedPane::Providers => 0,
+            FocusedPane::Resources => provider
+                .focused_resource_panel_index()
+                .map_or(0, |index| index + 1),
+            FocusedPane::Details => panel_count + 1,
+        };
+        let pane_count = panel_count + 2;
+        let next = (current as isize + delta).rem_euclid(pane_count as isize) as usize;
+        match next {
+            0 => self.state.focused_pane = FocusedPane::Providers,
+            next if next <= panel_count => self.focus_resource_panel(next - 1),
+            _ => self.state.focused_pane = FocusedPane::Details,
         }
     }
 
@@ -984,15 +946,6 @@ impl App {
             .retain(|_, provider_id| provider_id != &previous_provider);
         self.state.active_provider =
             Some((active_provider as isize + delta).rem_euclid(provider_count as isize) as usize);
-        if matches!(
-            &self.state.focused_pane,
-            FocusedPane::FirstResourcePanel | FocusedPane::ResourcePanel(_)
-        ) {
-            self.state.focused_pane = self.state.providers[self.state.active_provider.unwrap()]
-                .focused_resource_panel()
-                .cloned()
-                .map_or(FocusedPane::FirstResourcePanel, FocusedPane::ResourcePanel);
-        }
         self.refresh_active_provider()
     }
 }

@@ -52,10 +52,7 @@ pub fn render(state: &AppState, frame: &mut Frame<'_>) {
     render_workspace_panel(
         provider,
         workspace_view.as_ref(),
-        matches!(
-            &state.focused_pane,
-            FocusedPane::FirstResourcePanel | FocusedPane::ResourcePanel(_)
-        ),
+        matches!(&state.focused_pane, FocusedPane::Resources),
         &state.hints.focus_resource_panels,
         frame,
         columns[0],

@@ -1963,15 +1963,32 @@ fn direct_focus_commands_target_each_resource_panel_and_details() {
     ));
 
     app.invoke(Command::FocusResourcePanel(1));
-    assert_eq!(
-        app.state().focused_pane,
-        FocusedPane::ResourcePanel(ResourcePanelId::new("images"))
-    );
+    assert_eq!(app.state().focused_pane, FocusedPane::Resources);
     assert_eq!(app.active_scope(), CommandScope::ResourcePanel(1));
 
     app.invoke(Command::FocusDetails);
     assert_eq!(app.state().focused_pane, FocusedPane::Details);
     assert_eq!(app.active_scope(), CommandScope::Details);
+}
+
+#[test]
+fn removing_the_focused_resource_panel_reconciles_its_command_scope() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(docker_multi_panel_snapshot()),
+    ));
+    app.invoke(Command::FocusResourcePanel(1));
+    assert_eq!(app.active_scope(), CommandScope::ResourcePanel(1));
+    let refresh = refresh_request(app.invoke(Command::Refresh));
+
+    app.update(refresh_completed(
+        refresh,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+
+    assert_eq!(app.active_scope(), CommandScope::ResourcePanel(0));
 }
 
 #[test]
@@ -1984,14 +2001,20 @@ fn focus_cycles_through_provider_order_and_wraps() {
     ));
 
     let expected = [
-        FocusedPane::ResourcePanel(ResourcePanelId::new("images")),
-        FocusedPane::Details,
-        FocusedPane::Providers,
-        FocusedPane::ResourcePanel(ResourcePanelId::new("containers")),
+        (FocusedPane::Resources, Some("images")),
+        (FocusedPane::Details, None),
+        (FocusedPane::Providers, None),
+        (FocusedPane::Resources, Some("containers")),
     ];
-    for focused in expected {
+    for (focused, panel_id) in expected {
         app.invoke(Command::FocusNextPane);
         assert_eq!(app.state().focused_pane, focused);
+        if let Some(panel_id) = panel_id {
+            assert_eq!(
+                app.state().providers[0].focused_resource_panel(),
+                Some(&ResourcePanelId::new(panel_id))
+            );
+        }
     }
 
     app.invoke(Command::FocusPreviousPane);
@@ -2033,10 +2056,7 @@ fn every_workspace_and_resource_panel_restores_its_navigation_state() {
         view.focused_resource_panel,
         Some(&ResourcePanelId::new("images"))
     );
-    assert_eq!(
-        app.state().focused_pane,
-        FocusedPane::ResourcePanel(ResourcePanelId::new("images"))
-    );
+    assert_eq!(app.state().focused_pane, FocusedPane::Resources);
     assert_eq!(
         view.panels
             .iter()
