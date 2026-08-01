@@ -5,8 +5,8 @@ use crate::command::{Command, CommandRegistry, CommandScope, NUMBERED_RESOURCE_P
 use crate::keys::Key;
 use crate::provider::{
     DetailViewId, ProviderDiscovery, ProviderId, ProviderRequest, ProviderRequestId,
-    ResourceCommand, ResourceDetails, ResourceId, ResourcePanelId, ResourceState, WorkspaceError,
-    WorkspaceSnapshot,
+    ResourceCommand, ResourceDetails, ResourceId, ResourcePanelId, ResourceState, ResourceTarget,
+    WorkspaceError, WorkspaceSnapshot,
 };
 use crate::workspace::{DetailCompletion, ProviderWorkspaceState};
 
@@ -524,12 +524,13 @@ impl App {
             return Vec::new();
         };
         self.next_request_id += 1;
+        let (request_id, provider_id, target, view_id) = load.into_request_parts();
         vec![ProviderRequest::LoadResourceDetails {
-            request_id: load.request_id,
-            provider_id: load.provider_id,
-            panel_id: load.panel_id,
-            resource_id: load.resource_id,
-            view_id: load.view_id,
+            request_id,
+            provider_id,
+            panel_id: target.panel_id,
+            resource_id: target.resource_id,
+            view_id,
         }]
     }
 
@@ -553,8 +554,7 @@ impl App {
         provider.complete_detail_load(DetailCompletion::new(
             request_id,
             provider_id,
-            panel_id,
-            resource_id,
+            ResourceTarget::new(panel_id, resource_id),
             view_id,
             result,
         ));

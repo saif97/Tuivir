@@ -32,25 +32,38 @@ pub enum DetailContent {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ResourceDetailsState {
-    panel_id: ResourcePanelId,
-    resource_id: ResourceId,
+    target: DetailTarget,
     resource_name: String,
-    view_id: DetailViewId,
     title: String,
     content: DetailContent,
     scroll: u16,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+struct DetailTarget {
+    resource: ResourceTarget,
+    view_id: DetailViewId,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DetailLoad {
-    pub request_id: ProviderRequestId,
-    pub provider_id: ProviderId,
-    pub panel_id: ResourcePanelId,
-    pub resource_id: ResourceId,
-    pub view_id: DetailViewId,
+    request_id: ProviderRequestId,
+    provider_id: ProviderId,
+    target: DetailTarget,
 }
 
 impl DetailLoad {
+    pub fn into_request_parts(
+        self,
+    ) -> (ProviderRequestId, ProviderId, ResourceTarget, DetailViewId) {
+        (
+            self.request_id,
+            self.provider_id,
+            self.target.resource,
+            self.target.view_id,
+        )
+    }
+
     pub fn completion(self, result: Result<ResourceDetails, WorkspaceError>) -> DetailCompletion {
         DetailCompletion { load: self, result }
     }
@@ -66,8 +79,7 @@ impl DetailCompletion {
     pub fn new(
         request_id: ProviderRequestId,
         provider_id: ProviderId,
-        panel_id: ResourcePanelId,
-        resource_id: ResourceId,
+        resource: ResourceTarget,
         view_id: DetailViewId,
         result: Result<ResourceDetails, WorkspaceError>,
     ) -> Self {
@@ -75,9 +87,7 @@ impl DetailCompletion {
             load: DetailLoad {
                 request_id,
                 provider_id,
-                panel_id,
-                resource_id,
-                view_id,
+                target: DetailTarget { resource, view_id },
             },
             result,
         }
@@ -314,19 +324,21 @@ impl ProviderWorkspaceState {
             self.details = None;
             return None;
         };
-        let pending_for_target = self.pending_detail.as_ref().is_some_and(|pending| {
-            pending.panel_id == target.panel_id
-                && pending.resource_id == target.resource_id
-                && pending.view_id == view.id
-        });
+        let detail_target = DetailTarget {
+            resource: target,
+            view_id: view.id.clone(),
+        };
+        let pending_for_target = self
+            .pending_detail
+            .as_ref()
+            .is_some_and(|pending| pending.target == detail_target);
         if !pending_for_target {
             self.pending_detail = None;
         }
-        let describes_target = self.details.as_ref().is_some_and(|details| {
-            details.panel_id == target.panel_id
-                && details.resource_id == target.resource_id
-                && details.view_id == view.id
-        });
+        let describes_target = self
+            .details
+            .as_ref()
+            .is_some_and(|details| details.target == detail_target);
         if pending_for_target || describes_target {
             return None;
         }
@@ -334,15 +346,11 @@ impl ProviderWorkspaceState {
         let load = DetailLoad {
             request_id,
             provider_id: self.id.clone(),
-            panel_id: target.panel_id.clone(),
-            resource_id: target.resource_id.clone(),
-            view_id: view.id.clone(),
+            target: detail_target.clone(),
         };
         self.details = Some(ResourceDetailsState {
-            panel_id: target.panel_id,
-            resource_id: target.resource_id,
+            target: detail_target,
             resource_name,
-            view_id: view.id,
             title: view.title,
             content: DetailContent::Loading,
             scroll: 0,
@@ -454,9 +462,8 @@ impl ProviderWorkspaceState {
         let detail_views = selected_panel.map_or(&[][..], |panel| panel.detail_views.as_slice());
         let details = selected_target.as_ref().and_then(|selected| {
             self.details.as_ref().filter(|details| {
-                details.panel_id == selected.panel_id
-                    && details.resource_id == selected.resource_id
-                    && Some(&details.view_id) == self.selected_detail_view.as_ref()
+                details.target.resource == *selected
+                    && Some(&details.target.view_id) == self.selected_detail_view.as_ref()
             })
         });
         WorkspaceView {
@@ -533,13 +540,11 @@ impl ProviderWorkspaceState {
         result
     }
 
-    fn visible_detail_identity(&self) -> Option<(ResourcePanelId, ResourceId, DetailViewId)> {
-        let target = self.selected_resource_target()?;
-        Some((
-            target.panel_id,
-            target.resource_id,
-            self.selected_detail_view.clone()?,
-        ))
+    fn visible_detail_identity(&self) -> Option<DetailTarget> {
+        Some(DetailTarget {
+            resource: self.selected_resource_target()?,
+            view_id: self.selected_detail_view.clone()?,
+        })
     }
 
     fn reconcile_detail_view(&mut self, snapshot: &WorkspaceSnapshot) {
