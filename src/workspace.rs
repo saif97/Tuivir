@@ -168,6 +168,7 @@ impl ProviderWorkspaceState {
     /// Focuses an existing Resource Panel and restores its remembered Resource
     /// selection. A stale panel identity changes nothing.
     pub fn focus_resource_panel(&mut self, panel_id: &ResourcePanelId) -> bool {
+        let previous_detail = self.visible_detail_identity();
         let WorkspaceLoadState::Ready(snapshot) = &self.load_state else {
             return false;
         };
@@ -187,12 +188,16 @@ impl ProviderWorkspaceState {
         if !still_offered {
             self.selected_detail_view = offered.into_iter().next();
         }
+        if self.visible_detail_identity() != previous_detail {
+            self.invalidate_pending_detail();
+        }
         true
     }
 
     /// Moves the selected Resource within the focused panel and clamps at its
     /// ends. Every other panel keeps its own selection and scroll.
     pub fn move_resource_selection(&mut self, delta: isize) {
+        let previous_detail = self.visible_detail_identity();
         let WorkspaceLoadState::Ready(snapshot) = &self.load_state else {
             return;
         };
@@ -218,6 +223,9 @@ impl ProviderWorkspaceState {
             navigation.selected_resource =
                 panel.resources.first().map(|resource| resource.id.clone());
             navigation.scroll = 0;
+            if self.visible_detail_identity() != previous_detail {
+                self.invalidate_pending_detail();
+            }
             return;
         };
         let next = current
@@ -228,10 +236,14 @@ impl ProviderWorkspaceState {
             .get(next)
             .map(|resource| resource.id.clone());
         navigation.scroll = next;
+        if self.visible_detail_identity() != previous_detail {
+            self.invalidate_pending_detail();
+        }
     }
 
     /// Moves through the focused panel's Detail Views as a ring.
     pub fn move_detail_view(&mut self, delta: isize) {
+        let previous_detail = self.visible_detail_identity();
         let WorkspaceLoadState::Ready(snapshot) = &self.load_state else {
             return;
         };
@@ -257,6 +269,9 @@ impl ProviderWorkspaceState {
         let next =
             (current as isize + delta).rem_euclid(panel.detail_views.len() as isize) as usize;
         self.selected_detail_view = panel.detail_views.get(next).map(|view| view.id.clone());
+        if self.visible_detail_identity() != previous_detail {
+            self.invalidate_pending_detail();
+        }
     }
 
     /// Starts a load only when the visible Resource and Detail View are not
@@ -341,6 +356,7 @@ impl ProviderWorkspaceState {
     /// Replaces Provider data while preserving every still-valid presentation
     /// choice by stable Provider identity.
     pub fn reconcile_snapshot(&mut self, snapshot: WorkspaceSnapshot) {
+        let previous_detail = self.visible_detail_identity();
         let previous = std::mem::take(&mut self.panel_navigation);
         self.panel_navigation = snapshot
             .panels
@@ -386,6 +402,9 @@ impl ProviderWorkspaceState {
             self.focused_resource_panel = snapshot.panels.first().map(|panel| panel.id.clone());
         }
         self.reconcile_detail_view(&snapshot);
+        if self.visible_detail_identity() != previous_detail {
+            self.invalidate_pending_detail();
+        }
         self.load_state = WorkspaceLoadState::Ready(snapshot);
     }
 
@@ -451,6 +470,15 @@ impl ProviderWorkspaceState {
             .selected_resource
             .as_ref()?;
         Some(ResourceTarget::new(panel_id.clone(), resource_id.clone()))
+    }
+
+    fn visible_detail_identity(&self) -> Option<(ResourcePanelId, ResourceId, DetailViewId)> {
+        let target = self.selected_resource_target()?;
+        Some((
+            target.panel_id,
+            target.resource_id,
+            self.selected_detail_view.clone()?,
+        ))
     }
 
     fn reconcile_detail_view(&mut self, snapshot: &WorkspaceSnapshot) {

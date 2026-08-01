@@ -229,3 +229,27 @@ fn scrolling_details_clamps_to_the_visible_detail_content() {
     };
     assert_eq!(workspace.view(snapshot).details.expect("details").scroll, 0);
 }
+
+#[test]
+fn navigation_itself_refuses_the_detail_result_for_the_resource_left_behind() {
+    let mut snapshot = snapshot();
+    snapshot.panels[0]
+        .resources
+        .push(resource("container-b", "worker"));
+    let mut workspace = workspace();
+    workspace.reconcile_snapshot(snapshot);
+    let stale = workspace
+        .start_visible_detail_load(ProviderRequestId::new(1))
+        .expect("the selected Resource offers Logs");
+
+    workspace.move_resource_selection(1);
+    workspace.complete_detail_load(stale.completion(Ok(ResourceDetails::from_lines(["stale"]))));
+    workspace.move_resource_selection(-1);
+
+    assert!(
+        workspace
+            .start_visible_detail_load(ProviderRequestId::new(2))
+            .is_some(),
+        "returning to the Resource reloads details whose result was refused"
+    );
+}
