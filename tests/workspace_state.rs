@@ -1,7 +1,8 @@
 use virtui::{
     provider::{
         DetailView, ProviderDiscovery, ProviderId, ProviderRequestId, Resource, ResourceDetails,
-        ResourceId, ResourcePanel, ResourcePanelId, TargetEnvironment, WorkspaceSnapshot,
+        ResourceId, ResourcePanel, ResourcePanelId, TargetEnvironment, WorkspaceError,
+        WorkspaceSnapshot,
     },
     workspace::{DetailContent, ProviderWorkspaceState, WorkspaceLoadState},
 };
@@ -251,5 +252,33 @@ fn navigation_itself_refuses_the_detail_result_for_the_resource_left_behind() {
             .start_visible_detail_load(ProviderRequestId::new(2))
             .is_some(),
         "returning to the Resource reloads details whose result was refused"
+    );
+}
+
+#[test]
+fn recovery_from_a_refresh_error_restores_still_valid_navigation() {
+    let mut workspace = workspace();
+    workspace.reconcile_snapshot(snapshot());
+    assert!(workspace.focus_resource_panel(&ResourcePanelId::new("images")));
+
+    workspace.record_load_error(WorkspaceError::new("temporarily unavailable"));
+    workspace.reconcile_snapshot(snapshot());
+
+    let WorkspaceLoadState::Ready(snapshot) = workspace.load_state() else {
+        panic!("the recovered workspace is ready");
+    };
+    let view = workspace.view(snapshot);
+    assert_eq!(
+        view.focused_resource_panel,
+        Some(&ResourcePanelId::new("images"))
+    );
+    assert_eq!(
+        view.selected_resource
+            .map(|resource| resource.name.as_str()),
+        Some("alpine")
+    );
+    assert_eq!(
+        view.selected_detail_view.map(|view| view.title.as_str()),
+        Some("Inspect")
     );
 }

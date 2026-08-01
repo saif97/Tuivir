@@ -497,7 +497,7 @@ impl App {
         };
         match result {
             Ok(snapshot) if snapshot.panels.len() > NUMBERED_RESOURCE_PANEL_CAPACITY => {
-                provider.record_load_error(WorkspaceError::new(format!(
+                provider.reject_snapshot(WorkspaceError::new(format!(
                     "{} returned {} Resource Panels; Virtui supports at most \
                      {NUMBERED_RESOURCE_PANEL_CAPACITY} Resource Panels so each retains a \
                      numbered focus Command",

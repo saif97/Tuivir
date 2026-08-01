@@ -142,9 +142,15 @@ impl ProviderWorkspaceState {
         self.focused_resource_panel.as_ref()
     }
 
-    /// Moves the workspace to an unavailable state and invalidates presentation
-    /// choices that referred to its former snapshot.
+    /// Records a transient refresh failure while retaining stable presentation
+    /// choices for the next successful reconciliation.
     pub fn record_load_error(&mut self, error: WorkspaceError) {
+        self.load_state = WorkspaceLoadState::Error(error);
+        self.invalidate_pending_detail();
+    }
+
+    /// Rejects a snapshot whose shape Virtui cannot represent.
+    pub fn reject_snapshot(&mut self, error: WorkspaceError) {
         self.load_state = WorkspaceLoadState::Error(error);
         self.focused_resource_panel = None;
         self.panel_navigation.clear();
