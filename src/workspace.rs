@@ -193,30 +193,28 @@ impl ProviderWorkspaceState {
     /// Focuses an existing Resource Panel and restores its remembered Resource
     /// selection. A stale panel identity changes nothing.
     pub fn focus_resource_panel(&mut self, panel_id: &ResourcePanelId) -> bool {
-        let previous_detail = self.visible_detail_identity();
-        let WorkspaceLoadState::Ready(snapshot) = &self.load_state else {
-            return false;
-        };
-        let Some(panel) = snapshot.panel(panel_id) else {
-            return false;
-        };
-        let offered = panel
-            .detail_views
-            .iter()
-            .map(|view| view.id.clone())
-            .collect::<Vec<_>>();
-        self.focused_resource_panel = Some(panel_id.clone());
-        let still_offered = self
-            .selected_detail_view
-            .as_ref()
-            .is_some_and(|selected| offered.contains(selected));
-        if !still_offered {
-            self.selected_detail_view = offered.into_iter().next();
-        }
-        if self.visible_detail_identity() != previous_detail {
-            self.invalidate_pending_detail();
-        }
-        true
+        self.invalidate_detail_when_target_changes(|workspace| {
+            let WorkspaceLoadState::Ready(snapshot) = &workspace.load_state else {
+                return false;
+            };
+            let Some(panel) = snapshot.panel(panel_id) else {
+                return false;
+            };
+            let offered = panel
+                .detail_views
+                .iter()
+                .map(|view| view.id.clone())
+                .collect::<Vec<_>>();
+            workspace.focused_resource_panel = Some(panel_id.clone());
+            let still_offered = workspace
+                .selected_detail_view
+                .as_ref()
+                .is_some_and(|selected| offered.contains(selected));
+            if !still_offered {
+                workspace.selected_detail_view = offered.into_iter().next();
+            }
+            true
+        })
     }
 
     /// Focuses one Resource Panel by its Provider-defined order.
@@ -233,81 +231,75 @@ impl ProviderWorkspaceState {
     /// Moves the selected Resource within the focused panel and clamps at its
     /// ends. Every other panel keeps its own selection and scroll.
     pub fn move_resource_selection(&mut self, delta: isize) {
-        let previous_detail = self.visible_detail_identity();
-        let WorkspaceLoadState::Ready(snapshot) = &self.load_state else {
-            return;
-        };
-        let Some(panel_id) = self.focused_resource_panel.as_ref() else {
-            return;
-        };
-        let Some(panel) = snapshot.panel(panel_id) else {
-            return;
-        };
-        let Some(navigation) = self
-            .panel_navigation
-            .iter_mut()
-            .find(|navigation| &navigation.panel_id == panel_id)
-        else {
-            return;
-        };
-        let Some(current) = navigation.selected_resource.as_ref().and_then(|selected| {
-            panel
+        self.invalidate_detail_when_target_changes(|workspace| {
+            let WorkspaceLoadState::Ready(snapshot) = &workspace.load_state else {
+                return;
+            };
+            let Some(panel_id) = workspace.focused_resource_panel.as_ref() else {
+                return;
+            };
+            let Some(panel) = snapshot.panel(panel_id) else {
+                return;
+            };
+            let Some(navigation) = workspace
+                .panel_navigation
+                .iter_mut()
+                .find(|navigation| &navigation.panel_id == panel_id)
+            else {
+                return;
+            };
+            let Some(current) = navigation.selected_resource.as_ref().and_then(|selected| {
+                panel
+                    .resources
+                    .iter()
+                    .position(|resource| &resource.id == selected)
+            }) else {
+                navigation.selected_resource =
+                    panel.resources.first().map(|resource| resource.id.clone());
+                navigation.scroll = 0;
+                return;
+            };
+            let next = current
+                .saturating_add_signed(delta)
+                .min(panel.resources.len().saturating_sub(1));
+            navigation.selected_resource = panel
                 .resources
-                .iter()
-                .position(|resource| &resource.id == selected)
-        }) else {
-            navigation.selected_resource =
-                panel.resources.first().map(|resource| resource.id.clone());
-            navigation.scroll = 0;
-            if self.visible_detail_identity() != previous_detail {
-                self.invalidate_pending_detail();
-            }
-            return;
-        };
-        let next = current
-            .saturating_add_signed(delta)
-            .min(panel.resources.len().saturating_sub(1));
-        navigation.selected_resource = panel
-            .resources
-            .get(next)
-            .map(|resource| resource.id.clone());
-        navigation.scroll = next;
-        if self.visible_detail_identity() != previous_detail {
-            self.invalidate_pending_detail();
-        }
+                .get(next)
+                .map(|resource| resource.id.clone());
+            navigation.scroll = next;
+        });
     }
 
     /// Moves through the focused panel's Detail Views as a ring.
     pub fn move_detail_view(&mut self, delta: isize) {
-        let previous_detail = self.visible_detail_identity();
-        let WorkspaceLoadState::Ready(snapshot) = &self.load_state else {
-            return;
-        };
-        let Some(panel_id) = self.focused_resource_panel.as_ref() else {
-            return;
-        };
-        let Some(panel) = snapshot.panel(panel_id) else {
-            return;
-        };
-        if panel.detail_views.is_empty() {
-            return;
-        }
-        let current = self
-            .selected_detail_view
-            .as_ref()
-            .and_then(|selected| {
-                panel
-                    .detail_views
-                    .iter()
-                    .position(|view| &view.id == selected)
-            })
-            .unwrap_or(0);
-        let next =
-            (current as isize + delta).rem_euclid(panel.detail_views.len() as isize) as usize;
-        self.selected_detail_view = panel.detail_views.get(next).map(|view| view.id.clone());
-        if self.visible_detail_identity() != previous_detail {
-            self.invalidate_pending_detail();
-        }
+        self.invalidate_detail_when_target_changes(|workspace| {
+            let WorkspaceLoadState::Ready(snapshot) = &workspace.load_state else {
+                return;
+            };
+            let Some(panel_id) = workspace.focused_resource_panel.as_ref() else {
+                return;
+            };
+            let Some(panel) = snapshot.panel(panel_id) else {
+                return;
+            };
+            if panel.detail_views.is_empty() {
+                return;
+            }
+            let current = workspace
+                .selected_detail_view
+                .as_ref()
+                .and_then(|selected| {
+                    panel
+                        .detail_views
+                        .iter()
+                        .position(|view| &view.id == selected)
+                })
+                .unwrap_or(0);
+            let next =
+                (current as isize + delta).rem_euclid(panel.detail_views.len() as isize) as usize;
+            workspace.selected_detail_view =
+                panel.detail_views.get(next).map(|view| view.id.clone());
+        });
     }
 
     /// Starts a load only when the visible Resource and Detail View are not
@@ -392,56 +384,55 @@ impl ProviderWorkspaceState {
     /// Replaces Provider data while preserving every still-valid presentation
     /// choice by stable Provider identity.
     pub fn reconcile_snapshot(&mut self, snapshot: WorkspaceSnapshot) {
-        let previous_detail = self.visible_detail_identity();
-        let previous = std::mem::take(&mut self.panel_navigation);
-        self.panel_navigation = snapshot
-            .panels
-            .iter()
-            .map(|panel| {
-                let remembered = previous
-                    .iter()
-                    .find(|navigation| navigation.panel_id == panel.id);
-                let selected_resource = remembered
-                    .and_then(|navigation| navigation.selected_resource.as_ref())
-                    .filter(|selected| {
-                        panel
-                            .resources
-                            .iter()
-                            .any(|resource| &resource.id == *selected)
-                    })
-                    .cloned()
-                    .or_else(|| panel.resources.first().map(|resource| resource.id.clone()));
-                let selected_index = selected_resource
-                    .as_ref()
-                    .and_then(|selected| {
-                        panel
-                            .resources
-                            .iter()
-                            .position(|resource| &resource.id == selected)
-                    })
-                    .unwrap_or(0);
-                ResourcePanelNavigation {
-                    panel_id: panel.id.clone(),
-                    selected_resource,
-                    scroll: remembered
-                        .map_or(0, |navigation| navigation.scroll)
-                        .min(selected_index),
-                }
-            })
-            .collect();
+        self.invalidate_detail_when_target_changes(|workspace| {
+            let previous = std::mem::take(&mut workspace.panel_navigation);
+            workspace.panel_navigation = snapshot
+                .panels
+                .iter()
+                .map(|panel| {
+                    let remembered = previous
+                        .iter()
+                        .find(|navigation| navigation.panel_id == panel.id);
+                    let selected_resource = remembered
+                        .and_then(|navigation| navigation.selected_resource.as_ref())
+                        .filter(|selected| {
+                            panel
+                                .resources
+                                .iter()
+                                .any(|resource| &resource.id == *selected)
+                        })
+                        .cloned()
+                        .or_else(|| panel.resources.first().map(|resource| resource.id.clone()));
+                    let selected_index = selected_resource
+                        .as_ref()
+                        .and_then(|selected| {
+                            panel
+                                .resources
+                                .iter()
+                                .position(|resource| &resource.id == selected)
+                        })
+                        .unwrap_or(0);
+                    ResourcePanelNavigation {
+                        panel_id: panel.id.clone(),
+                        selected_resource,
+                        scroll: remembered
+                            .map_or(0, |navigation| navigation.scroll)
+                            .min(selected_index),
+                    }
+                })
+                .collect();
 
-        let focused_still_exists = self
-            .focused_resource_panel
-            .as_ref()
-            .is_some_and(|focused| snapshot.panel(focused).is_some());
-        if !focused_still_exists {
-            self.focused_resource_panel = snapshot.panels.first().map(|panel| panel.id.clone());
-        }
-        self.reconcile_detail_view(&snapshot);
-        if self.visible_detail_identity() != previous_detail {
-            self.invalidate_pending_detail();
-        }
-        self.load_state = WorkspaceLoadState::Ready(snapshot);
+            let focused_still_exists = workspace
+                .focused_resource_panel
+                .as_ref()
+                .is_some_and(|focused| snapshot.panel(focused).is_some());
+            if !focused_still_exists {
+                workspace.focused_resource_panel =
+                    snapshot.panels.first().map(|panel| panel.id.clone());
+            }
+            workspace.reconcile_detail_view(&snapshot);
+            workspace.load_state = WorkspaceLoadState::Ready(snapshot);
+        });
     }
 
     /// Projects the private presentation state against the Provider snapshot
@@ -528,6 +519,18 @@ impl ProviderWorkspaceState {
             return None;
         };
         snapshot.resource(&target.panel_id, &target.resource_id)
+    }
+
+    fn invalidate_detail_when_target_changes<R>(
+        &mut self,
+        update: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let previous_detail = self.visible_detail_identity();
+        let result = update(self);
+        if self.visible_detail_identity() != previous_detail {
+            self.invalidate_pending_detail();
+        }
+        result
     }
 
     fn visible_detail_identity(&self) -> Option<(ResourcePanelId, ResourceId, DetailViewId)> {
