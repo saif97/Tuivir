@@ -59,19 +59,14 @@ pub enum AppEvent {
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub enum FocusedPane {
     Providers,
     /// Resource focus requested before the Active Workspace has a snapshot.
+    #[default]
     FirstResourcePanel,
     ResourcePanel(ResourcePanelId),
     Details,
-}
-
-impl Default for FocusedPane {
-    fn default() -> Self {
-        Self::FirstResourcePanel
-    }
 }
 
 /// How far one scroll Command moves through a detail view. Rendering owns the
