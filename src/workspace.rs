@@ -497,6 +497,20 @@ impl ProviderWorkspaceState {
         }
     }
 
+    /// Projects the Provider Workspace into one coherent presentation state.
+    pub fn presentation(&self) -> WorkspacePresentation<'_> {
+        match &self.load_state {
+            WorkspaceLoadState::Loading => WorkspacePresentation::Loading { name: &self.name },
+            WorkspaceLoadState::Ready(snapshot) => {
+                WorkspacePresentation::Ready(self.view(snapshot))
+            }
+            WorkspaceLoadState::Error(error) => WorkspacePresentation::Error {
+                name: &self.name,
+                error,
+            },
+        }
+    }
+
     pub fn selected_resource_target(&self) -> Option<ResourceTarget> {
         let panel_id = self.focused_resource_panel.as_ref()?;
         let resource_id = self
@@ -506,6 +520,14 @@ impl ProviderWorkspaceState {
             .selected_resource
             .as_ref()?;
         Some(ResourceTarget::new(panel_id.clone(), resource_id.clone()))
+    }
+
+    pub fn selected_resource(&self) -> Option<&Resource> {
+        let target = self.selected_resource_target()?;
+        let WorkspaceLoadState::Ready(snapshot) = &self.load_state else {
+            return None;
+        };
+        snapshot.resource(&target.panel_id, &target.resource_id)
     }
 
     fn visible_detail_identity(&self) -> Option<(ResourcePanelId, ResourceId, DetailViewId)> {
@@ -561,6 +583,17 @@ pub struct WorkspaceView<'a> {
     pub detail_views: &'a [DetailView],
     pub selected_detail_view: Option<&'a DetailView>,
     pub details: Option<ResourceDetailsView<'a>>,
+}
+
+pub enum WorkspacePresentation<'a> {
+    Loading {
+        name: &'a str,
+    },
+    Ready(WorkspaceView<'a>),
+    Error {
+        name: &'a str,
+        error: &'a WorkspaceError,
+    },
 }
 
 #[derive(Clone, Copy)]

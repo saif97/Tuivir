@@ -8,7 +8,7 @@ use crate::provider::{
     ResourceCommand, ResourceDetails, ResourceId, ResourcePanelId, ResourceState, WorkspaceError,
     WorkspaceSnapshot,
 };
-use crate::workspace::{DetailCompletion, ProviderWorkspaceState, WorkspaceLoadState};
+use crate::workspace::{DetailCompletion, ProviderWorkspaceState};
 
 /// Facts the application receives: provider discovery, the refresh clock, and
 /// asynchronous completions.
@@ -661,10 +661,7 @@ impl App {
         let Some(target) = provider.selected_resource_target() else {
             return Vec::new();
         };
-        let WorkspaceLoadState::Ready(snapshot) = provider.load_state() else {
-            return Vec::new();
-        };
-        let Some(resource) = snapshot.resource(&target.panel_id, &target.resource_id) else {
+        let Some(resource) = provider.selected_resource() else {
             return Vec::new();
         };
         if !resource.available_commands.contains(&command) {
@@ -780,10 +777,7 @@ impl App {
             .state
             .active_provider
             .and_then(|active| self.state.providers.get(active))
-            .and_then(|provider| match provider.load_state() {
-                WorkspaceLoadState::Ready(snapshot) => Some(snapshot.panels.len()),
-                WorkspaceLoadState::Loading | WorkspaceLoadState::Error(_) => None,
-            })
+            .and_then(ProviderWorkspaceState::resource_panel_count)
             .unwrap_or(0);
         self.state.help_overlay = Some(HelpOverlay {
             target,
@@ -821,11 +815,7 @@ impl App {
             .state
             .active_provider
             .and_then(|active| self.state.providers.get(active))?;
-        let selected = provider.selected_resource_target()?;
-        let WorkspaceLoadState::Ready(snapshot) = provider.load_state() else {
-            return None;
-        };
-        snapshot.resource(&selected.panel_id, &selected.resource_id)
+        provider.selected_resource()
     }
 
     fn refresh_active_provider(&mut self) -> Vec<ProviderRequest> {

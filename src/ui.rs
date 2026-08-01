@@ -11,8 +11,7 @@ use ratatui::{
 use crate::app::{AppState, FocusedPane};
 use crate::provider::ResourceState;
 use crate::workspace::{
-    DetailContent, ProviderWorkspaceState, ResourceDetailsView, ResourcePanelView,
-    WorkspaceLoadState, WorkspaceView,
+    DetailContent, ResourceDetailsView, ResourcePanelView, WorkspacePresentation, WorkspaceView,
 };
 
 pub fn render(state: &AppState, frame: &mut Frame<'_>) {
@@ -45,13 +44,13 @@ pub fn render(state: &AppState, frame: &mut Frame<'_>) {
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(48), Constraint::Percentage(52)])
         .split(rows[1]);
-    let workspace_view = match provider.load_state() {
-        WorkspaceLoadState::Ready(snapshot) => Some(provider.view(snapshot)),
-        WorkspaceLoadState::Loading | WorkspaceLoadState::Error(_) => None,
+    let presentation = provider.presentation();
+    let workspace_view = match &presentation {
+        WorkspacePresentation::Ready(view) => Some(view),
+        WorkspacePresentation::Loading { .. } | WorkspacePresentation::Error { .. } => None,
     };
     render_workspace_panel(
-        provider,
-        workspace_view.as_ref(),
+        &presentation,
         matches!(&state.focused_pane, FocusedPane::Resources),
         &state.hints.focus_resource_panels,
         frame,
@@ -59,7 +58,7 @@ pub fn render(state: &AppState, frame: &mut Frame<'_>) {
     );
     render_details_panel(
         provider.name(),
-        workspace_view.as_ref(),
+        workspace_view,
         state.focused_pane == FocusedPane::Details,
         state.hints.focus_details.as_deref(),
         frame,
@@ -210,15 +209,14 @@ fn render_provider_bar(state: &AppState, frame: &mut Frame<'_>, area: Rect) {
 }
 
 fn render_workspace_panel(
-    provider: &ProviderWorkspaceState,
-    view: Option<&WorkspaceView<'_>>,
+    presentation: &WorkspacePresentation<'_>,
     resource_focus: bool,
     resource_hints: &[Option<String>],
     frame: &mut Frame<'_>,
     area: Rect,
 ) {
-    match provider.load_state() {
-        WorkspaceLoadState::Loading => frame.render_widget(
+    match presentation {
+        WorkspacePresentation::Loading { .. } => frame.render_widget(
             Paragraph::new("Refreshing…").block(pane_block(
                 pane_title(
                     resource_hints.first().and_then(Option::as_deref),
@@ -229,10 +227,10 @@ fn render_workspace_panel(
             )),
             area,
         ),
-        WorkspaceLoadState::Error(error) => frame.render_widget(
+        WorkspacePresentation::Error { name, error } => frame.render_widget(
             Paragraph::new(vec![
                 Line::styled(
-                    format!("{} provider is unavailable", provider.name()),
+                    format!("{name} provider is unavailable"),
                     Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
                 ),
                 Line::from(error.message.as_str()),
@@ -248,8 +246,7 @@ fn render_workspace_panel(
             )),
             area,
         ),
-        WorkspaceLoadState::Ready(_) => {
-            let view = view.expect("a ready Provider Workspace has a projection");
+        WorkspacePresentation::Ready(view) => {
             if view.panels.is_empty() {
                 frame.render_widget(
                     Paragraph::new("No Resource Panels available").block(pane_block(
