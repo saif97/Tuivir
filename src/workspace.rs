@@ -62,6 +62,28 @@ pub struct DetailCompletion {
     result: Result<ResourceDetails, WorkspaceError>,
 }
 
+impl DetailCompletion {
+    pub fn new(
+        request_id: ProviderRequestId,
+        provider_id: ProviderId,
+        panel_id: ResourcePanelId,
+        resource_id: ResourceId,
+        view_id: DetailViewId,
+        result: Result<ResourceDetails, WorkspaceError>,
+    ) -> Self {
+        Self {
+            load: DetailLoad {
+                request_id,
+                provider_id,
+                panel_id,
+                resource_id,
+                view_id,
+            },
+            result,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// All UI-neutral presentation state for one Provider Workspace.
 pub struct ProviderWorkspaceState {
@@ -98,6 +120,49 @@ impl ProviderWorkspaceState {
 
     pub fn load_state(&self) -> &WorkspaceLoadState {
         &self.load_state
+    }
+
+    pub fn id(&self) -> &ProviderId {
+        &self.id
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn target_environment(&self) -> &TargetEnvironment {
+        &self.target_environment
+    }
+
+    pub fn version(&self) -> Option<&ProviderVersion> {
+        self.version.as_ref()
+    }
+
+    pub fn focused_resource_panel(&self) -> Option<&ResourcePanelId> {
+        self.focused_resource_panel.as_ref()
+    }
+
+    /// Moves the workspace to an unavailable state and invalidates presentation
+    /// choices that referred to its former snapshot.
+    pub fn record_load_error(&mut self, error: WorkspaceError) {
+        self.load_state = WorkspaceLoadState::Error(error);
+        self.focused_resource_panel = None;
+        self.panel_navigation.clear();
+        self.selected_detail_view = None;
+        self.details = None;
+        self.pending_detail = None;
+    }
+
+    /// Refuses the pending detail result after its Provider Workspace is left.
+    pub fn invalidate_pending_detail(&mut self) {
+        self.pending_detail = None;
+        if self
+            .details
+            .as_ref()
+            .is_some_and(|details| details.content == DetailContent::Loading)
+        {
+            self.details = None;
+        }
     }
 
     /// Focuses an existing Resource Panel and restores its remembered Resource
@@ -201,7 +266,11 @@ impl ProviderWorkspaceState {
         &mut self,
         request_id: ProviderRequestId,
     ) -> Option<DetailLoad> {
-        let (target, resource_name, view) = self.detail_target()?;
+        let Some((target, resource_name, view)) = self.detail_target() else {
+            self.invalidate_pending_detail();
+            self.details = None;
+            return None;
+        };
         let pending_for_target = self.pending_detail.as_ref().is_some_and(|pending| {
             pending.panel_id == target.panel_id
                 && pending.resource_id == target.resource_id
@@ -336,6 +405,7 @@ impl ProviderWorkspaceState {
                 .iter()
                 .find(|view| &view.id == selected)
         });
+        let detail_views = selected_panel.map_or(&[][..], |panel| panel.detail_views.as_slice());
         let details = selected_target.as_ref().and_then(|selected| {
             self.details.as_ref().filter(|details| {
                 details.panel_id == selected.panel_id
@@ -366,12 +436,13 @@ impl ProviderWorkspaceState {
                 })
                 .collect(),
             selected_resource,
+            detail_views,
             selected_detail_view,
             details: details.map(ResourceDetailsView::from),
         }
     }
 
-    fn selected_resource_target(&self) -> Option<ResourceTarget> {
+    pub fn selected_resource_target(&self) -> Option<ResourceTarget> {
         let panel_id = self.focused_resource_panel.as_ref()?;
         let resource_id = self
             .panel_navigation
@@ -423,6 +494,7 @@ pub struct WorkspaceView<'a> {
     pub focused_resource_panel: Option<&'a ResourcePanelId>,
     pub panels: Vec<ResourcePanelView<'a>>,
     pub selected_resource: Option<&'a Resource>,
+    pub detail_views: &'a [DetailView],
     pub selected_detail_view: Option<&'a DetailView>,
     pub details: Option<ResourceDetailsView<'a>>,
 }
