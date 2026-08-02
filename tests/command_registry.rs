@@ -1,8 +1,5 @@
-use virtui::{
-    application::KeybindingError,
-    command::{Command, CommandRegistry, CommandScope},
-    keys::Key,
-    provider::ResourceCommand,
+use virtui::application::{
+    Command, CommandRegistry, CommandScope, Key, KeybindingError, ResourceCommand,
 };
 
 fn key(text: &str) -> Key {

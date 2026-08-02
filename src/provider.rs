@@ -1,5 +1,6 @@
-use std::{fmt, future::Future, pin::Pin};
+use std::{future::Future, pin::Pin};
 
+pub use crate::application::ResourceCommand;
 use crate::cli::{CliRunner, ProcessError, ProcessSpec};
 pub use crate::domain::{
     DetailViewId, Provider, ProviderId, ProviderVersion, ResourceId, ResourcePanelId,
@@ -19,30 +20,6 @@ impl ProviderRequestId {
     /// The application remains responsible for choosing unique values.
     pub fn new(value: u64) -> Self {
         Self(value)
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ResourceCommand {
-    Start,
-    Stop,
-    Restart,
-    /// Returns a suspended Resource to running — Docker `unpause`, Incus
-    /// `unfreeze`.
-    Resume,
-    Delete,
-}
-
-impl fmt::Display for ResourceCommand {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let name = match self {
-            Self::Start => "start",
-            Self::Stop => "stop",
-            Self::Restart => "restart",
-            Self::Resume => "resume",
-            Self::Delete => "delete",
-        };
-        formatter.write_str(name)
     }
 }
 
