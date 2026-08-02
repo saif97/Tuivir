@@ -5,35 +5,18 @@ use virtui::{
     cli::{ProcessError, ProcessOutput, ProcessSpec},
     incus::IncusWorkspace,
     provider::{
-        DetailViewId, ProviderRequest, ProviderWorkspace, ResourceCommand, ResourceId,
-        ResourcePanelId, ResourceState, WorkspaceError, WorkspaceSnapshot,
+        DetailViewId, ProviderWorkspace, ResourceCommand, ResourceId, ResourcePanelId,
+        ResourceState,
     },
     runtime::ProviderRuntime,
     ui::render_to_text,
 };
 
 mod common;
-use common::{FixtureCli, failure, failure_on_stdout, success};
+use common::{FixtureCli, failure, failure_on_stdout, refresh_completed, success};
 
 fn silent_failure() -> Result<ProcessOutput, ProcessError> {
     common::silent_failure(1)
-}
-
-fn refresh_completed(
-    request: ProviderRequest,
-    result: Result<WorkspaceSnapshot, WorkspaceError>,
-) -> AppEvent {
-    match request {
-        ProviderRequest::RefreshWorkspace {
-            request_id,
-            provider_id,
-        } => AppEvent::RefreshCompleted {
-            request_id,
-            provider_id,
-            result,
-        },
-        other => panic!("expected refresh request, got {other:?}"),
-    }
 }
 
 #[tokio::test]

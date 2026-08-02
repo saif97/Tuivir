@@ -8,14 +8,13 @@ use virtui::{
     provider::{
         DetailViewId, ProviderId, ProviderRequest, ProviderVersion, ProviderWorkspace,
         ResourceCommand, ResourceId, ResourcePanelId, ResourceState, TargetEnvironment,
-        WorkspaceError, WorkspaceSnapshot,
     },
     runtime::ProviderRuntime,
     ui::render_to_text,
 };
 
 mod common;
-use common::{FixtureCli, failure, success};
+use common::{FixtureCli, failure, refresh_completed, success};
 
 /// `sbx version` describes the installed Provider; it does not identify which
 /// Target Environment its daemon currently operates.
@@ -387,23 +386,6 @@ async fn command_availability_follows_the_last_refreshed_state() {
             ("unrecognised-sandbox", vec![ResourceCommand::Delete]),
         ]
     );
-}
-
-fn refresh_completed(
-    request: ProviderRequest,
-    result: Result<WorkspaceSnapshot, WorkspaceError>,
-) -> AppEvent {
-    match request {
-        ProviderRequest::RefreshWorkspace {
-            request_id,
-            provider_id,
-        } => AppEvent::RefreshCompleted {
-            request_id,
-            provider_id,
-            result,
-        },
-        other => panic!("expected refresh request, got {other:?}"),
-    }
 }
 
 #[tokio::test]

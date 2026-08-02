@@ -12,6 +12,10 @@ use std::{
 };
 
 use virtui::cli::{CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec};
+use virtui::{
+    app::AppEvent,
+    provider::{ProviderRequest, WorkspaceError, WorkspaceSnapshot},
+};
 
 /// A [`CliRunner`] that answers a fixed script of commands in order.
 ///
@@ -85,4 +89,22 @@ pub fn silent_failure(exit_code: i32) -> Result<ProcessOutput, ProcessError> {
         stdout: String::new(),
         stderr: String::new(),
     }))
+}
+
+/// Constructs the completion matching a refresh request emitted by the App.
+pub fn refresh_completed(
+    request: ProviderRequest,
+    result: Result<WorkspaceSnapshot, WorkspaceError>,
+) -> AppEvent {
+    match request {
+        ProviderRequest::RefreshWorkspace {
+            request_id,
+            provider_id,
+        } => AppEvent::RefreshCompleted {
+            request_id,
+            provider_id,
+            result,
+        },
+        other => panic!("expected refresh request, got {other:?}"),
+    }
 }
