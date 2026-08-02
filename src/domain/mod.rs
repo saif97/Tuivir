@@ -1,3 +1,5 @@
+//! Provider-neutral domain vocabulary and identities.
+
 use std::fmt;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
