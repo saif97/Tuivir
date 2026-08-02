@@ -4,15 +4,15 @@ use crossterm::event::KeyEvent;
 use tokio::time::{Instant, Interval, MissedTickBehavior};
 
 use crate::{
-    application::InteractiveShellOutcome,
-    application::{App, AppEvent},
+    application::{App, AppEvent, InteractiveShellOutcome, ProviderRequest},
     command::Command,
-    docker::DockerWorkspace,
-    docker_sandbox::DockerSandboxWorkspace,
-    incus::IncusWorkspace,
+    domain::ProviderId,
     infrastructure::process::{CliRunner, InteractiveRunner, ProcessSpec},
+    infrastructure::provider::{
+        DockerSandboxWorkspace, DockerWorkspace, IncusWorkspace, ProviderDiscovery,
+        ProviderWorkspace,
+    },
     presentation::key_from_event,
-    provider::{ProviderDiscovery, ProviderId, ProviderRequest, ProviderWorkspace},
 };
 
 /// The cadence for refreshing the Active Workspace.

@@ -1,14 +1,11 @@
 use std::sync::Arc;
 
 use virtui::{
-    application::{App, InteractiveShellProcess},
-    incus::IncusWorkspace,
+    application::{App, InteractiveShellProcess, ResourceCommand},
+    domain::{DetailViewId, ResourceId, ResourcePanelId, ResourceState, ResourceTarget},
     infrastructure::process::{ProcessError, ProcessOutput, ProcessSpec},
+    infrastructure::provider::{IncusWorkspace, ProviderWorkspace},
     presentation::render_to_text,
-    provider::{
-        DetailViewId, ProviderWorkspace, ResourceCommand, ResourceId, ResourcePanelId,
-        ResourceState, ResourceTarget,
-    },
     runtime::ProviderRuntime,
 };
 

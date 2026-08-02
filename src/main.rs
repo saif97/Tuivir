@@ -17,14 +17,13 @@ use crossterm::{
 use ratatui::DefaultTerminal;
 use tokio::sync::mpsc;
 use virtui::{
-    application::{App, AppEvent},
+    application::{App, AppEvent, ProviderRequest},
     command::CommandRegistry,
     infrastructure::{
         config::{Env, FileSystemReader, load},
         process::{CliRunner, TokioCliRunner},
     },
     presentation,
-    provider::ProviderRequest,
     runtime::{
         ProviderRuntime, RefreshTimer, ShellControl, ShellTerminal, handle_key, open_pending_shell,
     },

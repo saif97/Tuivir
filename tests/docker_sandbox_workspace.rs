@@ -1,16 +1,17 @@
 use std::sync::Arc;
 
 use virtui::{
-    application::{App, InteractiveShellProcess},
+    application::{App, InteractiveShellProcess, ProviderRequest, ResourceCommand},
     command::Command,
-    docker_sandbox::DockerSandboxWorkspace,
-    infrastructure::process::{ProcessError, ProcessFailure, ProcessSpec},
-    presentation::render_to_text,
-    provider::{
-        DetailViewId, ProviderId, ProviderRequest, ProviderVersion, ProviderWorkspace,
-        ResourceCommand, ResourceId, ResourcePanelId, ResourceState, ResourceTarget,
-        TargetEnvironment,
+    domain::{
+        DetailViewId, ProviderId, ProviderVersion, ResourceId, ResourcePanelId, ResourceState,
+        ResourceTarget, TargetEnvironment,
     },
+    infrastructure::{
+        process::{ProcessError, ProcessFailure, ProcessSpec},
+        provider::{DockerSandboxWorkspace, ProviderWorkspace},
+    },
+    presentation::render_to_text,
     runtime::ProviderRuntime,
 };
 

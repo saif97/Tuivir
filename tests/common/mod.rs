@@ -15,10 +15,10 @@ use virtui::infrastructure::process::{
     CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec,
 };
 use virtui::{
-    application::{App, AppEvent},
-    provider::{
-        ProviderDiscovery, ProviderRequest, ResourceDetails, WorkspaceError, WorkspaceSnapshot,
+    application::{
+        App, AppEvent, ProviderRequest, ResourceDetails, WorkspaceError, WorkspaceSnapshot,
     },
+    infrastructure::provider::ProviderDiscovery,
 };
 
 /// A [`CliRunner`] that answers a fixed script of commands in order.

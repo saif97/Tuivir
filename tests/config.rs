@@ -5,10 +5,8 @@ use std::{
 };
 
 use virtui::{
-    command::{Command, CommandScope},
+    application::{Command, CommandScope, Key, ResourceCommand},
     infrastructure::config::{ConfigError, Env, FileSystemReader, LoadError, ReadFile, load},
-    keys::Key,
-    provider::ResourceCommand,
 };
 
 fn key(text: &str) -> Key {

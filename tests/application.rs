@@ -9,20 +9,20 @@ use ratatui::style::Color;
 use tokio::sync::{Notify, mpsc};
 use virtui::{
     application::{
-        App, AppEvent, AppState, FocusedPane, InteractiveShellOutcome, InteractiveShellProcess,
-        WorkspaceLoadState,
+        App, AppEvent, AppState, DetailView, FocusedPane, InteractiveShellOutcome,
+        InteractiveShellProcess, ProviderRequest, Resource, ResourceCommand, ResourceDetails,
+        ResourcePanel, WorkspaceError, WorkspaceLoadState, WorkspaceSnapshot,
     },
     command::{Command, CommandRegistry, CommandScope},
-    docker::DockerWorkspace,
+    domain::{
+        DetailViewId, Provider, ProviderId, ResourceId, ResourcePanelId, ResourceState,
+        ResourceTarget, TargetEnvironment,
+    },
     infrastructure::process::{
         CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec,
     },
+    infrastructure::provider::{DockerWorkspace, ProviderDiscovery, ProviderWorkspace},
     presentation::{render_foreground_colours, render_to_text},
-    provider::{
-        DetailView, DetailViewId, Provider, ProviderDiscovery, ProviderId, ProviderRequest,
-        Resource, ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourcePanelId,
-        ResourceState, ResourceTarget, TargetEnvironment, WorkspaceError, WorkspaceSnapshot,
-    },
     runtime::{ProviderRuntime, RefreshTimer, ShellControl, handle_key},
 };
 
@@ -216,7 +216,7 @@ async fn runtime_executes_resource_command_and_publishes_its_completion() {
     let command = app.invoke(Command::Resource(ResourceCommand::Restart));
     let commands = Arc::new(Mutex::new(Vec::new()));
     let runtime = ProviderRuntime::new(
-        vec![Arc::new(DockerWorkspace) as Arc<dyn virtui::provider::ProviderWorkspace>],
+        vec![Arc::new(DockerWorkspace) as Arc<dyn ProviderWorkspace>],
         Arc::new(ExpectedCli {
             commands: Arc::clone(&commands),
         }),
@@ -268,7 +268,7 @@ async fn a_resource_command_that_exits_non_zero_reaches_the_screen_as_a_failure(
         .next()
         .expect("restart request");
     let runtime = ProviderRuntime::new(
-        vec![Arc::new(DockerWorkspace) as Arc<dyn virtui::provider::ProviderWorkspace>],
+        vec![Arc::new(DockerWorkspace) as Arc<dyn ProviderWorkspace>],
         Arc::new(RejectingCli {
             stderr: "no such container".to_owned(),
         }),
@@ -331,7 +331,7 @@ async fn slow_provider_refresh_does_not_block_navigation() {
     let started = Arc::new(Notify::new());
     let release = Arc::new(Notify::new());
     let runtime = ProviderRuntime::new(
-        vec![Arc::new(DockerWorkspace) as Arc<dyn virtui::provider::ProviderWorkspace>],
+        vec![Arc::new(DockerWorkspace) as Arc<dyn ProviderWorkspace>],
         Arc::new(DelayedCli {
             started: Arc::clone(&started),
             release: Arc::clone(&release),
@@ -355,7 +355,7 @@ async fn slow_provider_refresh_does_not_block_navigation() {
 #[tokio::test]
 async fn provider_is_omitted_when_docker_cli_is_absent() {
     let runtime = ProviderRuntime::new(
-        vec![Arc::new(DockerWorkspace) as Arc<dyn virtui::provider::ProviderWorkspace>],
+        vec![Arc::new(DockerWorkspace) as Arc<dyn ProviderWorkspace>],
         Arc::new(MissingCli),
     );
     let mut app = App::new();

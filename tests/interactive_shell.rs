@@ -13,14 +13,14 @@ use std::{
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use virtui::{
-    application::{App, AppEvent, InteractiveShellProcess},
-    infrastructure::process::{InteractiveRunner, ProcessError, ProcessFailure, ProcessSpec},
-    presentation::render_to_text,
-    provider::{
-        DetailView, Provider, ProviderDiscovery, ProviderId, ProviderRequest, Resource,
-        ResourceCommand, ResourceId, ResourcePanel, ResourcePanelId, ResourceState,
-        TargetEnvironment, WorkspaceSnapshot,
+    application::{
+        App, AppEvent, DetailView, InteractiveShellProcess, ProviderRequest, Resource,
+        ResourceCommand, ResourcePanel, WorkspaceSnapshot,
     },
+    domain::{Provider, ProviderId, ResourceId, ResourcePanelId, ResourceState, TargetEnvironment},
+    infrastructure::process::{InteractiveRunner, ProcessError, ProcessFailure, ProcessSpec},
+    infrastructure::provider::ProviderDiscovery,
+    presentation::render_to_text,
     runtime::{ShellTerminal, handle_key, open_pending_shell},
 };
 

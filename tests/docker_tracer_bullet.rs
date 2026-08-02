@@ -1,12 +1,11 @@
 use virtui::{
-    application::{App, InteractiveShellProcess},
-    docker::DockerWorkspace,
-    infrastructure::process::{ProcessError, ProcessOutput, ProcessSpec},
-    presentation::render_to_text,
-    provider::{
-        DetailViewId, ProviderWorkspace, Resource, ResourceCommand, ResourceId, ResourcePanelId,
-        ResourceState, ResourceTarget,
+    application::{App, InteractiveShellProcess, Resource, ResourceCommand},
+    domain::{DetailViewId, ResourceId, ResourcePanelId, ResourceState, ResourceTarget},
+    infrastructure::{
+        process::{ProcessError, ProcessOutput, ProcessSpec},
+        provider::{DockerWorkspace, ProviderWorkspace},
     },
+    presentation::render_to_text,
 };
 
 mod common;
