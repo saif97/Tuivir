@@ -5,8 +5,8 @@ use crate::command::{Command, CommandRegistry, CommandScope, NUMBERED_RESOURCE_P
 use crate::keys::Key;
 use crate::provider::{
     DetailViewId, ProviderDiscovery, ProviderId, ProviderRequest, ProviderRequestId,
-    ResourceCommand, ResourceDetails, ResourceId, ResourcePanelId, ResourceState, ResourceTarget,
-    WorkspaceError, WorkspaceSnapshot,
+    ResourceCommand, ResourceDetails, ResourceId, ResourceState, ResourceTarget, WorkspaceError,
+    WorkspaceSnapshot,
 };
 use crate::workspace::{DetailCompletion, ProviderWorkspaceState};
 
@@ -52,8 +52,7 @@ pub enum AppEvent {
     ResourceDetailsCompleted {
         request_id: ProviderRequestId,
         provider_id: ProviderId,
-        panel_id: ResourcePanelId,
-        resource_id: ResourceId,
+        target: ResourceTarget,
         view_id: DetailViewId,
         result: Result<ResourceDetails, WorkspaceError>,
     },
@@ -285,19 +284,11 @@ impl App {
             AppEvent::ResourceDetailsCompleted {
                 request_id,
                 provider_id,
-                panel_id,
-                resource_id,
+                target,
                 view_id,
                 result,
             } => {
-                self.apply_details_completed(
-                    request_id,
-                    provider_id,
-                    panel_id,
-                    resource_id,
-                    view_id,
-                    result,
-                );
+                self.apply_details_completed(request_id, provider_id, target, view_id, result);
                 Vec::new()
             }
         }
@@ -527,8 +518,7 @@ impl App {
         vec![ProviderRequest::LoadResourceDetails {
             request_id,
             provider_id,
-            panel_id: target.panel_id,
-            resource_id: target.resource_id,
+            target,
             view_id,
         }]
     }
@@ -537,8 +527,7 @@ impl App {
         &mut self,
         request_id: ProviderRequestId,
         provider_id: ProviderId,
-        panel_id: ResourcePanelId,
-        resource_id: ResourceId,
+        target: ResourceTarget,
         view_id: DetailViewId,
         result: Result<ResourceDetails, WorkspaceError>,
     ) {
@@ -553,7 +542,7 @@ impl App {
         provider.complete_detail_load(DetailCompletion::new(
             request_id,
             provider_id,
-            ResourceTarget::new(panel_id, resource_id),
+            target,
             view_id,
             result,
         ));

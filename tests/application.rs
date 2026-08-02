@@ -379,8 +379,8 @@ fn keyboard_commands_drive_navigation_manual_refresh_and_quit() {
     // Moving the selection asks only for the newly selected Resource's details.
     assert!(matches!(
         requests.as_slice(),
-        [ProviderRequest::LoadResourceDetails { resource_id, .. }]
-            if resource_id == &ResourceId::new("container-b")
+        [ProviderRequest::LoadResourceDetails { target, .. }]
+            if target.resource_id() == &ResourceId::new("container-b")
     ));
     assert!(render_to_text(app.state(), 100, 24).contains("Image: alpine:3.21"));
 
@@ -1740,11 +1740,14 @@ fn settling_on_a_resource_requests_only_the_visible_detail_view() {
             &requests[0],
             ProviderRequest::LoadResourceDetails {
                 provider_id,
-                resource_id,
+                target,
                 view_id,
                 ..
             } if provider_id == &ProviderId::new("docker")
-                && resource_id == &ResourceId::new("container-a")
+                && target == &ResourceTarget::new(
+                    ResourcePanelId::new("containers"),
+                    ResourceId::new("container-a"),
+                )
                 && view_id == &DetailViewId::new("logs")
         ),
         "unexpected request: {:?}",
@@ -1996,12 +1999,13 @@ fn selecting_an_image_routes_details_by_panel_and_resource() {
         matches!(
             requests.as_slice(),
             [ProviderRequest::LoadResourceDetails {
-                panel_id,
-                resource_id,
+                target,
                 view_id,
                 ..
-            }] if panel_id == &ResourcePanelId::new("images")
-                && resource_id == &ResourceId::new("shared-id")
+            }] if target == &ResourceTarget::new(
+                    ResourcePanelId::new("images"),
+                    ResourceId::new("shared-id"),
+                )
                 && view_id == &DetailViewId::new("inspect")
         ),
         "unexpected requests: {requests:?}"
@@ -2144,8 +2148,8 @@ fn the_chosen_detail_view_survives_moving_to_another_resource() {
     assert!(
         matches!(
             requests.as_slice(),
-            [ProviderRequest::LoadResourceDetails { resource_id, view_id, .. }]
-                if resource_id == &ResourceId::new("container-b")
+            [ProviderRequest::LoadResourceDetails { target, view_id, .. }]
+                if target.resource_id() == &ResourceId::new("container-b")
                     && view_id == &DetailViewId::new("stats")
         ),
         "unexpected requests: {requests:?}"
@@ -2346,8 +2350,8 @@ fn a_refresh_that_removes_the_selected_resource_loads_the_new_selections_details
     assert!(
         matches!(
             &reloaded,
-            ProviderRequest::LoadResourceDetails { resource_id, .. }
-                if resource_id == &ResourceId::new("container-b")
+            ProviderRequest::LoadResourceDetails { target, .. }
+                if target.resource_id() == &ResourceId::new("container-b")
         ),
         "unexpected request: {reloaded:?}"
     );

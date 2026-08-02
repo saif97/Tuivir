@@ -477,8 +477,7 @@ async fn image_inspect_is_routed_through_the_images_panel() {
     let details = DockerWorkspace
         .load_details(
             &cli,
-            &ResourcePanelId::new("images"),
-            &ResourceId::new(identity),
+            &ResourceTarget::new(ResourcePanelId::new("images"), ResourceId::new(identity)),
             &DetailViewId::new("inspect"),
         )
         .await
@@ -517,8 +516,7 @@ async fn each_detail_view_runs_its_own_docker_command() {
         let details = DockerWorkspace
             .load_details(
                 &cli,
-                &ResourcePanelId::new("containers"),
-                &ResourceId::new("container-a"),
+                &target("containers", "container-a"),
                 &DetailViewId::new(view),
             )
             .await
@@ -546,8 +544,7 @@ async fn container_logs_include_what_the_container_wrote_to_stderr() {
     let details = DockerWorkspace
         .load_details(
             &cli,
-            &ResourcePanelId::new("containers"),
-            &ResourceId::new("container-a"),
+            &target("containers", "container-a"),
             &DetailViewId::new("logs"),
         )
         .await
@@ -572,8 +569,7 @@ async fn a_container_that_has_logged_nothing_loads_empty_details() {
     let details = DockerWorkspace
         .load_details(
             &cli,
-            &ResourcePanelId::new("containers"),
-            &ResourceId::new("container-a"),
+            &target("containers", "container-a"),
             &DetailViewId::new("logs"),
         )
         .await
@@ -592,8 +588,7 @@ async fn a_failed_detail_view_reports_what_docker_wrote_to_stderr() {
     let error = DockerWorkspace
         .load_details(
             &cli,
-            &ResourcePanelId::new("containers"),
-            &ResourceId::new("container-a"),
+            &target("containers", "container-a"),
             &DetailViewId::new("inspect"),
         )
         .await
@@ -614,8 +609,7 @@ async fn inspect_output_reaches_the_panel_line_for_line() {
     let details = DockerWorkspace
         .load_details(
             &cli,
-            &ResourcePanelId::new("containers"),
-            &ResourceId::new("container-a"),
+            &target("containers", "container-a"),
             &DetailViewId::new("inspect"),
         )
         .await
@@ -642,8 +636,7 @@ async fn a_detail_view_docker_never_declared_is_refused_without_running_anything
     let error = DockerWorkspace
         .load_details(
             &cli,
-            &ResourcePanelId::new("containers"),
-            &ResourceId::new("container-a"),
+            &target("containers", "container-a"),
             &DetailViewId::new("processes"),
         )
         .await
@@ -668,8 +661,7 @@ async fn a_detail_view_loaded_without_the_docker_cli_names_docker() {
     let error = DockerWorkspace
         .load_details(
             &cli,
-            &ResourcePanelId::new("containers"),
-            &ResourceId::new("container-a"),
+            &target("containers", "container-a"),
             &DetailViewId::new("logs"),
         )
         .await
@@ -691,8 +683,7 @@ async fn a_silent_detail_failure_names_the_view_and_container() {
     let error = DockerWorkspace
         .load_details(
             &cli,
-            &ResourcePanelId::new("containers"),
-            &ResourceId::new("container-a"),
+            &target("containers", "container-a"),
             &DetailViewId::new("stats"),
         )
         .await

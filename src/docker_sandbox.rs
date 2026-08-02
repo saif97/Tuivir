@@ -356,11 +356,12 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
     fn load_details<'a>(
         &'a self,
         cli: &'a dyn CliRunner,
-        panel_id: &'a ResourcePanelId,
-        resource_id: &'a ResourceId,
+        target: &'a ResourceTarget,
         view_id: &'a DetailViewId,
     ) -> Pin<Box<dyn Future<Output = Result<ResourceDetails, WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
+            let panel_id = target.panel_id();
+            let resource_id = target.resource_id();
             if panel_id.0 != SANDBOXES_PANEL_ID {
                 return Err(WorkspaceError::new(format!(
                     "Docker Sandbox has no {view_id} view for Resource Panel {panel_id}"

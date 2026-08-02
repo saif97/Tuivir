@@ -247,8 +247,7 @@ impl ProviderRuntime {
             ProviderRequest::LoadResourceDetails {
                 request_id,
                 provider_id,
-                panel_id,
-                resource_id,
+                target,
                 view_id,
             } => {
                 let Some(workspace) = self.workspace(&provider_id) else {
@@ -257,13 +256,12 @@ impl ProviderRuntime {
                 let cli = Arc::clone(&self.cli);
                 tokio::spawn(async move {
                     let result = workspace
-                        .load_details(cli.as_ref(), &panel_id, &resource_id, &view_id)
+                        .load_details(cli.as_ref(), &target, &view_id)
                         .await;
                     let _ = events.send(AppEvent::ResourceDetailsCompleted {
                         request_id,
                         provider_id,
-                        panel_id,
-                        resource_id,
+                        target,
                         view_id,
                         result,
                     });

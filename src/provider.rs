@@ -161,8 +161,7 @@ pub enum ProviderRequest {
     LoadResourceDetails {
         request_id: ProviderRequestId,
         provider_id: ProviderId,
-        panel_id: ResourcePanelId,
-        resource_id: ResourceId,
+        target: ResourceTarget,
         view_id: DetailViewId,
     },
 }
@@ -461,8 +460,7 @@ pub trait ProviderWorkspace: Send + Sync {
     fn load_details<'a>(
         &'a self,
         cli: &'a dyn CliRunner,
-        panel_id: &'a ResourcePanelId,
-        resource_id: &'a ResourceId,
+        target: &'a ResourceTarget,
         view_id: &'a DetailViewId,
     ) -> Pin<Box<dyn Future<Output = Result<ResourceDetails, WorkspaceError>> + Send + 'a>>;
 }

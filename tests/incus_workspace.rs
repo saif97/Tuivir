@@ -190,8 +190,7 @@ async fn each_detail_view_runs_its_own_incus_command() {
         let details = IncusWorkspace
             .load_details(
                 &cli,
-                &ResourcePanelId::new("instances"),
-                &ResourceId::new("gateway"),
+                &target("instances", "gateway"),
                 &DetailViewId::new(view),
             )
             .await
@@ -211,8 +210,7 @@ async fn an_instance_with_no_console_log_loads_empty_details() {
     let details = IncusWorkspace
         .load_details(
             &cli,
-            &ResourcePanelId::new("instances"),
-            &ResourceId::new("gateway"),
+            &target("instances", "gateway"),
             &DetailViewId::new("console-log"),
         )
         .await
@@ -231,8 +229,7 @@ async fn a_failed_detail_view_reports_what_incus_wrote_to_stderr() {
     let error = IncusWorkspace
         .load_details(
             &cli,
-            &ResourcePanelId::new("instances"),
-            &ResourceId::new("gateway"),
+            &target("instances", "gateway"),
             &DetailViewId::new("info"),
         )
         .await
@@ -253,8 +250,7 @@ async fn info_output_reaches_the_panel_line_for_line() {
     let details = IncusWorkspace
         .load_details(
             &cli,
-            &ResourcePanelId::new("instances"),
-            &ResourceId::new("gateway"),
+            &target("instances", "gateway"),
             &DetailViewId::new("info"),
         )
         .await
@@ -285,8 +281,7 @@ async fn a_detail_view_incus_never_declared_is_refused_without_running_anything(
     let error = IncusWorkspace
         .load_details(
             &cli,
-            &ResourcePanelId::new("instances"),
-            &ResourceId::new("gateway"),
+            &target("instances", "gateway"),
             &DetailViewId::new("stats"),
         )
         .await
@@ -308,8 +303,7 @@ async fn a_silent_detail_failure_names_the_view_and_instance() {
     let error = IncusWorkspace
         .load_details(
             &cli,
-            &ResourcePanelId::new("instances"),
-            &ResourceId::new("gateway"),
+            &target("instances", "gateway"),
             &DetailViewId::new("config"),
         )
         .await

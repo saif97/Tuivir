@@ -685,8 +685,7 @@ async fn the_info_view_describes_the_selected_sandbox() {
     let details = DockerSandboxWorkspace
         .load_details(
             &cli,
-            &ResourcePanelId::new("sandboxes"),
-            &ResourceId::new("claude-virtui"),
+            &target("sandboxes", "claude-virtui"),
             &DetailViewId::new("info"),
         )
         .await
@@ -719,8 +718,7 @@ async fn the_info_view_omits_ports_a_sandbox_does_not_publish() {
     let details = DockerSandboxWorkspace
         .load_details(
             &cli,
-            &ResourcePanelId::new("sandboxes"),
-            &ResourceId::new("shell-dotfiles"),
+            &target("sandboxes", "shell-dotfiles"),
             &DetailViewId::new("info"),
         )
         .await
@@ -751,8 +749,7 @@ async fn the_info_view_of_a_vanished_sandbox_is_empty_rather_than_broken() {
     let details = DockerSandboxWorkspace
         .load_details(
             &cli,
-            &ResourcePanelId::new("sandboxes"),
-            &ResourceId::new("deleted-since-the-last-refresh"),
+            &target("sandboxes", "deleted-since-the-last-refresh"),
             &DetailViewId::new("info"),
         )
         .await
@@ -770,8 +767,7 @@ async fn a_view_docker_sandbox_never_declared_is_refused_without_running_anythin
     let error = DockerSandboxWorkspace
         .load_details(
             &cli,
-            &ResourcePanelId::new("sandboxes"),
-            &ResourceId::new("claude-virtui"),
+            &target("sandboxes", "claude-virtui"),
             &DetailViewId::new("logs"),
         )
         .await
@@ -793,8 +789,7 @@ async fn a_failed_info_view_reports_what_sbx_wrote_to_stderr() {
     let error = DockerSandboxWorkspace
         .load_details(
             &cli,
-            &ResourcePanelId::new("sandboxes"),
-            &ResourceId::new("claude-virtui"),
+            &target("sandboxes", "claude-virtui"),
             &DetailViewId::new("info"),
         )
         .await

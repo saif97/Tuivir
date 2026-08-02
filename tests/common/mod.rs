@@ -177,14 +177,12 @@ pub fn details_completed(
         ProviderRequest::LoadResourceDetails {
             request_id,
             provider_id,
-            panel_id,
-            resource_id,
+            target,
             view_id,
         } => AppEvent::ResourceDetailsCompleted {
             request_id,
             provider_id,
-            panel_id,
-            resource_id,
+            target,
             view_id,
             result,
         },
