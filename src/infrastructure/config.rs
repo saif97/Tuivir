@@ -6,8 +6,7 @@ use std::{
 
 use serde::Deserialize;
 
-use crate::application::CommandRegistry;
-pub use crate::application::KeybindingError as ConfigError;
+use crate::application::{CommandRegistry, KeybindingError};
 
 /// The environment Virtui consults to discover its configuration file.
 ///
@@ -68,7 +67,7 @@ pub enum LoadError {
     /// The file parsed, but its keybindings were rejected.
     Invalid {
         path: PathBuf,
-        errors: Vec<ConfigError>,
+        errors: Vec<KeybindingError>,
     },
 }
 
