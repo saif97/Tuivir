@@ -44,7 +44,7 @@ fn workspace() -> ProviderWorkspaceState {
         Provider::new(
             ProviderId::new("docker"),
             "Docker",
-            TargetEnvironment::new("desktop-linux"),
+            Some(TargetEnvironment::new("desktop-linux")),
             None,
         ),
         None,
@@ -80,7 +80,7 @@ fn reconciling_the_first_snapshot_projects_one_coherent_workspace_view() {
     assert_eq!(view.id, &ProviderId::new("docker"));
     assert_eq!(
         view.target_environment,
-        &TargetEnvironment::new("desktop-linux")
+        Some(&TargetEnvironment::new("desktop-linux"))
     );
     assert_eq!(
         view.focused_resource_panel,

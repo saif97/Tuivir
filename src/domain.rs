@@ -70,7 +70,7 @@ impl fmt::Display for ProviderVersion {
 pub struct Provider {
     id: ProviderId,
     name: String,
-    target_environment: TargetEnvironment,
+    target_environment: Option<TargetEnvironment>,
     version: Option<ProviderVersion>,
 }
 
@@ -78,7 +78,7 @@ impl Provider {
     pub fn new(
         id: ProviderId,
         name: impl Into<String>,
-        target_environment: TargetEnvironment,
+        target_environment: Option<TargetEnvironment>,
         version: Option<ProviderVersion>,
     ) -> Self {
         Self {
@@ -97,8 +97,8 @@ impl Provider {
         &self.name
     }
 
-    pub fn target_environment(&self) -> &TargetEnvironment {
-        &self.target_environment
+    pub fn target_environment(&self) -> Option<&TargetEnvironment> {
+        self.target_environment.as_ref()
     }
 
     pub fn version(&self) -> Option<&ProviderVersion> {

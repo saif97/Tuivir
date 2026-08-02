@@ -4,7 +4,7 @@ use virtui::{
     application::{App, Command, InteractiveShellProcess, ProviderRequest, ResourceCommand},
     domain::{
         DetailViewId, ProviderId, ProviderVersion, ResourceId, ResourcePanelId, ResourceState,
-        ResourceTarget, TargetEnvironment,
+        ResourceTarget,
     },
     infrastructure::runtime::ProviderRuntime,
     infrastructure::{
@@ -46,10 +46,7 @@ async fn docker_sandbox_keeps_provider_version_separate_from_its_target_environm
         &ProviderId::new("docker-sandbox")
     );
     assert_eq!(discovered.provider().name(), "Docker Sandbox");
-    assert_eq!(
-        discovered.provider().target_environment(),
-        &TargetEnvironment::new("local")
-    );
+    assert_eq!(discovered.provider().target_environment(), None);
     assert_eq!(
         discovered.provider().version(),
         Some(&ProviderVersion::new("v0.37.0"))
@@ -396,7 +393,7 @@ async fn command_availability_follows_the_last_refreshed_state() {
 }
 
 #[tokio::test]
-async fn discovered_docker_sandbox_renders_target_environment_and_sandboxes() {
+async fn discovered_docker_sandbox_omits_an_unselected_environment() {
     let cli = FixtureCli::new([
         (
             ProcessSpec::new("sbx", &["version"]),
@@ -427,7 +424,8 @@ async fn discovered_docker_sandbox_renders_target_environment_and_sandboxes() {
 
     let screen = render_to_text(app.state(), 100, 24);
     assert!(screen.contains("Docker Sandbox"), "{screen}");
-    assert!(screen.contains("[ Docker Sandbox · local ]"), "{screen}");
+    assert!(screen.contains("[ Docker Sandbox ]"), "{screen}");
+    assert!(!screen.contains("Docker Sandbox ·"), "{screen}");
     assert!(screen.contains("Sandboxes"), "{screen}");
     assert!(screen.contains("claude-virtui"), "{screen}");
     assert!(screen.contains("running"), "{screen}");
@@ -461,7 +459,7 @@ async fn reachable_docker_sandbox_without_sandboxes_renders_a_distinct_empty_sta
     app.update(refresh_completed(request, sandboxes.refresh(&cli).await));
 
     let screen = render_to_text(app.state(), 100, 24);
-    assert!(screen.contains("[ Docker Sandbox · local ]"), "{screen}");
+    assert!(screen.contains("[ Docker Sandbox ]"), "{screen}");
     assert!(
         screen.contains("No Docker Sandbox sandboxes found"),
         "{screen}"
@@ -501,7 +499,7 @@ async fn runtime_with_builtin_providers_discovers_installed_docker_sandbox() {
         &ProviderId::new("docker-sandbox")
     );
     assert_eq!(discovered[0].provider().name(), "Docker Sandbox");
-    assert_eq!(discovered[0].provider().target_environment(), &"local");
+    assert_eq!(discovered[0].provider().target_environment(), None);
     assert_eq!(
         discovered[0].provider().version(),
         Some(&ProviderVersion::new("v0.37.0"))
@@ -939,7 +937,7 @@ async fn installed_docker_sandbox_that_cannot_list_stays_visible_with_an_actiona
         .expect("an installed sbx is never omitted");
 
     assert_eq!(discovered.provider().name(), "Docker Sandbox");
-    assert_eq!(discovered.provider().target_environment(), &"unavailable");
+    assert_eq!(discovered.provider().target_environment(), None);
     assert_eq!(
         discovered
             .error()

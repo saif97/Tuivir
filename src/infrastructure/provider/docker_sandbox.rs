@@ -8,8 +8,8 @@ use crate::{
     infrastructure::provider::{
         DetailView, DetailViewId, Provider, ProviderDiscovery, ProviderId, ProviderVersion,
         ProviderWorkspace, Resource, ResourceCommand, ResourceDetails, ResourceId, ResourcePanel,
-        ResourcePanelId, ResourceState, ResourceTarget, TargetEnvironment, WorkspaceError,
-        WorkspaceSnapshot, provider_cli_error,
+        ResourcePanelId, ResourceState, ResourceTarget, WorkspaceError, WorkspaceSnapshot,
+        provider_cli_error,
     },
 };
 
@@ -170,12 +170,7 @@ fn refresh_error(message: impl AsRef<str>) -> WorkspaceError {
 
 fn discovery_error(message: impl AsRef<str>) -> ProviderDiscovery {
     ProviderDiscovery::new(
-        Provider::new(
-            ProviderId::new(PROVIDER_ID),
-            PROVIDER_NAME,
-            TargetEnvironment::new("unavailable"),
-            None,
-        ),
+        Provider::new(ProviderId::new(PROVIDER_ID), PROVIDER_NAME, None, None),
         Some(WorkspaceError::with_help(
             message,
             "Run `sbx ls` to verify sandboxd is running and you are signed in to Docker.",
@@ -278,12 +273,7 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
             }
 
             Some(ProviderDiscovery::new(
-                Provider::new(
-                    self.id(),
-                    PROVIDER_NAME,
-                    TargetEnvironment::new("local"),
-                    Some(version),
-                ),
+                Provider::new(self.id(), PROVIDER_NAME, None, Some(version)),
                 None,
             ))
         })

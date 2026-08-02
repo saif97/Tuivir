@@ -89,7 +89,7 @@ impl ProviderWorkspace for IncusWorkspace {
                 Provider::new(
                     self.id(),
                     PROVIDER_NAME,
-                    TargetEnvironment::new(format!("{remote} / {project}")),
+                    Some(TargetEnvironment::new(format!("{remote} / {project}"))),
                     None,
                 ),
                 None,
@@ -290,12 +290,7 @@ fn instance_shell(state: ResourceState, name: &str) -> Option<InteractiveShellPr
 
 fn discovery_error(message: impl AsRef<str>, command: &str) -> ProviderDiscovery {
     ProviderDiscovery::new(
-        Provider::new(
-            ProviderId::new(PROVIDER_ID),
-            PROVIDER_NAME,
-            TargetEnvironment::new("unavailable"),
-            None,
-        ),
+        Provider::new(ProviderId::new(PROVIDER_ID), PROVIDER_NAME, None, None),
         Some(WorkspaceError::with_help(
             message,
             &format!("Run `{command}` to verify the selected Target Environment."),

@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use virtui::{
     application::{App, InteractiveShellProcess, ResourceCommand},
-    domain::{DetailViewId, ResourceId, ResourcePanelId, ResourceState, ResourceTarget},
+    domain::{
+        DetailViewId, ResourceId, ResourcePanelId, ResourceState, ResourceTarget, TargetEnvironment,
+    },
     infrastructure::process::{ProcessError, ProcessOutput, ProcessSpec},
     infrastructure::provider::{IncusWorkspace, ProviderWorkspace},
     infrastructure::runtime::ProviderRuntime,
@@ -773,6 +775,6 @@ async fn runtime_with_builtin_providers_discovers_installed_incus() {
     assert_eq!(discovered[0].provider().name(), "Incus");
     assert_eq!(
         discovered[0].provider().target_environment(),
-        &"local / default"
+        Some(&TargetEnvironment::new("local / default"))
     );
 }

@@ -898,7 +898,7 @@ async fn docker_that_fails_silently_at_discovery_still_explains_itself() {
         "workspace error: {}",
         error.message
     );
-    assert_eq!(discovered.provider().target_environment(), &"unavailable");
+    assert_eq!(discovered.provider().target_environment(), None);
 }
 
 #[tokio::test]

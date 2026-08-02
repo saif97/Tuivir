@@ -81,7 +81,7 @@ fn docker_discovery() -> ProviderDiscovery {
         Provider::new(
             ProviderId::new("docker"),
             "Docker",
-            TargetEnvironment::new("desktop-linux"),
+            Some(TargetEnvironment::new("desktop-linux")),
             None,
         ),
         None,
@@ -93,7 +93,7 @@ fn fixture_discovery() -> ProviderDiscovery {
         Provider::new(
             ProviderId::new("fixture"),
             "Fixture",
-            TargetEnvironment::new("local"),
+            Some(TargetEnvironment::new("local")),
             None,
         ),
         None,
@@ -105,7 +105,7 @@ fn incus_discovery() -> ProviderDiscovery {
         Provider::new(
             ProviderId::new("incus"),
             "Incus",
-            TargetEnvironment::new("local / default"),
+            Some(TargetEnvironment::new("local / default")),
             None,
         ),
         None,

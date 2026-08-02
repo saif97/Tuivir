@@ -5,7 +5,7 @@ Virtui is a terminal environment for inspecting and operating resources managed 
 ## Language
 
 **Provider**:
-An installed system that owns and operates resources, such as Docker, Incus, or Docker Sandbox. Its domain record keeps its stable identity, display name, Target Environment, and optional Provider Version together.
+An installed system that owns and operates resources, such as Docker, Incus, or Docker Sandbox. Its domain record keeps its stable identity and display name together with its optional Target Environment and Provider Version.
 _Avoid_: Backend, runtime, engine
 
 **Provider Discovery**:

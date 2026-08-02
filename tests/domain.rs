@@ -1,23 +1,20 @@
 use virtui::domain::{
     DetailViewId, Provider, ProviderId, ProviderVersion, ResourceId, ResourcePanelId,
-    ResourceState, ResourceTarget, TargetEnvironment,
+    ResourceState, ResourceTarget,
 };
 
 #[test]
-fn a_provider_keeps_its_identity_environment_and_version_together() {
+fn a_provider_can_omit_a_target_environment_without_losing_its_version() {
     let provider = Provider::new(
         ProviderId::new("docker-sandbox"),
         "Docker Sandbox",
-        TargetEnvironment::new("local"),
+        None,
         Some(ProviderVersion::new("v0.37.0")),
     );
 
     assert_eq!(provider.id(), &ProviderId::new("docker-sandbox"));
     assert_eq!(provider.name(), "Docker Sandbox");
-    assert_eq!(
-        provider.target_environment(),
-        &TargetEnvironment::new("local")
-    );
+    assert_eq!(provider.target_environment(), None);
     assert_eq!(provider.version(), Some(&ProviderVersion::new("v0.37.0")));
 }
 

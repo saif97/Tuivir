@@ -76,7 +76,7 @@ impl ProviderWorkspace for DockerWorkspace {
                     Provider::new(
                         self.id(),
                         PROVIDER_NAME,
-                        TargetEnvironment::new(output.stdout.trim()),
+                        Some(TargetEnvironment::new(output.stdout.trim())),
                         None,
                     ),
                     None,
@@ -375,12 +375,7 @@ fn container_shell(state: ResourceState, resource_id: &str) -> Option<Interactiv
 fn discovery_with_error(message: impl Into<String>) -> ProviderDiscovery {
     let message = message.into();
     ProviderDiscovery::new(
-        Provider::new(
-            ProviderId::new(PROVIDER_ID),
-            PROVIDER_NAME,
-            TargetEnvironment::new("unavailable"),
-            None,
-        ),
+        Provider::new(ProviderId::new(PROVIDER_ID), PROVIDER_NAME, None, None),
         Some(WorkspaceError::with_help(
             message,
             "Run `docker context show` to verify the selected context and ensure Docker is running.",

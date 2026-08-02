@@ -106,7 +106,7 @@ fn docker_discovery() -> ProviderDiscovery {
         Provider::new(
             ProviderId::new("docker"),
             "Docker",
-            TargetEnvironment::new("desktop-linux"),
+            Some(TargetEnvironment::new("desktop-linux")),
             None,
         ),
         None,

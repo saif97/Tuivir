@@ -137,7 +137,7 @@ impl ProviderWorkspaceState {
         self.provider.name()
     }
 
-    pub fn target_environment(&self) -> &TargetEnvironment {
+    pub fn target_environment(&self) -> Option<&TargetEnvironment> {
         self.provider.target_environment()
     }
 
@@ -582,7 +582,7 @@ impl ProviderWorkspaceState {
 pub struct WorkspaceView<'a> {
     pub id: &'a ProviderId,
     pub name: &'a str,
-    pub target_environment: &'a TargetEnvironment,
+    pub target_environment: Option<&'a TargetEnvironment>,
     pub version: Option<&'a ProviderVersion>,
     pub focused_resource_panel: Option<&'a ResourcePanelId>,
     pub panels: Vec<ResourcePanelView<'a>>,
