@@ -7,7 +7,7 @@ use crate::{
     provider::{
         DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderWorkspace, Resource,
         ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourcePanelId,
-        ResourceState, WorkspaceError, WorkspaceSnapshot, provider_cli_error,
+        ResourceState, TargetEnvironment, WorkspaceError, WorkspaceSnapshot, provider_cli_error,
     },
 };
 
@@ -86,7 +86,8 @@ impl ProviderWorkspace for IncusWorkspace {
             Some(ProviderDiscovery {
                 id: self.id(),
                 name: PROVIDER_NAME.to_owned(),
-                target_environment: format!("{remote} / {project}"),
+                target_environment: TargetEnvironment::new(format!("{remote} / {project}")),
+                version: None,
                 error: None,
             })
         })
@@ -285,7 +286,8 @@ fn discovery_error(message: impl AsRef<str>, command: &str) -> ProviderDiscovery
     ProviderDiscovery {
         id: ProviderId::new(PROVIDER_ID),
         name: PROVIDER_NAME.to_owned(),
-        target_environment: "unavailable".to_owned(),
+        target_environment: TargetEnvironment::new("unavailable"),
+        version: None,
         error: Some(WorkspaceError::with_help(
             message,
             &format!("Run `{command}` to verify the selected Target Environment."),

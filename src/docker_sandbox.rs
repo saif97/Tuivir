@@ -5,9 +5,10 @@ use serde::Deserialize;
 use crate::{
     cli::{CliRunner, ProcessError, ProcessSpec},
     provider::{
-        DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderWorkspace, Resource,
-        ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourcePanelId,
-        ResourceState, WorkspaceError, WorkspaceSnapshot, provider_cli_error,
+        DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderVersion,
+        ProviderWorkspace, Resource, ResourceCommand, ResourceDetails, ResourceId, ResourcePanel,
+        ResourcePanelId, ResourceState, TargetEnvironment, WorkspaceError, WorkspaceSnapshot,
+        provider_cli_error,
     },
 };
 
@@ -170,7 +171,8 @@ fn discovery_error(message: impl AsRef<str>) -> ProviderDiscovery {
     ProviderDiscovery {
         id: ProviderId::new(PROVIDER_ID),
         name: PROVIDER_NAME.to_owned(),
-        target_environment: "unavailable".to_owned(),
+        target_environment: TargetEnvironment::new("unavailable"),
+        version: None,
         error: Some(WorkspaceError::with_help(
             message,
             "Run `sbx ls` to verify sandboxd is running and you are signed in to Docker.",
@@ -226,20 +228,15 @@ fn sandbox_command(command: ResourceCommand, resource_id: &str) -> Option<Vec<&s
     }
 }
 
-/// The version out of `sbx version: v0.37.0 <commit>`.
+/// The Provider version out of `sbx version: v0.37.0 <commit>`.
 ///
-/// The build commit identifies nothing the user is targeting, so only the
-/// version reaches the Target Environment. An unrecognised line is shown whole
-/// rather than guessed at.
-fn sbx_version(output: &str) -> String {
+/// The build commit is deliberately omitted. An unrecognised line is kept
+/// whole rather than guessed at.
+fn sbx_version(output: &str) -> ProviderVersion {
     let reported = output.trim();
     match reported.strip_prefix("sbx version:") {
-        Some(rest) => rest
-            .split_whitespace()
-            .next()
-            .unwrap_or(reported)
-            .to_owned(),
-        None => reported.to_owned(),
+        Some(rest) => ProviderVersion::new(rest.split_whitespace().next().unwrap_or(reported)),
+        None => ProviderVersion::new(reported),
     }
 }
 
@@ -280,7 +277,8 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
             Some(ProviderDiscovery {
                 id: self.id(),
                 name: PROVIDER_NAME.to_owned(),
-                target_environment: version,
+                target_environment: TargetEnvironment::new("local"),
+                version: Some(version),
                 error: None,
             })
         })

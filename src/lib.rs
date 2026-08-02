@@ -9,3 +9,4 @@ pub mod keys;
 pub mod provider;
 pub mod runtime;
 pub mod ui;
+pub mod workspace;

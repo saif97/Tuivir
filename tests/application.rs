@@ -8,17 +8,18 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::Color;
 use tokio::sync::{Notify, mpsc};
 use virtui::{
-    app::{App, AppEvent, AppState, FocusedPane, WorkspaceState},
+    app::{App, AppEvent, AppState, FocusedPane},
     cli::{CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec},
     command::{Command, CommandRegistry, CommandScope},
     docker::DockerWorkspace,
     provider::{
         DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderRequest, Resource,
         ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourcePanelId,
-        ResourceState, ResourceTarget, WorkspaceError, WorkspaceSnapshot,
+        ResourceState, ResourceTarget, TargetEnvironment, WorkspaceError, WorkspaceSnapshot,
     },
     runtime::{ProviderRuntime, RefreshTimer, ShellControl, handle_key},
     ui::{render_foreground_colours, render_to_text},
+    workspace::WorkspaceLoadState,
 };
 
 /// Reports the single foreground colour `text` is rendered in, panicking when
@@ -48,7 +49,8 @@ fn docker_discovery() -> ProviderDiscovery {
     ProviderDiscovery {
         id: ProviderId::new("docker"),
         name: "Docker".to_owned(),
-        target_environment: "desktop-linux".to_owned(),
+        target_environment: TargetEnvironment::new("desktop-linux"),
+        version: None,
         error: None,
     }
 }
@@ -57,7 +59,8 @@ fn fixture_discovery() -> ProviderDiscovery {
     ProviderDiscovery {
         id: ProviderId::new("fixture"),
         name: "Fixture".to_owned(),
-        target_environment: "local".to_owned(),
+        target_environment: TargetEnvironment::new("local"),
+        version: None,
         error: None,
     }
 }
@@ -66,7 +69,8 @@ fn incus_discovery() -> ProviderDiscovery {
     ProviderDiscovery {
         id: ProviderId::new("incus"),
         name: "Incus".to_owned(),
-        target_environment: "local / default".to_owned(),
+        target_environment: TargetEnvironment::new("local / default"),
+        version: None,
         error: None,
     }
 }
@@ -607,7 +611,7 @@ fn returning_from_a_shell_refreshes_the_active_workspace_and_preserves_selection
     ));
 
     assert_eq!(
-        app.state().providers[0].selected_resource,
+        app.state().providers[0].selected_resource_target(),
         Some(ResourceTarget::new(
             ResourcePanelId::new("containers"),
             ResourceId::new("container-b")
@@ -1902,8 +1906,8 @@ fn a_workspace_over_the_numbered_panel_capacity_is_refused() {
     app.update(refresh_completed(initial, Ok(WorkspaceSnapshot { panels })));
 
     assert!(matches!(
-        &app.state().providers[0].workspace_state,
-        WorkspaceState::Error(error)
+        app.state().providers[0].load_state(),
+        WorkspaceLoadState::Error(error)
             if error.message.contains("supports at most 9 Resource Panels")
     ));
 }
@@ -1959,15 +1963,32 @@ fn direct_focus_commands_target_each_resource_panel_and_details() {
     ));
 
     app.invoke(Command::FocusResourcePanel(1));
-    assert_eq!(
-        app.state().focused_pane,
-        FocusedPane::ResourcePanel(ResourcePanelId::new("images"))
-    );
+    assert_eq!(app.state().focused_pane, FocusedPane::Resources);
     assert_eq!(app.active_scope(), CommandScope::ResourcePanel(1));
 
     app.invoke(Command::FocusDetails);
     assert_eq!(app.state().focused_pane, FocusedPane::Details);
     assert_eq!(app.active_scope(), CommandScope::Details);
+}
+
+#[test]
+fn removing_the_focused_resource_panel_reconciles_its_command_scope() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(docker_multi_panel_snapshot()),
+    ));
+    app.invoke(Command::FocusResourcePanel(1));
+    assert_eq!(app.active_scope(), CommandScope::ResourcePanel(1));
+    let refresh = refresh_request(app.invoke(Command::Refresh));
+
+    app.update(refresh_completed(
+        refresh,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+
+    assert_eq!(app.active_scope(), CommandScope::ResourcePanel(0));
 }
 
 #[test]
@@ -1980,14 +2001,20 @@ fn focus_cycles_through_provider_order_and_wraps() {
     ));
 
     let expected = [
-        FocusedPane::ResourcePanel(ResourcePanelId::new("images")),
-        FocusedPane::Details,
-        FocusedPane::Providers,
-        FocusedPane::ResourcePanel(ResourcePanelId::new("containers")),
+        (FocusedPane::Resources, Some("images")),
+        (FocusedPane::Details, None),
+        (FocusedPane::Providers, None),
+        (FocusedPane::Resources, Some("containers")),
     ];
-    for focused in expected {
+    for (focused, panel_id) in expected {
         app.invoke(Command::FocusNextPane);
         assert_eq!(app.state().focused_pane, focused);
+        if let Some(panel_id) = panel_id {
+            assert_eq!(
+                app.state().providers[0].focused_resource_panel(),
+                Some(&ResourcePanelId::new(panel_id))
+            );
+        }
     }
 
     app.invoke(Command::FocusPreviousPane);
@@ -2021,23 +2048,19 @@ fn every_workspace_and_resource_panel_restores_its_navigation_state() {
     app.invoke(Command::PreviousWorkspace);
 
     let docker = &app.state().providers[0];
+    let WorkspaceLoadState::Ready(snapshot) = docker.load_state() else {
+        panic!("Docker is ready");
+    };
+    let view = docker.view(snapshot);
     assert_eq!(
-        docker.focused_resource_panel,
-        Some(ResourcePanelId::new("images"))
+        view.focused_resource_panel,
+        Some(&ResourcePanelId::new("images"))
     );
+    assert_eq!(app.state().focused_pane, FocusedPane::Resources);
     assert_eq!(
-        app.state().focused_pane,
-        FocusedPane::ResourcePanel(ResourcePanelId::new("images"))
-    );
-    assert_eq!(
-        docker
-            .panel_navigation
+        view.panels
             .iter()
-            .map(|panel| (
-                &panel.panel_id,
-                panel.selected_resource.as_ref(),
-                panel.scroll
-            ))
+            .map(|panel| (&panel.panel.id, panel.selected_resource, panel.scroll))
             .collect::<Vec<_>>(),
         vec![
             (

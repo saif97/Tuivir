@@ -8,6 +8,10 @@ Virtui is a terminal environment for inspecting and operating resources managed 
 An installed system that owns and operates resources, such as Docker, Incus, or Docker Sandbox.
 _Avoid_: Backend, runtime, engine
 
+**Provider Version**:
+Build information reported by an installed Provider. It describes the Provider itself and never identifies the Target Environment that owns the Resources Virtui operates.
+_Avoid_: Target version, environment version
+
 **Provider Workspace**:
 The provider-specific view of its native resources and operations within Virtui.
 _Avoid_: Provider tab, unified resource view

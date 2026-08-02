@@ -8,8 +8,11 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph},
 };
 
-use crate::app::{AppState, DetailContent, FocusedPane, ProviderState, WorkspaceState};
+use crate::app::{AppState, FocusedPane};
 use crate::provider::ResourceState;
+use crate::workspace::{
+    DetailContent, ResourceDetailsView, ResourcePanelView, WorkspacePresentation, WorkspaceView,
+};
 
 pub fn render(state: &AppState, frame: &mut Frame<'_>) {
     let status_height = u16::from(!state.running_commands.is_empty());
@@ -41,23 +44,21 @@ pub fn render(state: &AppState, frame: &mut Frame<'_>) {
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(48), Constraint::Percentage(52)])
         .split(rows[1]);
-    let focused_resource_panel = match &state.focused_pane {
-        FocusedPane::ResourcePanel(panel_id) => Some(panel_id),
-        FocusedPane::Providers | FocusedPane::FirstResourcePanel | FocusedPane::Details => None,
+    let presentation = provider.presentation();
+    let workspace_view = match &presentation {
+        WorkspacePresentation::Ready(view) => Some(view),
+        WorkspacePresentation::Loading { .. } | WorkspacePresentation::Error { .. } => None,
     };
     render_workspace_panel(
-        provider,
-        focused_resource_panel,
-        matches!(
-            &state.focused_pane,
-            FocusedPane::FirstResourcePanel | FocusedPane::ResourcePanel(_)
-        ),
+        &presentation,
+        matches!(&state.focused_pane, FocusedPane::Resources),
         &state.hints.focus_resource_panels,
         frame,
         columns[0],
     );
     render_details_panel(
-        provider,
+        provider.name(),
+        workspace_view,
         state.focused_pane == FocusedPane::Details,
         state.hints.focus_details.as_deref(),
         frame,
@@ -193,26 +194,29 @@ fn render_provider_bar(state: &AppState, frame: &mut Frame<'_>, area: Rect) {
         }
         if Some(index) == state.active_provider {
             provider_spans.push(Span::styled(
-                format!("[ {} · {} ]", provider.name, provider.target_environment),
+                format!(
+                    "[ {} · {} ]",
+                    provider.name(),
+                    provider.target_environment()
+                ),
                 Style::default().add_modifier(Modifier::BOLD),
             ));
         } else {
-            provider_spans.push(Span::raw(provider.name.as_str()));
+            provider_spans.push(Span::raw(provider.name()));
         }
     }
     frame.render_widget(Paragraph::new(Line::from(provider_spans)), area);
 }
 
 fn render_workspace_panel(
-    provider: &ProviderState,
-    focused_panel: Option<&crate::provider::ResourcePanelId>,
+    presentation: &WorkspacePresentation<'_>,
     resource_focus: bool,
     resource_hints: &[Option<String>],
     frame: &mut Frame<'_>,
     area: Rect,
 ) {
-    match &provider.workspace_state {
-        WorkspaceState::Loading => frame.render_widget(
+    match presentation {
+        WorkspacePresentation::Loading { .. } => frame.render_widget(
             Paragraph::new("Refreshing…").block(pane_block(
                 pane_title(
                     resource_hints.first().and_then(Option::as_deref),
@@ -223,10 +227,10 @@ fn render_workspace_panel(
             )),
             area,
         ),
-        WorkspaceState::Error(error) => frame.render_widget(
+        WorkspacePresentation::Error { name, error } => frame.render_widget(
             Paragraph::new(vec![
                 Line::styled(
-                    format!("{} provider is unavailable", provider.name),
+                    format!("{name} provider is unavailable"),
                     Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
                 ),
                 Line::from(error.message.as_str()),
@@ -242,8 +246,8 @@ fn render_workspace_panel(
             )),
             area,
         ),
-        WorkspaceState::Ready(snapshot) => {
-            if snapshot.panels.is_empty() {
+        WorkspacePresentation::Ready(view) => {
+            if view.panels.is_empty() {
                 frame.render_widget(
                     Paragraph::new("No Resource Panels available").block(pane_block(
                         pane_title(
@@ -264,22 +268,22 @@ fn render_workspace_panel(
             let panel_areas = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints(
-                    snapshot
-                        .panels
+                    view.panels
                         .iter()
-                        .map(|panel| Constraint::Fill(panel.resources.len().max(1) as u16))
+                        .map(|panel| Constraint::Fill(panel.panel.resources.len().max(1) as u16))
                         .collect::<Vec<_>>(),
                 )
                 .split(area);
-            for (index, (panel, area)) in snapshot
+            for (index, (panel, area)) in view
                 .panels
                 .iter()
                 .zip(panel_areas.iter().copied())
                 .enumerate()
             {
-                let focused = focused_panel == Some(&panel.id);
+                let focused =
+                    resource_focus && view.focused_resource_panel == Some(&panel.panel.id);
                 render_resource_panel(
-                    provider,
+                    view.name,
                     panel,
                     resource_hints.get(index).and_then(Option::as_deref),
                     focused,
@@ -292,13 +296,14 @@ fn render_workspace_panel(
 }
 
 fn render_resource_panel(
-    provider: &ProviderState,
-    panel: &crate::provider::ResourcePanel,
+    provider_name: &str,
+    view: &ResourcePanelView<'_>,
     resources_hint: Option<&str>,
     focused: bool,
     frame: &mut Frame<'_>,
     area: Rect,
 ) {
+    let panel = view.panel;
     // A row names its Resource and, where the Resource has one, says what it is
     // doing. Everything else a Provider reported is in the Details pane, so a
     // row never has to compete for width with it.
@@ -306,10 +311,7 @@ fn render_resource_panel(
         .resources
         .iter()
         .map(|resource| {
-            let marker = if provider.panel_navigation.iter().any(|navigation| {
-                navigation.panel_id == panel.id
-                    && navigation.selected_resource.as_ref() == Some(&resource.id)
-            }) {
+            let marker = if view.selected_resource == Some(&resource.id) {
                 ">"
             } else {
                 " "
@@ -330,21 +332,18 @@ fn render_resource_panel(
     if items.is_empty() {
         items.push(ListItem::new(format!(
             "No {} {} found",
-            provider.name,
+            provider_name,
             panel.title.to_lowercase()
         )));
     }
-    let selected = provider
-        .panel_navigation
-        .iter()
-        .find(|navigation| navigation.panel_id == panel.id)
-        .and_then(|navigation| navigation.selected_resource.as_ref())
-        .and_then(|selected| {
-            panel
-                .resources
-                .iter()
-                .position(|resource| &resource.id == selected)
-        });
+    let selected = view.selected_resource.and_then(|selected| {
+        panel
+            .resources
+            .iter()
+            .position(|resource| &resource.id == selected)
+    });
+    // Ratatui owns the viewport height and keeps earlier rows visible until the
+    // cursor leaves it; Workspace state supplies the remembered selection.
     let mut state = ListState::default().with_selected(selected);
     frame.render_stateful_widget(
         List::new(items).block(pane_block(
@@ -411,39 +410,41 @@ fn pane_block(title: String, focused: bool) -> Block<'static> {
 }
 
 fn render_details_panel(
-    provider: &ProviderState,
+    provider_name: &str,
+    view: Option<&WorkspaceView<'_>>,
     focused: bool,
     details_hint: Option<&str>,
     frame: &mut Frame<'_>,
     area: Rect,
 ) {
-    let summary = match &provider.workspace_state {
-        WorkspaceState::Ready(snapshot) => provider
-            .selected_resource
-            .as_ref()
-            .and_then(|selected| snapshot.resource(&selected.panel_id, &selected.resource_id))
-            .map(|resource| {
-                let mut lines = vec![Line::styled(
-                    resource.name.clone(),
-                    Style::default().add_modifier(Modifier::BOLD),
-                )];
-                lines.extend(
-                    resource
-                        .fields
-                        .iter()
-                        .map(|(label, value)| Line::from(format!("{label}: {value}"))),
-                );
-                lines
-            })
-            .unwrap_or_else(|| vec![Line::from("Select a resource")]),
-        _ => vec![Line::from("No details available")],
-    };
+    let summary = view
+        .and_then(|view| view.selected_resource)
+        .map(|resource| {
+            let mut lines = vec![Line::styled(
+                resource.name.clone(),
+                Style::default().add_modifier(Modifier::BOLD),
+            )];
+            lines.extend(
+                resource
+                    .fields
+                    .iter()
+                    .map(|(label, value)| Line::from(format!("{label}: {value}"))),
+            );
+            lines
+        })
+        .unwrap_or_else(|| {
+            if view.is_some() {
+                vec![Line::from("Select a resource")]
+            } else {
+                vec![Line::from("No details available")]
+            }
+        });
 
     let block = pane_block(pane_title(details_hint, "Details", focused), focused);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let views = provider.detail_views();
+    let views = view.map_or(&[][..], |view| view.detail_views);
     // The view strip is a control, not another summary field, so it gets a
     // blank line to sit behind rather than running straight into the fields.
     let rows = Layout::default()
@@ -462,19 +463,24 @@ fn render_details_panel(
     if views.is_empty() {
         return;
     }
-    render_detail_content(provider, frame, rows[2]);
+    if let Some(details) = view.and_then(|view| view.details) {
+        render_detail_content(provider_name, details, frame, rows[2]);
+    }
     let mut spans = Vec::new();
-    for view in views {
+    for detail_view in views {
         if !spans.is_empty() {
             spans.push(Span::raw("  "));
         }
-        if provider.selected_detail_view.as_ref() == Some(&view.id) {
+        if view
+            .and_then(|workspace| workspace.selected_detail_view)
+            .is_some_and(|selected| selected.id == detail_view.id)
+        {
             spans.push(Span::styled(
-                format!("[ {} ]", view.title),
+                format!("[ {} ]", detail_view.title),
                 Style::default().add_modifier(Modifier::BOLD),
             ));
         } else {
-            spans.push(Span::raw(view.title.as_str()));
+            spans.push(Span::raw(detail_view.title.as_str()));
         }
     }
     frame.render_widget(
@@ -487,16 +493,18 @@ fn render_details_panel(
 ///
 /// An empty view and a failed one are told apart deliberately: a container that
 /// has logged nothing is not a broken one, and neither must read as the other.
-fn render_detail_content(provider: &ProviderState, frame: &mut Frame<'_>, area: Rect) {
-    let Some(details) = &provider.details else {
-        return;
-    };
-    let lines = match &details.content {
+fn render_detail_content(
+    provider_name: &str,
+    details: ResourceDetailsView<'_>,
+    frame: &mut Frame<'_>,
+    area: Rect,
+) {
+    let lines = match details.content {
         DetailContent::Loading => vec![Line::from(format!("Loading {}…", details.title))],
         DetailContent::Ready(loaded) if loaded.is_empty() => vec![Line::styled(
             format!(
                 "{} returned no {} for {}",
-                provider.name, details.title, details.resource_name
+                provider_name, details.title, details.resource_name
             ),
             Style::default().fg(Color::DarkGray),
         )],
@@ -509,7 +517,7 @@ fn render_detail_content(provider: &ProviderState, frame: &mut Frame<'_>, area: 
             Line::styled(
                 format!(
                     "{} {} failed for {}:",
-                    provider.name, details.title, details.resource_name
+                    provider_name, details.title, details.resource_name
                 ),
                 Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             ),
