@@ -734,6 +734,44 @@ fn a_resource_command_completion_for_another_target_stays_late() {
 }
 
 #[test]
+fn a_resource_command_completion_for_another_command_stays_late() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+    let restart = command_request(app.invoke(Command::Resource(ResourceCommand::Restart)));
+    let ProviderRequest::ExecuteResourceCommand {
+        request_id,
+        provider_id,
+        target,
+        resource_name,
+        ..
+    } = &restart
+    else {
+        panic!("expected Resource Command request");
+    };
+
+    let requests = app.update(AppEvent::ResourceCommandCompleted {
+        request_id: *request_id,
+        provider_id: provider_id.clone(),
+        target: target.clone(),
+        resource_name: resource_name.clone(),
+        command: ResourceCommand::Stop,
+        result: Ok(()),
+    });
+
+    assert!(requests.is_empty());
+    assert_eq!(app.state().running_commands.len(), 1);
+    assert_eq!(
+        app.update(command_completed(restart, Ok(()))).len(),
+        1,
+        "the matching completion still refreshes its Provider Workspace"
+    );
+}
+
+#[test]
 fn switching_provider_workspaces_keeps_an_in_flight_resource_command() {
     let mut app = App::new();
     ready_workspace(

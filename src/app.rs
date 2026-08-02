@@ -564,7 +564,7 @@ impl App {
         request_id: ProviderRequestId,
         provider_id: ProviderId,
         target: ResourceTarget,
-        resource_name: String,
+        _resource_name: String,
         command: ResourceCommand,
         result: Result<(), WorkspaceError>,
     ) -> Vec<ProviderRequest> {
@@ -576,24 +576,24 @@ impl App {
                 running.request_id == request_id
                     && running.provider_id == provider_id
                     && running.target == target
+                    && running.command == command
             })
             .map(|index| self.state.running_commands.remove(index))
         else {
             return Vec::new();
         };
-        let provider_name = running.provider_name;
         if let Err(error) = result {
             self.state.command_error = Some(operation_failure(
-                &provider_name,
-                &command.to_string(),
-                &resource_name,
-                target.resource_id(),
+                &running.provider_name,
+                &running.command.to_string(),
+                &running.resource_name,
+                running.target.resource_id(),
                 &error.message,
             ));
             return Vec::new();
         }
         self.state.command_error = None;
-        if !self.is_active_provider(&provider_id) {
+        if !self.is_active_provider(&running.provider_id) {
             return Vec::new();
         }
         self.refresh_active_provider()
