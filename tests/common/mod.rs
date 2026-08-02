@@ -13,8 +13,10 @@ use std::{
 
 use virtui::cli::{CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec};
 use virtui::{
-    app::AppEvent,
-    provider::{ProviderRequest, WorkspaceError, WorkspaceSnapshot},
+    app::{App, AppEvent},
+    provider::{
+        ProviderDiscovery, ProviderRequest, ResourceDetails, WorkspaceError, WorkspaceSnapshot,
+    },
 };
 
 /// A [`CliRunner`] that answers a fixed script of commands in order.
@@ -106,5 +108,86 @@ pub fn refresh_completed(
             result,
         },
         other => panic!("expected refresh request, got {other:?}"),
+    }
+}
+
+/// Selects the refresh from requests emitted by one App Event or Command.
+pub fn refresh_request(requests: Vec<ProviderRequest>) -> ProviderRequest {
+    requests
+        .into_iter()
+        .find(|request| matches!(request, ProviderRequest::RefreshWorkspace { .. }))
+        .expect("refresh request")
+}
+
+/// Discovers a Provider and applies its initial snapshot, returning any detail
+/// loads the ready Provider Workspace emits.
+pub fn ready_workspace(
+    app: &mut App,
+    discovery: ProviderDiscovery,
+    snapshot: WorkspaceSnapshot,
+) -> Vec<ProviderRequest> {
+    let refresh = refresh_request(app.update(AppEvent::ProviderDiscovered(discovery)));
+    app.update(refresh_completed(refresh, Ok(snapshot)))
+}
+
+/// Selects the Resource Command from requests emitted by one App Command.
+pub fn command_request(requests: Vec<ProviderRequest>) -> ProviderRequest {
+    requests
+        .into_iter()
+        .find(|request| matches!(request, ProviderRequest::ExecuteResourceCommand { .. }))
+        .expect("Resource Command request")
+}
+
+/// Constructs the completion matching a Resource Command request.
+pub fn command_completed(request: ProviderRequest, result: Result<(), WorkspaceError>) -> AppEvent {
+    match request {
+        ProviderRequest::ExecuteResourceCommand {
+            request_id,
+            provider_id,
+            resource_id,
+            resource_name,
+            command,
+            ..
+        } => AppEvent::ResourceCommandCompleted {
+            request_id,
+            provider_id,
+            resource_id,
+            resource_name,
+            command,
+            result,
+        },
+        other => panic!("expected Resource Command request, got {other:?}"),
+    }
+}
+
+/// Selects the detail load from requests emitted by one App Event or Command.
+pub fn detail_request(requests: Vec<ProviderRequest>) -> ProviderRequest {
+    requests
+        .into_iter()
+        .find(|request| matches!(request, ProviderRequest::LoadResourceDetails { .. }))
+        .expect("detail load request")
+}
+
+/// Constructs the completion matching a detail-load request.
+pub fn details_completed(
+    request: ProviderRequest,
+    result: Result<ResourceDetails, WorkspaceError>,
+) -> AppEvent {
+    match request {
+        ProviderRequest::LoadResourceDetails {
+            request_id,
+            provider_id,
+            panel_id,
+            resource_id,
+            view_id,
+        } => AppEvent::ResourceDetailsCompleted {
+            request_id,
+            provider_id,
+            panel_id,
+            resource_id,
+            view_id,
+            result,
+        },
+        other => panic!("expected detail load request, got {other:?}"),
     }
 }

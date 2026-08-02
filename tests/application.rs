@@ -22,6 +22,12 @@ use virtui::{
     workspace::WorkspaceLoadState,
 };
 
+mod common;
+use common::{
+    command_completed, command_request, detail_request, details_completed, ready_workspace,
+    refresh_completed, refresh_request,
+};
+
 /// Reports the single foreground colour `text` is rendered in, panicking when
 /// it is absent from the screen or split across colours.
 fn foreground_of(state: &AppState, width: u16, height: u16, text: &str) -> Color {
@@ -391,11 +397,11 @@ fn keyboard_commands_drive_navigation_manual_refresh_and_quit() {
 #[test]
 fn restart_key_dispatches_the_selected_resource_command() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
 
     let (_, requests) = handle_key(
         &mut app,
@@ -1688,86 +1694,6 @@ fn docker_multi_panel_snapshot() -> WorkspaceSnapshot {
                 }],
             },
         ],
-    }
-}
-
-fn refresh_request(requests: Vec<ProviderRequest>) -> ProviderRequest {
-    requests.into_iter().next().expect("refresh request")
-}
-
-fn command_request(requests: Vec<ProviderRequest>) -> ProviderRequest {
-    requests
-        .into_iter()
-        .next()
-        .expect("Resource Command request")
-}
-
-fn command_completed(request: ProviderRequest, result: Result<(), WorkspaceError>) -> AppEvent {
-    match request {
-        ProviderRequest::ExecuteResourceCommand {
-            request_id,
-            provider_id,
-            resource_id,
-            resource_name,
-            command,
-            ..
-        } => AppEvent::ResourceCommandCompleted {
-            request_id,
-            provider_id,
-            resource_id,
-            resource_name,
-            command,
-            result,
-        },
-        other => panic!("expected Resource Command request, got {other:?}"),
-    }
-}
-
-fn refresh_completed(
-    request: ProviderRequest,
-    result: Result<WorkspaceSnapshot, WorkspaceError>,
-) -> AppEvent {
-    match request {
-        ProviderRequest::RefreshWorkspace {
-            request_id,
-            provider_id,
-        } => AppEvent::RefreshCompleted {
-            request_id,
-            provider_id,
-            result,
-        },
-        other => panic!("expected refresh request, got {other:?}"),
-    }
-}
-
-/// The one detail load among the requests an event or Command produced.
-fn detail_request(requests: Vec<ProviderRequest>) -> ProviderRequest {
-    requests
-        .into_iter()
-        .find(|request| matches!(request, ProviderRequest::LoadResourceDetails { .. }))
-        .expect("detail load request")
-}
-
-fn details_completed(
-    request: ProviderRequest,
-    result: Result<ResourceDetails, WorkspaceError>,
-) -> AppEvent {
-    match request {
-        ProviderRequest::LoadResourceDetails {
-            request_id,
-            provider_id,
-            panel_id,
-            resource_id,
-            view_id,
-        } => AppEvent::ResourceDetailsCompleted {
-            request_id,
-            provider_id,
-            panel_id,
-            resource_id,
-            view_id,
-            result,
-        },
-        other => panic!("expected detail load request, got {other:?}"),
     }
 }
 
