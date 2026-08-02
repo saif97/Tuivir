@@ -170,7 +170,7 @@ pub struct RunningResourceCommand {
 pub struct PendingShell {
     pub provider_id: ProviderId,
     pub provider_name: String,
-    pub resource_id: ResourceId,
+    pub target: ResourceTarget,
     pub resource_name: String,
     /// The Provider CLI process that takes over the terminal.
     pub process: ProcessSpec,
@@ -624,7 +624,7 @@ impl App {
                 &shell.provider_name,
                 "shell",
                 &shell.resource_name,
-                &shell.resource_id,
+                shell.target.resource_id(),
                 &reason,
             ));
         }
@@ -725,18 +725,20 @@ impl App {
         };
         let provider_id = provider.id().clone();
         let provider_name = provider.name().to_owned();
+        let Some(target) = provider.selected_resource_target() else {
+            return;
+        };
         let Some(resource) = self.selected_resource() else {
             return;
         };
         let Some(process) = resource.shell.clone() else {
             return;
         };
-        let resource_id = resource.id.clone();
         let resource_name = resource.name.clone();
         self.state.pending_shell = Some(PendingShell {
             provider_id,
             provider_name,
-            resource_id,
+            target,
             resource_name,
             process,
         });

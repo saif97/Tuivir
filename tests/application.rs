@@ -598,7 +598,7 @@ fn returning_from_a_shell_refreshes_the_active_workspace_and_preserves_selection
         KeyEvent::new(KeyCode::Char('E'), KeyModifiers::NONE),
     );
     let shell = app.take_pending_shell().expect("a shell to hand over to");
-    assert_eq!(shell.resource_id, ResourceId::new("container-b"));
+    assert_eq!(shell.target.resource_id(), &ResourceId::new("container-b"));
 
     let requests = app.update(AppEvent::ShellClosed {
         shell,
@@ -1100,7 +1100,13 @@ fn the_shell_key_asks_for_the_terminal_for_the_selected_container() {
         .expect("a shell waiting for the terminal");
     assert_eq!(pending.provider_id, ProviderId::new("docker"));
     assert_eq!(pending.provider_name, "Docker");
-    assert_eq!(pending.resource_id, ResourceId::new("container-a"));
+    assert_eq!(
+        pending.target,
+        ResourceTarget::new(
+            ResourcePanelId::new("containers"),
+            ResourceId::new("container-a"),
+        )
+    );
     assert_eq!(pending.resource_name, "api");
     assert_eq!(
         pending.process,
