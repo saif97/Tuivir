@@ -1,71 +1,7 @@
 use std::{fmt, future::Future, pin::Pin};
 
 use crate::cli::{CliRunner, ProcessError, ProcessSpec};
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct ProviderId(pub String);
-
-impl ProviderId {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-}
-
-impl fmt::Display for ProviderId {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(formatter)
-    }
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-/// The Provider-selected destination that owns the Resources Virtui operates.
-///
-/// This is deliberately distinct from [`ProviderVersion`]: a Docker context
-/// or Incus remote/project says where work happens, while a version says which
-/// Provider build happens to be installed.
-pub struct TargetEnvironment(String);
-
-impl TargetEnvironment {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Display for TargetEnvironment {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(formatter)
-    }
-}
-
-impl PartialEq<&str> for TargetEnvironment {
-    fn eq(&self, other: &&str) -> bool {
-        self.0 == *other
-    }
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-/// The installed Provider build, when discovery can report it.
-pub struct ProviderVersion(String);
-
-impl ProviderVersion {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Display for ProviderVersion {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(formatter)
-    }
-}
+pub use crate::domain::{Provider, ProviderId, ProviderVersion, TargetEnvironment};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 /// Identifies one asynchronous request sent to a Provider Workspace.

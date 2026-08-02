@@ -4,6 +4,7 @@ pub mod command;
 pub mod config;
 pub mod docker;
 pub mod docker_sandbox;
+pub mod domain;
 pub mod incus;
 pub mod keys;
 pub mod provider;
