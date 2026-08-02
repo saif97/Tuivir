@@ -419,7 +419,6 @@ fn restart_key_dispatches_the_selected_resource_command() {
         [ProviderRequest::ExecuteResourceCommand {
             provider_id,
             target,
-            resource_name,
             command: ResourceCommand::Restart,
             ..
         }] if provider_id == &ProviderId::new("docker")
@@ -427,7 +426,6 @@ fn restart_key_dispatches_the_selected_resource_command() {
                 ResourcePanelId::new("containers"),
                 ResourceId::new("container-a"),
             )
-            && resource_name == "api"
     ));
 }
 
@@ -507,7 +505,6 @@ fn resume_key_dispatches_for_a_paused_container_and_carries_its_state() {
         [ProviderRequest::ExecuteResourceCommand {
             provider_id,
             target,
-            resource_name,
             command: ResourceCommand::Resume,
             state: ResourceState::Paused,
             ..
@@ -516,7 +513,6 @@ fn resume_key_dispatches_for_a_paused_container_and_carries_its_state() {
                 ResourcePanelId::new("containers"),
                 ResourceId::new("container-a"),
             )
-            && resource_name == "api"
     ));
 }
 
@@ -562,7 +558,6 @@ fn successful_resource_command_refreshes_the_active_workspace_and_preserves_sele
         request_id,
         provider_id,
         target,
-        resource_name,
         command,
         ..
     } = request.into_iter().next().expect("restart request")
@@ -574,7 +569,6 @@ fn successful_resource_command_refreshes_the_active_workspace_and_preserves_sele
         request_id,
         provider_id,
         target,
-        resource_name,
         command,
         result: Ok(()),
     }));
@@ -662,7 +656,6 @@ fn failed_resource_command_identifies_provider_resource_and_attempted_command() 
         request_id,
         provider_id,
         target,
-        resource_name,
         command,
         ..
     } = request.into_iter().next().expect("restart request")
@@ -674,7 +667,6 @@ fn failed_resource_command_identifies_provider_resource_and_attempted_command() 
         request_id,
         provider_id,
         target,
-        resource_name,
         command,
         result: Err(WorkspaceError::new("permission denied")),
     });
@@ -722,7 +714,6 @@ fn a_resource_command_completion_for_another_target_stays_late() {
     let ProviderRequest::ExecuteResourceCommand {
         request_id,
         provider_id,
-        resource_name,
         command,
         ..
     } = &restart
@@ -737,7 +728,6 @@ fn a_resource_command_completion_for_another_target_stays_late() {
             ResourcePanelId::new("images"),
             ResourceId::new("container-a"),
         ),
-        resource_name: resource_name.clone(),
         command: *command,
         result: Ok(()),
     });
@@ -764,7 +754,6 @@ fn a_resource_command_completion_for_another_command_stays_late() {
         request_id,
         provider_id,
         target,
-        resource_name,
         ..
     } = &restart
     else {
@@ -775,7 +764,6 @@ fn a_resource_command_completion_for_another_command_stays_late() {
         request_id: *request_id,
         provider_id: provider_id.clone(),
         target: target.clone(),
-        resource_name: resource_name.clone(),
         command: ResourceCommand::Stop,
         result: Ok(()),
     });
@@ -1269,7 +1257,6 @@ fn delete_requires_target_identifying_confirmation_before_dispatch() {
         [ProviderRequest::ExecuteResourceCommand {
             provider_id,
             target,
-            resource_name,
             command: ResourceCommand::Delete,
             ..
         }] if provider_id == &ProviderId::new("docker")
@@ -1277,7 +1264,6 @@ fn delete_requires_target_identifying_confirmation_before_dispatch() {
                 ResourcePanelId::new("containers"),
                 ResourceId::new("container-a"),
             )
-            && resource_name == "api"
     ));
 }
 

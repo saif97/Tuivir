@@ -145,14 +145,12 @@ pub fn command_completed(request: ProviderRequest, result: Result<(), WorkspaceE
             request_id,
             provider_id,
             target,
-            resource_name,
             command,
             ..
         } => AppEvent::ResourceCommandCompleted {
             request_id,
             provider_id,
             target,
-            resource_name,
             command,
             result,
         },

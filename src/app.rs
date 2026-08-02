@@ -40,7 +40,6 @@ pub enum AppEvent {
         request_id: ProviderRequestId,
         provider_id: ProviderId,
         target: ResourceTarget,
-        resource_name: String,
         command: ResourceCommand,
         result: Result<(), WorkspaceError>,
     },
@@ -270,17 +269,11 @@ impl App {
                 request_id,
                 provider_id,
                 target,
-                resource_name,
                 command,
                 result,
-            } => self.apply_resource_command_result(
-                request_id,
-                provider_id,
-                target,
-                resource_name,
-                command,
-                result,
-            ),
+            } => {
+                self.apply_resource_command_result(request_id, provider_id, target, command, result)
+            }
             AppEvent::ResourceDetailsCompleted {
                 request_id,
                 provider_id,
@@ -564,7 +557,6 @@ impl App {
         request_id: ProviderRequestId,
         provider_id: ProviderId,
         target: ResourceTarget,
-        _resource_name: String,
         command: ResourceCommand,
         result: Result<(), WorkspaceError>,
     ) -> Vec<ProviderRequest> {
@@ -705,7 +697,6 @@ impl App {
             request_id,
             provider_id: target.provider_id,
             target: target.target,
-            resource_name: target.resource_name,
             command: target.command,
             state: target.state,
         }]

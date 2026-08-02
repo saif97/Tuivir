@@ -217,7 +217,6 @@ impl ProviderRuntime {
                 request_id,
                 provider_id,
                 target,
-                resource_name,
                 command,
                 state,
             } => {
@@ -238,7 +237,6 @@ impl ProviderRuntime {
                         request_id,
                         provider_id,
                         target,
-                        resource_name,
                         command,
                         result,
                     });

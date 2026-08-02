@@ -148,7 +148,6 @@ pub enum ProviderRequest {
         request_id: ProviderRequestId,
         provider_id: ProviderId,
         target: ResourceTarget,
-        resource_name: String,
         command: ResourceCommand,
         /// What the last refresh reported for this Resource, carried here so
         /// the Provider Workspace never re-queries it while dispatching.
