@@ -1,4 +1,5 @@
 pub mod app;
+pub mod application;
 pub mod cli;
 pub mod command;
 pub mod config;
@@ -7,6 +8,7 @@ pub mod docker_sandbox;
 pub mod domain;
 pub mod incus;
 pub mod keys;
+pub mod presentation;
 pub mod provider;
 pub mod runtime;
 pub mod ui;

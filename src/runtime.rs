@@ -10,7 +10,7 @@ use crate::{
     docker::DockerWorkspace,
     docker_sandbox::DockerSandboxWorkspace,
     incus::IncusWorkspace,
-    keys::Key,
+    presentation::key_from_event,
     provider::{ProviderDiscovery, ProviderId, ProviderRequest, ProviderWorkspace},
 };
 
@@ -26,7 +26,7 @@ pub enum ShellControl {
 pub fn handle_key(app: &mut App, key: KeyEvent) -> (ShellControl, Vec<ProviderRequest>) {
     // Normalize the terminal event into the registry's vocabulary before any
     // routing: the application never sees a crossterm event for a Command.
-    let Some(key) = Key::from_event(key) else {
+    let Some(key) = key_from_event(key) else {
         return (ShellControl::Continue, Vec::new());
     };
     // The emergency Quit is reserved by the registry and stays active in every
