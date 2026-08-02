@@ -573,7 +573,9 @@ impl App {
             .running_commands
             .iter()
             .position(|running| {
-                running.request_id == request_id && running.provider_id == provider_id
+                running.request_id == request_id
+                    && running.provider_id == provider_id
+                    && running.target == target
             })
             .map(|index| self.state.running_commands.remove(index))
         else {
