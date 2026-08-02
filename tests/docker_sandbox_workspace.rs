@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
 use virtui::{
-    application::{App, InteractiveShellProcess, ProviderRequest, ResourceCommand},
-    command::Command,
+    application::{App, Command, InteractiveShellProcess, ProviderRequest, ResourceCommand},
     domain::{
         DetailViewId, ProviderId, ProviderVersion, ResourceId, ResourcePanelId, ResourceState,
         ResourceTarget, TargetEnvironment,

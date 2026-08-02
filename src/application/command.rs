@@ -1,7 +1,6 @@
 use std::{collections::HashMap, fmt};
 
-use crate::application::KeybindingError;
-use crate::keys::Key;
+use super::{Key, KeybindingError};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ResourceCommand {

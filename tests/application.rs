@@ -9,11 +9,11 @@ use ratatui::style::Color;
 use tokio::sync::{Notify, mpsc};
 use virtui::{
     application::{
-        App, AppEvent, AppState, DetailView, FocusedPane, InteractiveShellOutcome,
-        InteractiveShellProcess, ProviderRequest, Resource, ResourceCommand, ResourceDetails,
-        ResourcePanel, WorkspaceError, WorkspaceLoadState, WorkspaceSnapshot,
+        App, AppEvent, AppState, Command, CommandRegistry, CommandScope, DetailView, FocusedPane,
+        InteractiveShellOutcome, InteractiveShellProcess, ProviderRequest, Resource,
+        ResourceCommand, ResourceDetails, ResourcePanel, WorkspaceError, WorkspaceLoadState,
+        WorkspaceSnapshot,
     },
-    command::{Command, CommandRegistry, CommandScope},
     domain::{
         DetailViewId, Provider, ProviderId, ResourceId, ResourcePanelId, ResourceState,
         ResourceTarget, TargetEnvironment,
