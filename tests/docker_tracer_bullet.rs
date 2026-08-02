@@ -3,14 +3,14 @@ use virtui::{
     cli::{ProcessError, ProcessOutput, ProcessSpec},
     docker::DockerWorkspace,
     provider::{
-        DetailViewId, ProviderRequest, ProviderWorkspace, Resource, ResourceCommand, ResourceId,
-        ResourcePanelId, ResourceState, WorkspaceError, WorkspaceSnapshot,
+        DetailViewId, ProviderWorkspace, Resource, ResourceCommand, ResourceId, ResourcePanelId,
+        ResourceState,
     },
     ui::render_to_text,
 };
 
 mod common;
-use common::{FixtureCli, failure, failure_on_stdout, success};
+use common::{FixtureCli, failure, failure_on_stdout, refresh_completed, success};
 
 fn silent_failure() -> Result<ProcessOutput, ProcessError> {
     common::silent_failure(125)
@@ -35,23 +35,6 @@ fn image_ls() -> ProcessSpec {
         "docker",
         &["image", "ls", "--no-trunc", "--format", "{{json .}}"],
     )
-}
-
-fn refresh_completed(
-    request: ProviderRequest,
-    result: Result<WorkspaceSnapshot, WorkspaceError>,
-) -> AppEvent {
-    match request {
-        ProviderRequest::RefreshWorkspace {
-            request_id,
-            provider_id,
-        } => AppEvent::RefreshCompleted {
-            request_id,
-            provider_id,
-            result,
-        },
-        other => panic!("expected refresh request, got {other:?}"),
-    }
 }
 
 #[tokio::test]
