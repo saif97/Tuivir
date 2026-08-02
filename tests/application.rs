@@ -22,8 +22,8 @@ use virtui::{
         CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec,
     },
     infrastructure::provider::{DockerWorkspace, ProviderDiscovery, ProviderWorkspace},
-    presentation::{render_foreground_colours, render_to_text},
-    runtime::{ProviderRuntime, RefreshTimer, ShellControl, handle_key},
+    infrastructure::runtime::{ProviderRuntime, RefreshTimer},
+    presentation::{key_from_event, render_foreground_colours, render_to_text},
 };
 
 mod common;
@@ -31,6 +31,27 @@ use common::{
     command_completed, command_request, detail_request, details_completed, ready_workspace,
     refresh_completed, refresh_request,
 };
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ShellControl {
+    Continue,
+    Quit,
+}
+
+/// Drives the application through the same logical-key seam as the host.
+fn handle_key(app: &mut App, event: KeyEvent) -> (ShellControl, Vec<ProviderRequest>) {
+    let Some(key) = key_from_event(event) else {
+        return (ShellControl::Continue, Vec::new());
+    };
+    if app.reserved(key) == Some(Command::Quit) {
+        return (ShellControl::Quit, Vec::new());
+    }
+    match app.resolve_command(key) {
+        Some(Command::Quit) => (ShellControl::Quit, Vec::new()),
+        Some(command) => (ShellControl::Continue, app.invoke(command)),
+        None => (ShellControl::Continue, Vec::new()),
+    }
+}
 
 /// Reports the single foreground colour `text` is rendered in, panicking when
 /// it is absent from the screen or split across colours.

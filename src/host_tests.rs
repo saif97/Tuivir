@@ -11,6 +11,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use super::{ShellTerminal, handle_key, open_pending_shell};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use virtui::{
     application::{
@@ -21,7 +22,6 @@ use virtui::{
     infrastructure::process::{InteractiveRunner, ProcessError, ProcessFailure, ProcessSpec},
     infrastructure::provider::ProviderDiscovery,
     presentation::render_to_text,
-    runtime::{ShellTerminal, handle_key, open_pending_shell},
 };
 
 /// Everything the host was asked to do, in the order it was asked.

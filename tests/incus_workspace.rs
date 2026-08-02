@@ -5,8 +5,8 @@ use virtui::{
     domain::{DetailViewId, ResourceId, ResourcePanelId, ResourceState, ResourceTarget},
     infrastructure::process::{ProcessError, ProcessOutput, ProcessSpec},
     infrastructure::provider::{IncusWorkspace, ProviderWorkspace},
+    infrastructure::runtime::ProviderRuntime,
     presentation::render_to_text,
-    runtime::ProviderRuntime,
 };
 
 mod common;

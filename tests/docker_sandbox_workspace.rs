@@ -7,12 +7,12 @@ use virtui::{
         DetailViewId, ProviderId, ProviderVersion, ResourceId, ResourcePanelId, ResourceState,
         ResourceTarget, TargetEnvironment,
     },
+    infrastructure::runtime::ProviderRuntime,
     infrastructure::{
         process::{ProcessError, ProcessFailure, ProcessSpec},
         provider::{DockerSandboxWorkspace, ProviderWorkspace},
     },
     presentation::render_to_text,
-    runtime::ProviderRuntime,
 };
 
 mod common;
