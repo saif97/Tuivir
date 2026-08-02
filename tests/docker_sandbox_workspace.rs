@@ -5,13 +5,13 @@ use virtui::{
     cli::{ProcessError, ProcessFailure, ProcessSpec},
     command::Command,
     docker_sandbox::DockerSandboxWorkspace,
+    presentation::render_to_text,
     provider::{
         DetailViewId, ProviderId, ProviderRequest, ProviderVersion, ProviderWorkspace,
         ResourceCommand, ResourceId, ResourcePanelId, ResourceState, ResourceTarget,
         TargetEnvironment,
     },
     runtime::ProviderRuntime,
-    ui::render_to_text,
 };
 
 mod common;

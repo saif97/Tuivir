@@ -15,13 +15,13 @@ use virtui::{
     cli::{CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec},
     command::{Command, CommandRegistry, CommandScope},
     docker::DockerWorkspace,
+    presentation::{render_foreground_colours, render_to_text},
     provider::{
         DetailView, DetailViewId, Provider, ProviderDiscovery, ProviderId, ProviderRequest,
         Resource, ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourcePanelId,
         ResourceState, ResourceTarget, TargetEnvironment, WorkspaceError, WorkspaceSnapshot,
     },
     runtime::{ProviderRuntime, RefreshTimer, ShellControl, handle_key},
-    ui::{render_foreground_colours, render_to_text},
 };
 
 mod common;

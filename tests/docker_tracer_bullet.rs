@@ -2,11 +2,11 @@ use virtui::{
     application::{App, InteractiveShellProcess},
     cli::{ProcessError, ProcessOutput, ProcessSpec},
     docker::DockerWorkspace,
+    presentation::render_to_text,
     provider::{
         DetailViewId, ProviderWorkspace, Resource, ResourceCommand, ResourceId, ResourcePanelId,
         ResourceState, ResourceTarget,
     },
-    ui::render_to_text,
 };
 
 mod common;

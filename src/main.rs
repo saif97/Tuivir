@@ -21,11 +21,11 @@ use virtui::{
     cli::{CliRunner, TokioCliRunner},
     command::CommandRegistry,
     config::{Env, FileSystemReader, load},
+    presentation,
     provider::ProviderRequest,
     runtime::{
         ProviderRuntime, RefreshTimer, ShellControl, ShellTerminal, handle_key, open_pending_shell,
     },
-    ui,
 };
 
 #[tokio::main]
@@ -61,7 +61,7 @@ async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::R
     let mut refresh_timer = RefreshTimer::new();
 
     let result = loop {
-        if let Err(error) = terminal.draw(|frame| ui::render(app.state(), frame)) {
+        if let Err(error) = terminal.draw(|frame| presentation::render(app.state(), frame)) {
             break Err(error);
         }
 

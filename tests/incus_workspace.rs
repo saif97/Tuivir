@@ -4,12 +4,12 @@ use virtui::{
     application::{App, InteractiveShellProcess},
     cli::{ProcessError, ProcessOutput, ProcessSpec},
     incus::IncusWorkspace,
+    presentation::render_to_text,
     provider::{
         DetailViewId, ProviderWorkspace, ResourceCommand, ResourceId, ResourcePanelId,
         ResourceState, ResourceTarget,
     },
     runtime::ProviderRuntime,
-    ui::render_to_text,
 };
 
 mod common;

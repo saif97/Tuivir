@@ -15,13 +15,13 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use virtui::{
     application::{App, AppEvent, InteractiveShellProcess},
     cli::{InteractiveRunner, ProcessError, ProcessFailure, ProcessSpec},
+    presentation::render_to_text,
     provider::{
         DetailView, Provider, ProviderDiscovery, ProviderId, ProviderRequest, Resource,
         ResourceCommand, ResourceId, ResourcePanel, ResourcePanelId, ResourceState,
         TargetEnvironment, WorkspaceSnapshot,
     },
     runtime::{ShellTerminal, handle_key, open_pending_shell},
-    ui::render_to_text,
 };
 
 /// Everything the host was asked to do, in the order it was asked.
