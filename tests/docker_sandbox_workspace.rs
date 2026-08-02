@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
 use virtui::{
-    app::{App, AppEvent},
-    application::InteractiveShellProcess,
+    application::{App, AppEvent, InteractiveShellProcess},
     cli::{ProcessError, ProcessFailure, ProcessSpec},
     command::Command,
     docker_sandbox::DockerSandboxWorkspace,

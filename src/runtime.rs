@@ -4,8 +4,8 @@ use crossterm::event::KeyEvent;
 use tokio::time::{Instant, Interval, MissedTickBehavior};
 
 use crate::{
-    app::{App, AppEvent},
     application::InteractiveShellOutcome,
+    application::{App, AppEvent},
     cli::{CliRunner, InteractiveRunner},
     command::Command,
     docker::DockerWorkspace,

@@ -1,11 +1,11 @@
 use virtui::{
+    application::{DetailContent, ProviderWorkspaceState, WorkspaceLoadState},
     domain::Provider,
     provider::{
         DetailView, ProviderId, ProviderRequestId, Resource, ResourceDetails, ResourceId,
         ResourcePanel, ResourcePanelId, ResourceTarget, TargetEnvironment, WorkspaceError,
         WorkspaceSnapshot,
     },
-    workspace::{DetailContent, ProviderWorkspaceState, WorkspaceLoadState},
 };
 
 fn resource(id: &str, name: &str) -> Resource {

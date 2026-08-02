@@ -8,11 +8,11 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph},
 };
 
-use crate::app::{AppState, FocusedPane};
-use crate::provider::ResourceState;
-use crate::workspace::{
+use crate::application::{AppState, FocusedPane};
+use crate::application::{
     DetailContent, ResourceDetailsView, ResourcePanelView, WorkspacePresentation, WorkspaceView,
 };
+use crate::provider::ResourceState;
 
 pub fn render(state: &AppState, frame: &mut Frame<'_>) {
     let status_height = u16::from(!state.running_commands.is_empty());

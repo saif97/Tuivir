@@ -30,7 +30,7 @@ impl fmt::Display for ResourceCommand {
 /// One registered user intention.
 ///
 /// A Command is what the user meant, not what happened: facts and asynchronous
-/// completions stay in [`crate::app::AppEvent`].
+/// completions stay in [`crate::application::AppEvent`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Command {
     Quit,

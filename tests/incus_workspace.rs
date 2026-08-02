@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
 use virtui::{
-    app::{App, AppEvent},
-    application::InteractiveShellProcess,
+    application::{App, AppEvent, InteractiveShellProcess},
     cli::{ProcessError, ProcessOutput, ProcessSpec},
     incus::IncusWorkspace,
     provider::{

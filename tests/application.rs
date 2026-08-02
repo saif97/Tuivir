@@ -8,8 +8,10 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::Color;
 use tokio::sync::{Notify, mpsc};
 use virtui::{
-    app::{App, AppEvent, AppState, FocusedPane},
-    application::{InteractiveShellOutcome, InteractiveShellProcess},
+    application::{
+        App, AppEvent, AppState, FocusedPane, InteractiveShellOutcome, InteractiveShellProcess,
+        WorkspaceLoadState,
+    },
     cli::{CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec},
     command::{Command, CommandRegistry, CommandScope},
     docker::DockerWorkspace,
@@ -20,7 +22,6 @@ use virtui::{
     },
     runtime::{ProviderRuntime, RefreshTimer, ShellControl, handle_key},
     ui::{render_foreground_colours, render_to_text},
-    workspace::WorkspaceLoadState,
 };
 
 mod common;

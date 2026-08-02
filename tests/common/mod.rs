@@ -13,7 +13,7 @@ use std::{
 
 use virtui::cli::{CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec};
 use virtui::{
-    app::{App, AppEvent},
+    application::{App, AppEvent},
     provider::{
         ProviderDiscovery, ProviderRequest, ResourceDetails, WorkspaceError, WorkspaceSnapshot,
     },

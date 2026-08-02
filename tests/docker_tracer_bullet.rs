@@ -1,6 +1,5 @@
 use virtui::{
-    app::{App, AppEvent},
-    application::InteractiveShellProcess,
+    application::{App, AppEvent, InteractiveShellProcess},
     cli::{ProcessError, ProcessOutput, ProcessSpec},
     docker::DockerWorkspace,
     provider::{

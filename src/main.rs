@@ -17,7 +17,7 @@ use crossterm::{
 use ratatui::DefaultTerminal;
 use tokio::sync::mpsc;
 use virtui::{
-    app::{App, AppEvent},
+    application::{App, AppEvent},
     cli::{CliRunner, TokioCliRunner},
     command::CommandRegistry,
     config::{Env, FileSystemReader, load},

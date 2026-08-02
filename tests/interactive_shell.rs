@@ -13,8 +13,7 @@ use std::{
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use virtui::{
-    app::{App, AppEvent},
-    application::InteractiveShellProcess,
+    application::{App, AppEvent, InteractiveShellProcess},
     cli::{InteractiveRunner, ProcessError, ProcessFailure, ProcessSpec},
     provider::{
         DetailView, Provider, ProviderDiscovery, ProviderId, ProviderRequest, Resource,
