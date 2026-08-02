@@ -1,215 +1,14 @@
 use std::{future::Future, pin::Pin};
 
-pub use crate::application::{InteractiveShellProcess, ResourceCommand};
+pub use crate::application::{
+    DetailView, InteractiveShellProcess, ProviderRequest, ProviderRequestId, Resource,
+    ResourceCommand, ResourceDetails, ResourcePanel, WorkspaceError, WorkspaceSnapshot,
+};
 use crate::cli::{CliRunner, ProcessError};
 pub use crate::domain::{
     DetailViewId, Provider, ProviderId, ProviderVersion, ResourceId, ResourcePanelId,
     ResourceState, ResourceTarget, TargetEnvironment,
 };
-
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-/// Identifies one asynchronous request sent to a Provider Workspace.
-///
-/// The application allocates these IDs and accepts a completion only while its
-/// ID remains pending for its Provider. That prevents stale provider results
-/// from overwriting newer application state.
-pub struct ProviderRequestId(pub(crate) u64);
-
-impl ProviderRequestId {
-    /// Reconstructs an application-allocated request identity at a state seam.
-    /// The application remains responsible for choosing unique values.
-    pub fn new(value: u64) -> Self {
-        Self(value)
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-/// A specific request the application asks a Provider Workspace to perform.
-///
-/// The runtime executes requests outside the single-owner application state.
-pub enum ProviderRequest {
-    RefreshWorkspace {
-        request_id: ProviderRequestId,
-        provider_id: ProviderId,
-    },
-    ExecuteResourceCommand {
-        request_id: ProviderRequestId,
-        provider_id: ProviderId,
-        target: ResourceTarget,
-        command: ResourceCommand,
-        /// What the last refresh reported for this Resource, carried here so
-        /// the Provider Workspace never re-queries it while dispatching.
-        state: ResourceState,
-    },
-    /// Loads one detail view for one Resource.
-    ///
-    /// The application asks for exactly the view on screen, so a Provider never
-    /// runs work for a detail the user is not looking at.
-    LoadResourceDetails {
-        request_id: ProviderRequestId,
-        provider_id: ProviderId,
-        target: ResourceTarget,
-        view_id: DetailViewId,
-    },
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-/// One selectable native resource in a Provider Workspace.
-pub struct Resource {
-    pub id: ResourceId,
-    pub name: String,
-    /// Provider-defined status text shown next to the resource in the list,
-    /// such as a Docker container's running/exited state.
-    pub status: Option<String>,
-    /// The provider-neutral reading of `status` that the shell can act on.
-    /// Stateless Resources, such as Docker images, have no Resource State.
-    pub state: Option<ResourceState>,
-    /// Provider-defined label/value fields for the selected-resource details panel.
-    pub fields: Vec<(String, String)>,
-    /// Lifecycle Commands currently available for this provider Resource.
-    pub available_commands: Vec<ResourceCommand>,
-    /// The Interactive Shell this Provider offers inside the Resource right
-    /// now, or `None` when it offers none.
-    ///
-    /// Declaring the process here rather than answering a later "can I?" is
-    /// what keeps availability and the command that implements it from
-    /// drifting: a Resource with no shell has nothing to run, so the operation
-    /// is absent rather than offered and then refused.
-    pub shell: Option<InteractiveShellProcess>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-/// One provider-native way of inspecting a selected Resource.
-///
-/// Views belong to the Provider Workspace that declared them and keep their
-/// own names — Docker's Logs is not Incus's Console Log — so the shell can
-/// offer them without knowing what either Provider inspects.
-pub struct DetailView {
-    pub id: DetailViewId,
-    pub title: String,
-}
-
-impl DetailView {
-    pub fn new(id: impl Into<String>, title: impl Into<String>) -> Self {
-        Self {
-            id: DetailViewId::new(id),
-            title: title.into(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-/// A provider-defined group of resources, such as Docker Containers.
-pub struct ResourcePanel {
-    pub id: ResourcePanelId,
-    pub title: String,
-    /// The detail views offered for every Resource in this panel, in the order
-    /// the user moves through them. The first is shown when a Resource is
-    /// selected.
-    pub detail_views: Vec<DetailView>,
-    pub resources: Vec<Resource>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-/// UI-neutral data returned by a successful provider refresh.
-///
-/// Provider workspaces populate snapshots; the shared shell renders them.
-pub struct WorkspaceSnapshot {
-    pub panels: Vec<ResourcePanel>,
-}
-
-impl WorkspaceSnapshot {
-    /// Iterates every Resource across all panels in provider-defined order.
-    pub fn resources(&self) -> impl Iterator<Item = &Resource> {
-        self.panels.iter().flat_map(|panel| panel.resources.iter())
-    }
-
-    /// Iterates every Resource across all panels in panel order, each paired
-    /// with the target that identifies it.
-    ///
-    /// A Resource is only addressable together with its panel: two panels may
-    /// hold the same [`ResourceId`], so a bare id is never enough to say which
-    /// Resource is meant.
-    pub fn targets(&self) -> impl Iterator<Item = (ResourceTarget, &Resource)> {
-        self.panels.iter().flat_map(|panel| {
-            panel.resources.iter().map(|resource| {
-                (
-                    ResourceTarget::new(panel.id.clone(), resource.id.clone()),
-                    resource,
-                )
-            })
-        })
-    }
-
-    /// The panel `resource_id` belongs to, and so the detail views offered for
-    /// it.
-    pub fn panel(&self, panel_id: &ResourcePanelId) -> Option<&ResourcePanel> {
-        self.panels.iter().find(|panel| &panel.id == panel_id)
-    }
-
-    pub(crate) fn panel_for(&self, target: &ResourceTarget) -> Option<&ResourcePanel> {
-        self.panel(target.panel_id())
-    }
-
-    pub fn resource(&self, target: &ResourceTarget) -> Option<&Resource> {
-        self.panel_for(target)?
-            .resources
-            .iter()
-            .find(|resource| &resource.id == target.resource_id())
-    }
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-/// UI-neutral output of one detail view for one Resource.
-///
-/// Provider Workspaces decide what a line is — a log record, a formatted table
-/// row, a line of YAML — and the shell only ever displays and scrolls them.
-pub struct ResourceDetails {
-    pub lines: Vec<String>,
-}
-
-impl ResourceDetails {
-    pub fn from_lines<I, S>(lines: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        Self {
-            lines: lines.into_iter().map(Into::into).collect(),
-        }
-    }
-
-    /// Splits provider output into displayable lines, dropping the trailing
-    /// blank a CLI leaves behind so it cannot read as content.
-    pub fn from_output(output: &str) -> Self {
-        Self::from_lines(output.trim_end_matches('\n').lines())
-    }
-
-    /// A view the Provider answered with nothing at all, such as a container
-    /// that has not logged yet.
-    pub fn is_empty(&self) -> bool {
-        self.lines.iter().all(|line| line.trim().is_empty())
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-/// A user-facing failure from discovering or refreshing a Provider Workspace.
-pub struct WorkspaceError {
-    pub message: String,
-}
-
-impl WorkspaceError {
-    pub fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-        }
-    }
-
-    /// Attaches the Provider's suggested next step to a message.
-    pub fn with_help(message: impl AsRef<str>, help: &str) -> Self {
-        Self::new(format!("{}. {help}", message.as_ref()))
-    }
-}
 
 /// What a Provider CLI left behind, with no suggested next step attached.
 ///
@@ -252,6 +51,11 @@ impl ProviderDiscovery {
 
     pub fn into_parts(self) -> (Provider, Option<WorkspaceError>) {
         (self.provider, self.error)
+    }
+
+    pub fn into_event(self) -> crate::application::AppEvent {
+        let (provider, error) = self.into_parts();
+        crate::application::AppEvent::ProviderDiscovered { provider, error }
     }
 }
 

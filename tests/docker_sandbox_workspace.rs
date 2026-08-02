@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use virtui::{
-    application::{App, AppEvent, InteractiveShellProcess},
+    application::{App, InteractiveShellProcess},
     cli::{ProcessError, ProcessFailure, ProcessSpec},
     command::Command,
     docker_sandbox::DockerSandboxWorkspace,
@@ -419,7 +419,7 @@ async fn discovered_docker_sandbox_renders_target_environment_and_sandboxes() {
         .expect("the fixture represents an installed sbx");
     let mut app = App::new();
     let request = app
-        .update(AppEvent::ProviderDiscovered(discovered))
+        .update(discovered.into_event())
         .into_iter()
         .next()
         .expect("discovery requests the first workspace refresh");
@@ -454,7 +454,7 @@ async fn reachable_docker_sandbox_without_sandboxes_renders_a_distinct_empty_sta
     let discovered = sandboxes.discover(&cli).await.expect("sbx is installed");
     let mut app = App::new();
     let request = app
-        .update(AppEvent::ProviderDiscovered(discovered))
+        .update(discovered.into_event())
         .into_iter()
         .next()
         .expect("initial refresh");
@@ -531,7 +531,7 @@ async fn deleting_a_sandbox_confirms_first_and_then_runs_the_expected_cli_reques
     let discovered = sandboxes.discover(&cli).await.expect("sbx is installed");
     let mut app = App::new();
     let request = app
-        .update(AppEvent::ProviderDiscovered(discovered))
+        .update(discovered.into_event())
         .into_iter()
         .next()
         .expect("initial refresh");
@@ -601,7 +601,7 @@ async fn starting_an_already_running_sandbox_is_not_offered_and_issues_nothing()
     let discovered = sandboxes.discover(&cli).await.expect("sbx is installed");
     let mut app = App::new();
     let request = app
-        .update(AppEvent::ProviderDiscovered(discovered))
+        .update(discovered.into_event())
         .into_iter()
         .next()
         .expect("initial refresh");

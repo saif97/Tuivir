@@ -1,10 +1,10 @@
 use virtui::{
-    application::{DetailContent, ProviderWorkspaceState, WorkspaceLoadState},
-    domain::Provider,
-    provider::{
-        DetailView, ProviderId, ProviderRequestId, Resource, ResourceDetails, ResourceId,
-        ResourcePanel, ResourcePanelId, ResourceTarget, TargetEnvironment, WorkspaceError,
-        WorkspaceSnapshot,
+    application::{
+        DetailContent, DetailView, ProviderRequestId, ProviderWorkspaceState, Resource,
+        ResourceDetails, ResourcePanel, WorkspaceError, WorkspaceLoadState, WorkspaceSnapshot,
+    },
+    domain::{
+        Provider, ProviderId, ResourceId, ResourcePanelId, ResourceTarget, TargetEnvironment,
     },
 };
 

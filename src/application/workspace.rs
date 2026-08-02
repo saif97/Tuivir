@@ -1,9 +1,11 @@
 use crate::{
-    domain::Provider,
-    provider::{
-        DetailView, DetailViewId, ProviderId, ProviderRequestId, ProviderVersion, Resource,
-        ResourceDetails, ResourceId, ResourcePanel, ResourcePanelId, ResourceTarget,
-        TargetEnvironment, WorkspaceError, WorkspaceSnapshot,
+    application::{
+        DetailView, ProviderRequestId, Resource, ResourceDetails, ResourcePanel, WorkspaceError,
+        WorkspaceSnapshot,
+    },
+    domain::{
+        DetailViewId, Provider, ProviderId, ProviderVersion, ResourceId, ResourcePanelId,
+        ResourceTarget, TargetEnvironment,
     },
 };
 

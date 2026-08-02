@@ -140,7 +140,7 @@ fn running_container() -> WorkspaceSnapshot {
 /// An application sitting on a running container, with `E` already pressed.
 fn app_awaiting_the_terminal() -> App {
     let mut app = App::new();
-    let requests = app.update(AppEvent::ProviderDiscovered(docker_discovery()));
+    let requests = app.update(docker_discovery().into_event());
     let ProviderRequest::RefreshWorkspace {
         request_id,
         provider_id,

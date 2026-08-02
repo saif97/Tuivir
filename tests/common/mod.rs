@@ -126,7 +126,7 @@ pub fn ready_workspace(
     discovery: ProviderDiscovery,
     snapshot: WorkspaceSnapshot,
 ) -> Vec<ProviderRequest> {
-    let refresh = refresh_request(app.update(AppEvent::ProviderDiscovered(discovery)));
+    let refresh = refresh_request(app.update(discovery.into_event()));
     app.update(refresh_completed(refresh, Ok(snapshot)))
 }
 

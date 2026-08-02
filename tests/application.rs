@@ -94,7 +94,7 @@ fn first_available_provider_becomes_the_active_workspace() {
     let mut app = App::new();
     assert_eq!(app.state().active_provider, None);
 
-    app.update(AppEvent::ProviderDiscovered(docker_discovery()));
+    app.update(docker_discovery().into_event());
 
     assert_eq!(app.state().active_provider, Some(0));
 }
@@ -359,7 +359,7 @@ async fn provider_is_omitted_when_docker_cli_is_absent() {
     let mut app = App::new();
 
     for discovered in runtime.discover().await {
-        app.update(AppEvent::ProviderDiscovered(discovered));
+        app.update(discovered.into_event());
     }
 
     let screen = render_to_text(app.state(), 100, 24);
@@ -537,7 +537,7 @@ fn resume_key_dispatches_nothing_for_a_resource_that_is_not_paused() {
         ),
     ] {
         let mut app = App::new();
-        let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+        let initial = refresh_request(app.update(docker_discovery().into_event()));
         app.update(refresh_completed(initial, Ok(snapshot)));
 
         let (_, requests) = handle_key(
@@ -601,7 +601,7 @@ fn returning_from_a_shell_refreshes_the_active_workspace_and_preserves_selection
         ("container-b", "worker", "redis:7"),
     ];
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
     app.update(refresh_completed(initial, Ok(snapshot(&containers))));
     handle_key(
         &mut app,
@@ -713,7 +713,7 @@ fn selecting_another_resource_keeps_an_in_flight_resource_command() {
 #[test]
 fn a_resource_command_completion_for_another_target_stays_late() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
     app.update(refresh_completed(
         initial,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
@@ -752,7 +752,7 @@ fn a_resource_command_completion_for_another_target_stays_late() {
 #[test]
 fn a_resource_command_completion_for_another_command_stays_late() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
     app.update(refresh_completed(
         initial,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
@@ -794,7 +794,7 @@ fn switching_provider_workspaces_keeps_an_in_flight_resource_command() {
         snapshot(&[("container-a", "api", "nginx:1.27")]),
     );
     let restart = command_request(app.invoke(Command::Resource(ResourceCommand::Restart)));
-    app.update(AppEvent::ProviderDiscovered(incus_discovery()));
+    app.update(incus_discovery().into_event());
     let incus_refresh = refresh_request(app.invoke(Command::NextWorkspace));
     app.update(refresh_completed(
         incus_refresh,
@@ -840,7 +840,7 @@ fn a_successful_resource_command_refreshes_only_its_own_provider_workspace() {
         snapshot(&[("container-a", "api", "nginx:1.27")]),
     );
     let restart = command_request(app.invoke(Command::Resource(ResourceCommand::Restart)));
-    app.update(AppEvent::ProviderDiscovered(incus_discovery()));
+    app.update(incus_discovery().into_event());
     let incus_refresh = refresh_request(app.invoke(Command::NextWorkspace));
     app.update(refresh_completed(
         incus_refresh,
@@ -864,7 +864,7 @@ fn a_failed_resource_command_opens_an_error_popup_over_another_active_workspace(
         snapshot(&[("container-a", "api", "nginx:1.27")]),
     );
     let restart = command_request(app.invoke(Command::Resource(ResourceCommand::Restart)));
-    app.update(AppEvent::ProviderDiscovered(incus_discovery()));
+    app.update(incus_discovery().into_event());
     let incus_refresh = refresh_request(app.invoke(Command::NextWorkspace));
     app.update(refresh_completed(
         incus_refresh,
@@ -983,7 +983,7 @@ fn switching_providers_invalidates_a_refresh_but_not_a_running_resource_command(
     );
     let restart = command_request(app.invoke(Command::Resource(ResourceCommand::Restart)));
     let stale_docker = refresh_request(app.invoke(Command::Refresh));
-    app.update(AppEvent::ProviderDiscovered(incus_discovery()));
+    app.update(incus_discovery().into_event());
     let incus_refresh = refresh_request(app.invoke(Command::NextWorkspace));
     app.update(refresh_completed(
         incus_refresh,
@@ -1055,7 +1055,7 @@ fn question_mark_shows_registered_commands_for_the_focused_resource() {
 #[test]
 fn help_offers_resume_only_while_the_resource_is_suspended() {
     let mut paused = App::new();
-    let initial = refresh_request(paused.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let initial = refresh_request(paused.update(docker_discovery().into_event()));
     paused.update(refresh_completed(
         initial,
         Ok(paused_snapshot(&[("container-a", "api", "nginx:1.27")])),
@@ -1072,7 +1072,7 @@ fn help_offers_resume_only_while_the_resource_is_suspended() {
     );
 
     let mut running = App::new();
-    let initial = refresh_request(running.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let initial = refresh_request(running.update(docker_discovery().into_event()));
     running.update(refresh_completed(
         initial,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
@@ -1094,7 +1094,7 @@ fn help_offers_resume_only_while_the_resource_is_suspended() {
 #[test]
 fn help_offers_a_shell_only_while_the_resource_can_host_one() {
     let mut stopped = App::new();
-    let initial = refresh_request(stopped.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let initial = refresh_request(stopped.update(docker_discovery().into_event()));
     stopped.update(refresh_completed(
         initial,
         Ok(stopped_snapshot(&[("container-a", "api", "nginx:1.27")])),
@@ -1120,7 +1120,7 @@ fn help_offers_a_shell_only_while_the_resource_can_host_one() {
     );
 
     let mut running = App::new();
-    let initial = refresh_request(running.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let initial = refresh_request(running.update(docker_discovery().into_event()));
     running.update(refresh_completed(
         initial,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
@@ -1475,7 +1475,7 @@ fn numbered_panels_render_their_navigation_shortcuts() {
 #[test]
 fn resource_panel_keeps_its_navigation_shortcut_while_loading_or_unavailable() {
     let mut loading_app = App::new();
-    loading_app.update(AppEvent::ProviderDiscovered(docker_discovery()));
+    loading_app.update(docker_discovery().into_event());
     assert!(render_to_text(loading_app.state(), 100, 24).contains("[2] Resources"));
 
     let unavailable = ProviderDiscovery::new(
@@ -1483,7 +1483,7 @@ fn resource_panel_keeps_its_navigation_shortcut_while_loading_or_unavailable() {
         Some(WorkspaceError::new("Docker is unavailable")),
     );
     let mut error_app = App::new();
-    error_app.update(AppEvent::ProviderDiscovered(unavailable));
+    error_app.update(unavailable.into_event());
     assert!(render_to_text(error_app.state(), 100, 24).contains("[2] Error"));
 }
 
@@ -1500,7 +1500,7 @@ fn each_resource_status_is_coloured_by_its_resource_state() {
         (ResourceState::Unknown, "teleporting", Color::Reset),
     ] {
         let mut app = App::new();
-        let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+        let initial = refresh_request(app.update(docker_discovery().into_event()));
         app.update(refresh_completed(
             initial,
             Ok(container_snapshot(
@@ -1538,8 +1538,7 @@ fn bracket_keys_switch_the_active_workspace() {
         snapshot(&[("container-a", "api", "nginx:1.27")]),
     );
     assert!(
-        app.update(AppEvent::ProviderDiscovered(fixture_discovery()))
-            .is_empty(),
+        app.update(fixture_discovery().into_event()).is_empty(),
         "inactive workspaces remain idle"
     );
 
@@ -1575,8 +1574,7 @@ fn numbered_provider_panel_activates_incus_and_requests_its_refresh() {
         snapshot(&[("container-a", "api", "nginx:1.27")]),
     );
     assert!(
-        app.update(AppEvent::ProviderDiscovered(incus_discovery()))
-            .is_empty(),
+        app.update(incus_discovery().into_event()).is_empty(),
         "inactive workspaces remain idle"
     );
 
@@ -1610,9 +1608,8 @@ fn numbered_provider_panel_activates_incus_and_requests_its_refresh() {
 #[test]
 fn late_docker_result_cannot_replace_the_active_incus_workspace() {
     let mut app = App::new();
-    let stale_docker =
-        refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(AppEvent::ProviderDiscovered(incus_discovery()));
+    let stale_docker = refresh_request(app.update(docker_discovery().into_event()));
+    app.update(incus_discovery().into_event());
     app.invoke(Command::FocusProviders);
     let incus_request = refresh_request(app.invoke(Command::NextWorkspace));
     app.update(refresh_completed(
@@ -1815,7 +1812,7 @@ fn docker_multi_panel_snapshot() -> WorkspaceSnapshot {
 #[test]
 fn a_selected_container_offers_dockers_native_detail_views() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
 
     app.update(refresh_completed(
         initial,
@@ -1834,7 +1831,7 @@ fn a_selected_container_offers_dockers_native_detail_views() {
 #[test]
 fn settling_on_a_resource_requests_only_the_visible_detail_view() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
 
     let requests = app.update(refresh_completed(
         initial,
@@ -1867,7 +1864,7 @@ fn settling_on_a_resource_requests_only_the_visible_detail_view() {
 #[test]
 fn docker_renders_every_provider_defined_resource_panel() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
 
     app.update(refresh_completed(
         initial,
@@ -1926,7 +1923,7 @@ fn focus_has_a_non_colour_cue_on_every_pane() {
 #[test]
 fn a_workspace_over_the_numbered_panel_capacity_is_refused() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
     let template = docker_multi_panel_snapshot().panels.remove(0);
     let panels = (0..10)
         .map(|index| {
@@ -1962,7 +1959,7 @@ fn active_provider_and_target_environment_share_the_top_bar() {
 #[test]
 fn resource_panel_scroll_is_restored_when_focus_returns() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
     let mut workspace = docker_multi_panel_snapshot();
     for index in 1..12 {
         let mut resource = workspace.panels[0].resources[0].clone();
@@ -2042,8 +2039,7 @@ fn focus_cycles_through_provider_order_and_wraps() {
 #[test]
 fn every_workspace_and_resource_panel_restores_its_navigation_state() {
     let mut app = App::new();
-    let docker_refresh =
-        refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let docker_refresh = refresh_request(app.update(docker_discovery().into_event()));
     let mut docker_snapshot = docker_multi_panel_snapshot();
     for (panel_index, suffix) in [(0, "worker"), (1, "alpine:3.20")] {
         let mut second = docker_snapshot.panels[panel_index].resources[0].clone();
@@ -2056,7 +2052,7 @@ fn every_workspace_and_resource_panel_restores_its_navigation_state() {
     app.invoke(Command::SelectNext);
     app.invoke(Command::FocusResourcePanel(1));
     app.invoke(Command::SelectNext);
-    app.update(AppEvent::ProviderDiscovered(incus_discovery()));
+    app.update(incus_discovery().into_event());
     let incus_refresh = refresh_request(app.invoke(Command::NextWorkspace));
     app.update(refresh_completed(
         incus_refresh,
@@ -2126,7 +2122,7 @@ fn selecting_an_image_routes_details_by_panel_and_resource() {
 #[test]
 fn stale_container_details_cannot_replace_selected_image_details() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
     let stale_container = detail_request(app.update(refresh_completed(
         initial,
         Ok(docker_multi_panel_snapshot()),
@@ -2152,7 +2148,7 @@ fn stale_container_details_cannot_replace_selected_image_details() {
 #[test]
 fn the_detail_panel_reports_loading_and_then_the_providers_own_output() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
     let request = detail_request(app.update(refresh_completed(
         initial,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
@@ -2272,7 +2268,7 @@ fn the_chosen_detail_view_survives_moving_to_another_resource() {
 #[test]
 fn a_late_result_for_the_previous_resource_cannot_replace_current_details() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
     let stale = detail_request(app.update(refresh_completed(
         initial,
         Ok(snapshot(&[
@@ -2301,7 +2297,7 @@ fn a_late_result_for_the_previous_resource_cannot_replace_current_details() {
 #[test]
 fn a_late_result_for_the_previous_detail_view_cannot_replace_current_details() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
     let stale = detail_request(app.update(refresh_completed(
         initial,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
@@ -2325,13 +2321,12 @@ fn a_late_result_for_the_previous_detail_view_cannot_replace_current_details() {
 #[test]
 fn a_late_docker_detail_result_cannot_reach_the_active_incus_workspace() {
     let mut app = App::new();
-    let docker_refresh =
-        refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let docker_refresh = refresh_request(app.update(docker_discovery().into_event()));
     let stale = detail_request(app.update(refresh_completed(
         docker_refresh,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
     )));
-    app.update(AppEvent::ProviderDiscovered(incus_discovery()));
+    app.update(incus_discovery().into_event());
     app.invoke(Command::FocusProviders);
     let incus_refresh = refresh_request(app.invoke(Command::NextWorkspace));
     let incus_details = detail_request(app.update(refresh_completed(
@@ -2359,13 +2354,12 @@ fn a_late_docker_detail_result_cannot_reach_the_active_incus_workspace() {
 #[test]
 fn returning_to_a_workspace_whose_detail_load_was_invalidated_asks_for_it_again() {
     let mut app = App::new();
-    let docker_refresh =
-        refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let docker_refresh = refresh_request(app.update(docker_discovery().into_event()));
     let abandoned = detail_request(app.update(refresh_completed(
         docker_refresh,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
     )));
-    app.update(AppEvent::ProviderDiscovered(incus_discovery()));
+    app.update(incus_discovery().into_event());
     app.invoke(Command::FocusProviders);
     app.invoke(Command::NextWorkspace);
 
@@ -2402,7 +2396,7 @@ fn returning_to_a_workspace_whose_detail_load_was_invalidated_asks_for_it_again(
 #[test]
 fn an_ordinary_refresh_neither_reloads_nor_discards_the_loaded_details() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
     let details = detail_request(app.update(refresh_completed(
         initial,
         Ok(snapshot(&[
@@ -2440,7 +2434,7 @@ fn an_ordinary_refresh_neither_reloads_nor_discards_the_loaded_details() {
 #[test]
 fn a_refresh_that_removes_the_selected_resource_loads_the_new_selections_details() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
     let details = detail_request(app.update(refresh_completed(
         initial,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
@@ -2478,7 +2472,7 @@ fn a_refresh_that_removes_the_selected_resource_loads_the_new_selections_details
 #[test]
 fn a_detail_view_the_provider_answered_with_nothing_gets_its_own_empty_state() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
     let details = detail_request(app.update(refresh_completed(
         initial,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
@@ -2496,7 +2490,7 @@ fn a_detail_view_the_provider_answered_with_nothing_gets_its_own_empty_state() {
 #[test]
 fn a_failed_detail_view_names_the_provider_resource_and_view() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
     let details = detail_request(app.update(refresh_completed(
         initial,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
@@ -2520,7 +2514,7 @@ fn a_failed_detail_view_names_the_provider_resource_and_view() {
 #[test]
 fn a_failed_detail_view_leaves_the_resource_list_and_its_commands_alone() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
     let details = detail_request(app.update(refresh_completed(
         initial,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
@@ -2555,7 +2549,7 @@ fn a_failed_detail_view_leaves_the_resource_list_and_its_commands_alone() {
 #[test]
 fn scrolling_moves_through_a_long_detail_view_and_clamps_at_both_ends() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
     let details = detail_request(app.update(refresh_completed(
         initial,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
@@ -2598,7 +2592,7 @@ fn scrolling_moves_through_a_long_detail_view_and_clamps_at_both_ends() {
 #[test]
 fn moving_to_another_resource_starts_its_detail_view_at_the_top() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
     let details = detail_request(app.update(refresh_completed(
         initial,
         Ok(snapshot(&[
@@ -2674,7 +2668,7 @@ fn configured_detail_view_keys_change_dispatch_and_help_together() {
 #[test]
 fn a_selected_instance_offers_incus_views_rather_than_docker_equivalents() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(incus_discovery())));
+    let initial = refresh_request(app.update(incus_discovery().into_event()));
 
     app.update(refresh_completed(
         initial,
@@ -2767,7 +2761,7 @@ fn resource_navigation_keeps_earlier_rows_visible_until_the_selection_leaves_the
 #[test]
 fn automatic_and_manual_refreshes_do_not_overlap() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
 
     assert!(app.update(AppEvent::RefreshTimerElapsed).is_empty());
     assert!(app.invoke(Command::Refresh).is_empty());
@@ -2790,7 +2784,7 @@ fn automatic_and_manual_refreshes_do_not_overlap() {
 #[test]
 fn capital_j_moves_the_resource_selection_five_items_and_clamps_at_the_end() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
     app.update(refresh_completed(initial, Ok(seven_resources())));
 
     // Five ahead from the first lands on the sixth resource.
@@ -2811,7 +2805,7 @@ fn capital_j_moves_the_resource_selection_five_items_and_clamps_at_the_end() {
 #[test]
 fn capital_k_moves_the_resource_selection_five_items_back_and_clamps_at_the_start() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
     app.update(refresh_completed(initial, Ok(seven_resources())));
     // Park the selection on the last resource.
     for _ in 0..6 {
@@ -2838,9 +2832,9 @@ fn capital_k_moves_the_resource_selection_five_items_back_and_clamps_at_the_star
 #[test]
 fn fast_navigation_does_nothing_while_the_provider_selector_has_focus() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
     app.update(refresh_completed(initial, Ok(seven_resources())));
-    app.update(AppEvent::ProviderDiscovered(fixture_discovery()));
+    app.update(fixture_discovery().into_event());
     handle_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('1'), KeyModifiers::NONE),
@@ -2871,7 +2865,7 @@ fn fast_navigation_does_nothing_while_the_provider_selector_has_focus() {
 #[test]
 fn help_lists_fast_navigation_under_its_effective_bindings() {
     let mut default = App::new();
-    let initial = refresh_request(default.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let initial = refresh_request(default.update(docker_discovery().into_event()));
     default.update(refresh_completed(initial, Ok(seven_resources())));
 
     handle_key(
@@ -2886,8 +2880,7 @@ fn help_lists_fast_navigation_under_its_effective_bindings() {
         CommandRegistry::effective(&[("selection.next.fast".to_owned(), vec!["f5".to_owned()])])
             .expect("a valid override");
     let mut configured = App::with_registry(registry);
-    let initial =
-        refresh_request(configured.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let initial = refresh_request(configured.update(docker_discovery().into_event()));
     configured.update(refresh_completed(initial, Ok(seven_resources())));
 
     handle_key(
@@ -2915,7 +2908,7 @@ fn configured_fast_navigation_keys_replace_the_capital_defaults() {
     ])
     .expect("a valid override set");
     let mut app = App::with_registry(registry);
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
     app.update(refresh_completed(initial, Ok(seven_resources())));
 
     handle_key(&mut app, KeyEvent::new(KeyCode::F(5), KeyModifiers::NONE));
@@ -2952,7 +2945,7 @@ fn unbound_fast_navigation_neither_moves_the_selection_nor_appears_in_help() {
     ])
     .expect("unbinding is valid");
     let mut app = App::with_registry(registry);
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
     app.update(refresh_completed(initial, Ok(seven_resources())));
 
     for unbound in ['J', 'K'] {

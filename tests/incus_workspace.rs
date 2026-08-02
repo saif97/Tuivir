@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use virtui::{
-    application::{App, AppEvent, InteractiveShellProcess},
+    application::{App, InteractiveShellProcess},
     cli::{ProcessError, ProcessOutput, ProcessSpec},
     incus::IncusWorkspace,
     provider::{
@@ -470,7 +470,7 @@ async fn discovered_incus_workspace_renders_target_environment_and_instances() {
         .expect("the fixture represents an installed Incus CLI");
     let mut app = App::new();
     let request = app
-        .update(AppEvent::ProviderDiscovered(discovered))
+        .update(discovered.into_event())
         .into_iter()
         .next()
         .expect("discovery requests the first workspace refresh");
@@ -507,7 +507,7 @@ async fn reachable_incus_without_instances_renders_a_distinct_empty_state() {
     let discovered = incus.discover(&cli).await.expect("Incus is installed");
     let mut app = App::new();
     let request = app
-        .update(AppEvent::ProviderDiscovered(discovered))
+        .update(discovered.into_event())
         .into_iter()
         .next()
         .expect("initial refresh");
@@ -539,7 +539,7 @@ async fn installed_but_unreachable_incus_stays_visible_with_provider_specific_er
 
     let discovered = incus.discover(&cli).await.expect("Incus is installed");
     let mut app = App::new();
-    let requests = app.update(AppEvent::ProviderDiscovered(discovered));
+    let requests = app.update(discovered.into_event());
 
     assert!(
         requests.is_empty(),

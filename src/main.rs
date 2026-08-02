@@ -52,7 +52,7 @@ async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::R
     let mut app = App::with_registry(registry);
 
     for discovered in runtime.discover().await {
-        let requests = app.update(AppEvent::ProviderDiscovered(discovered));
+        let requests = app.update(discovered.into_event());
         dispatch_all(&runtime, &completion_tx, requests);
     }
 

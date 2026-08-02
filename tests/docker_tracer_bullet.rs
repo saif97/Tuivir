@@ -1,5 +1,5 @@
 use virtui::{
-    application::{App, AppEvent, InteractiveShellProcess},
+    application::{App, InteractiveShellProcess},
     cli::{ProcessError, ProcessOutput, ProcessSpec},
     docker::DockerWorkspace,
     provider::{
@@ -776,7 +776,7 @@ async fn discovered_docker_workspace_renders_target_environment_and_containers()
         .await
         .expect("the fixture represents an installed Docker CLI");
     let mut app = App::new();
-    let requests = app.update(AppEvent::ProviderDiscovered(discovered));
+    let requests = app.update(discovered.into_event());
     let request = requests
         .into_iter()
         .next()
@@ -824,7 +824,7 @@ async fn reachable_docker_without_containers_renders_a_distinct_empty_state() {
     let discovered = docker.discover(&cli).await.expect("Docker is installed");
     let mut app = App::new();
     let request = app
-        .update(AppEvent::ProviderDiscovered(discovered))
+        .update(discovered.into_event())
         .into_iter()
         .next()
         .expect("initial refresh");
@@ -846,7 +846,7 @@ async fn installed_but_unreachable_docker_stays_visible_with_actionable_error() 
     let discovered = docker.discover(&cli).await.expect("Docker is installed");
     let mut app = App::new();
 
-    let requests = app.update(AppEvent::ProviderDiscovered(discovered));
+    let requests = app.update(discovered.into_event());
 
     assert!(
         requests.is_empty(),
@@ -928,7 +928,7 @@ async fn failed_container_refresh_identifies_docker_command_and_target() {
     let discovered = docker.discover(&cli).await.expect("Docker is installed");
     let mut app = App::new();
     let request = app
-        .update(AppEvent::ProviderDiscovered(discovered))
+        .update(discovered.into_event())
         .into_iter()
         .next()
         .expect("initial refresh");

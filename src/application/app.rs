@@ -3,13 +3,10 @@ use std::collections::HashMap;
 use super::workspace::{DetailCompletion, ProviderWorkspaceState};
 use super::{
     Command, CommandRegistry, CommandScope, InteractiveShellOutcome, InteractiveShellProcess, Key,
-    NUMBERED_RESOURCE_PANEL_CAPACITY,
+    NUMBERED_RESOURCE_PANEL_CAPACITY, ProviderRequest, ProviderRequestId, ResourceCommand,
+    ResourceDetails, WorkspaceError, WorkspaceSnapshot,
 };
-use crate::provider::{
-    DetailViewId, ProviderDiscovery, ProviderId, ProviderRequest, ProviderRequestId,
-    ResourceCommand, ResourceDetails, ResourceState, ResourceTarget, WorkspaceError,
-    WorkspaceSnapshot,
-};
+use crate::domain::{DetailViewId, Provider, ProviderId, ResourceState, ResourceTarget};
 
 /// Facts the application receives: provider discovery, the refresh clock, and
 /// asynchronous completions.
@@ -17,7 +14,10 @@ use crate::provider::{
 /// User intentions are [`Command`]s, resolved from keys, not events. Keeping
 /// the two separate means a keypress never looks like a completed refresh.
 pub enum AppEvent {
-    ProviderDiscovered(ProviderDiscovery),
+    ProviderDiscovered {
+        provider: Provider,
+        error: Option<WorkspaceError>,
+    },
     RefreshTimerElapsed,
     /// The result of an earlier [`ProviderRequest::RefreshWorkspace`].
     ///
@@ -258,7 +258,9 @@ impl App {
 
     fn apply(&mut self, event: AppEvent) -> Vec<ProviderRequest> {
         match event {
-            AppEvent::ProviderDiscovered(discovery) => self.handle_provider_discovered(discovery),
+            AppEvent::ProviderDiscovered { provider, error } => {
+                self.handle_provider_discovered(provider, error)
+            }
             AppEvent::RefreshTimerElapsed => self.refresh_active_provider(),
             AppEvent::ShellClosed { shell, outcome } => self.apply_shell_closed(shell, outcome),
             AppEvent::RefreshCompleted {
@@ -436,11 +438,14 @@ impl App {
         }
     }
 
-    fn handle_provider_discovered(&mut self, discovery: ProviderDiscovery) -> Vec<ProviderRequest> {
+    fn handle_provider_discovered(
+        &mut self,
+        provider: Provider,
+        error: Option<WorkspaceError>,
+    ) -> Vec<ProviderRequest> {
         let activates_provider = self.state.active_provider.is_none();
-        let should_refresh_active_provider = activates_provider && discovery.error().is_none();
-        let provider_id = discovery.provider().id().clone();
-        let (provider, error) = discovery.into_parts();
+        let should_refresh_active_provider = activates_provider && error.is_none();
+        let provider_id = provider.id().clone();
         self.state
             .providers
             .push(ProviderWorkspaceState::new(provider, error));
@@ -791,7 +796,7 @@ impl App {
         });
     }
 
-    fn selected_resource(&self) -> Option<&crate::provider::Resource> {
+    fn selected_resource(&self) -> Option<&super::Resource> {
         let provider = self
             .state
             .active_provider

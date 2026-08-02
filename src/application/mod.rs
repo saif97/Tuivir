@@ -2,6 +2,7 @@ mod app;
 mod command;
 mod key;
 mod keybinding;
+mod provider;
 mod shell;
 mod workspace;
 
@@ -15,6 +16,10 @@ pub use command::{
 };
 pub use key::{InvalidKey, Key, Named};
 pub use keybinding::KeybindingError;
+pub use provider::{
+    DetailView, ProviderRequest, ProviderRequestId, Resource, ResourceDetails, ResourcePanel,
+    WorkspaceError, WorkspaceSnapshot,
+};
 pub use shell::{InteractiveShellOutcome, InteractiveShellProcess};
 pub use workspace::{
     DetailCompletion, DetailContent, DetailLoad, ProviderWorkspaceState, ResourceDetailsView,
