@@ -213,6 +213,14 @@ impl ResourceTarget {
             resource_id,
         }
     }
+
+    pub fn panel_id(&self) -> &ResourcePanelId {
+        &self.panel_id
+    }
+
+    pub fn resource_id(&self) -> &ResourceId {
+        &self.resource_id
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -325,15 +333,11 @@ impl WorkspaceSnapshot {
         self.panels.iter().find(|panel| &panel.id == panel_id)
     }
 
-    pub fn resource(
-        &self,
-        panel_id: &ResourcePanelId,
-        resource_id: &ResourceId,
-    ) -> Option<&Resource> {
-        self.panel(panel_id)?
+    pub fn resource(&self, target: &ResourceTarget) -> Option<&Resource> {
+        self.panel(target.panel_id())?
             .resources
             .iter()
-            .find(|resource| &resource.id == resource_id)
+            .find(|resource| &resource.id == target.resource_id())
     }
 }
 

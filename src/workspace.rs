@@ -449,7 +449,7 @@ impl ProviderWorkspaceState {
         let selected_target = self.selected_resource_target();
         let selected_resource = selected_target
             .as_ref()
-            .and_then(|selected| snapshot.resource(&selected.panel_id, &selected.resource_id));
+            .and_then(|selected| snapshot.resource(selected));
         let selected_panel = selected_target
             .as_ref()
             .and_then(|selected| snapshot.panel(&selected.panel_id));
@@ -525,7 +525,7 @@ impl ProviderWorkspaceState {
         let WorkspaceLoadState::Ready(snapshot) = &self.load_state else {
             return None;
         };
-        snapshot.resource(&target.panel_id, &target.resource_id)
+        snapshot.resource(&target)
     }
 
     fn invalidate_detail_when_target_changes<R>(
@@ -567,7 +567,7 @@ impl ProviderWorkspaceState {
             return None;
         };
         let target = self.selected_resource_target()?;
-        let resource = snapshot.resource(&target.panel_id, &target.resource_id)?;
+        let resource = snapshot.resource(&target)?;
         let view_id = self.selected_detail_view.as_ref()?;
         let view = snapshot
             .panel(&target.panel_id)?
