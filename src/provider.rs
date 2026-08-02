@@ -200,8 +200,8 @@ impl fmt::Display for ResourceId {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 /// Identifies one Resource within its provider-defined Resource Panel.
 pub struct ResourceTarget {
-    pub panel_id: ResourcePanelId,
-    pub resource_id: ResourceId,
+    panel_id: ResourcePanelId,
+    resource_id: ResourceId,
 }
 
 impl ResourceTarget {
