@@ -233,11 +233,26 @@ pub fn provider_cli_error(provider_name: &str, error: &ProcessError, fallback: &
 /// `error` distinguishes an installed-but-unreachable provider from an absent
 /// CLI, which is represented by `None` from [`ProviderWorkspace::discover`].
 pub struct ProviderDiscovery {
-    pub id: ProviderId,
-    pub name: String,
-    pub target_environment: TargetEnvironment,
-    pub version: Option<ProviderVersion>,
-    pub error: Option<WorkspaceError>,
+    provider: Provider,
+    error: Option<WorkspaceError>,
+}
+
+impl ProviderDiscovery {
+    pub fn new(provider: Provider, error: Option<WorkspaceError>) -> Self {
+        Self { provider, error }
+    }
+
+    pub fn provider(&self) -> &Provider {
+        &self.provider
+    }
+
+    pub fn error(&self) -> Option<&WorkspaceError> {
+        self.error.as_ref()
+    }
+
+    pub fn into_parts(self) -> (Provider, Option<WorkspaceError>) {
+        (self.provider, self.error)
+    }
 }
 
 /// A provider-specific source of UI-neutral workspace data.

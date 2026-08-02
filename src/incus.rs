@@ -6,8 +6,8 @@ use crate::{
     application::InteractiveShellProcess,
     cli::{CliRunner, ProcessError, ProcessSpec},
     provider::{
-        DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderWorkspace, Resource,
-        ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourcePanelId,
+        DetailView, DetailViewId, Provider, ProviderDiscovery, ProviderId, ProviderWorkspace,
+        Resource, ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourcePanelId,
         ResourceState, ResourceTarget, TargetEnvironment, WorkspaceError, WorkspaceSnapshot,
         provider_cli_error,
     },
@@ -85,13 +85,15 @@ impl ProviderWorkspace for IncusWorkspace {
                 Ok(output) => output.stdout.trim().to_owned(),
             };
 
-            Some(ProviderDiscovery {
-                id: self.id(),
-                name: PROVIDER_NAME.to_owned(),
-                target_environment: TargetEnvironment::new(format!("{remote} / {project}")),
-                version: None,
-                error: None,
-            })
+            Some(ProviderDiscovery::new(
+                Provider::new(
+                    self.id(),
+                    PROVIDER_NAME,
+                    TargetEnvironment::new(format!("{remote} / {project}")),
+                    None,
+                ),
+                None,
+            ))
         })
     }
 
@@ -287,16 +289,18 @@ fn instance_shell(state: ResourceState, name: &str) -> Option<InteractiveShellPr
 }
 
 fn discovery_error(message: impl AsRef<str>, command: &str) -> ProviderDiscovery {
-    ProviderDiscovery {
-        id: ProviderId::new(PROVIDER_ID),
-        name: PROVIDER_NAME.to_owned(),
-        target_environment: TargetEnvironment::new("unavailable"),
-        version: None,
-        error: Some(WorkspaceError::with_help(
+    ProviderDiscovery::new(
+        Provider::new(
+            ProviderId::new(PROVIDER_ID),
+            PROVIDER_NAME,
+            TargetEnvironment::new("unavailable"),
+            None,
+        ),
+        Some(WorkspaceError::with_help(
             message,
             &format!("Run `{command}` to verify the selected Target Environment."),
         )),
-    }
+    )
 }
 
 /// A failed listing, carrying help only where it applies.

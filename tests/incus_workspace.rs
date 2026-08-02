@@ -569,8 +569,8 @@ async fn incus_with_unreadable_current_project_stays_visible() {
 
     let discovered = incus.discover(&cli).await.expect("Incus is installed");
 
-    assert_eq!(discovered.name, "Incus");
-    let error = discovered.error.expect("the provider exposes its error");
+    assert_eq!(discovered.provider().name(), "Incus");
+    let error = discovered.error().expect("the provider exposes its error");
     assert!(
         error
             .message
@@ -715,7 +715,7 @@ async fn a_silent_discovery_failure_names_the_probe_that_failed() {
         .await
         .expect("Incus is installed");
 
-    let error = discovered.error.expect("the provider exposes its error");
+    let error = discovered.error().expect("the provider exposes its error");
     assert_eq!(
         error.message,
         "Incus could not report its default remote. Run `incus remote get-default` to verify the selected Target Environment."
@@ -740,7 +740,7 @@ async fn incus_that_disappears_during_discovery_stays_visible_with_an_error() {
         .await
         .expect("the initial probe already proved Incus was installed");
 
-    let error = discovered.error.expect("the provider exposes its error");
+    let error = discovered.error().expect("the provider exposes its error");
     assert!(
         error.message.contains("Incus CLI is no longer available"),
         "workspace error: {}",
@@ -774,6 +774,9 @@ async fn runtime_with_builtin_providers_discovers_installed_incus() {
     let discovered = runtime.discover().await;
 
     assert_eq!(discovered.len(), 1);
-    assert_eq!(discovered[0].name, "Incus");
-    assert_eq!(discovered[0].target_environment, "local / default");
+    assert_eq!(discovered[0].provider().name(), "Incus");
+    assert_eq!(
+        discovered[0].provider().target_environment(),
+        &"local / default"
+    );
 }

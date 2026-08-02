@@ -1,8 +1,9 @@
 use virtui::{
+    domain::Provider,
     provider::{
-        DetailView, ProviderDiscovery, ProviderId, ProviderRequestId, Resource, ResourceDetails,
-        ResourceId, ResourcePanel, ResourcePanelId, ResourceTarget, TargetEnvironment,
-        WorkspaceError, WorkspaceSnapshot,
+        DetailView, ProviderId, ProviderRequestId, Resource, ResourceDetails, ResourceId,
+        ResourcePanel, ResourcePanelId, ResourceTarget, TargetEnvironment, WorkspaceError,
+        WorkspaceSnapshot,
     },
     workspace::{DetailContent, ProviderWorkspaceState, WorkspaceLoadState},
 };
@@ -39,13 +40,15 @@ fn snapshot() -> WorkspaceSnapshot {
 }
 
 fn workspace() -> ProviderWorkspaceState {
-    ProviderWorkspaceState::new(ProviderDiscovery {
-        id: ProviderId::new("docker"),
-        name: "Docker".to_owned(),
-        target_environment: TargetEnvironment::new("desktop-linux"),
-        version: None,
-        error: None,
-    })
+    ProviderWorkspaceState::new(
+        Provider::new(
+            ProviderId::new("docker"),
+            "Docker",
+            TargetEnvironment::new("desktop-linux"),
+            None,
+        ),
+        None,
+    )
 }
 
 #[test]

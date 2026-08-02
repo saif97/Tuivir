@@ -437,11 +437,12 @@ impl App {
 
     fn handle_provider_discovered(&mut self, discovery: ProviderDiscovery) -> Vec<ProviderRequest> {
         let activates_provider = self.state.active_provider.is_none();
-        let should_refresh_active_provider = activates_provider && discovery.error.is_none();
-        let provider_id = discovery.id.clone();
+        let should_refresh_active_provider = activates_provider && discovery.error().is_none();
+        let provider_id = discovery.provider().id().clone();
+        let (provider, error) = discovery.into_parts();
         self.state
             .providers
-            .push(ProviderWorkspaceState::new(discovery));
+            .push(ProviderWorkspaceState::new(provider, error));
         if activates_provider {
             self.state.active_provider = Some(self.state.providers.len() - 1);
         }

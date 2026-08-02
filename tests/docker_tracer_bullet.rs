@@ -871,7 +871,7 @@ async fn unreachable_docker_without_stderr_reports_what_it_printed_on_stdout() {
         .await
         .expect("Docker is installed");
 
-    let error = discovered.error.expect("the provider exposes its error");
+    let error = discovered.error().expect("the provider exposes its error");
     assert!(
         error.message.contains("the context store is unreadable"),
         "workspace error: {}",
@@ -892,7 +892,7 @@ async fn docker_that_fails_silently_at_discovery_still_explains_itself() {
         .await
         .expect("Docker is installed");
 
-    let error = discovered.error.expect("the provider exposes its error");
+    let error = discovered.error().expect("the provider exposes its error");
     assert!(
         error
             .message
@@ -900,7 +900,7 @@ async fn docker_that_fails_silently_at_discovery_still_explains_itself() {
         "workspace error: {}",
         error.message
     );
-    assert_eq!(discovered.target_environment, "unavailable");
+    assert_eq!(discovered.provider().target_environment(), &"unavailable");
 }
 
 #[tokio::test]

@@ -17,9 +17,9 @@ use virtui::{
     application::InteractiveShellProcess,
     cli::{InteractiveRunner, ProcessError, ProcessFailure, ProcessSpec},
     provider::{
-        DetailView, ProviderDiscovery, ProviderId, ProviderRequest, Resource, ResourceCommand,
-        ResourceId, ResourcePanel, ResourcePanelId, ResourceState, TargetEnvironment,
-        WorkspaceSnapshot,
+        DetailView, Provider, ProviderDiscovery, ProviderId, ProviderRequest, Resource,
+        ResourceCommand, ResourceId, ResourcePanel, ResourcePanelId, ResourceState,
+        TargetEnvironment, WorkspaceSnapshot,
     },
     runtime::{ShellTerminal, handle_key, open_pending_shell},
     ui::render_to_text,
@@ -103,13 +103,15 @@ impl InteractiveRunner for FakeShell {
 }
 
 fn docker_discovery() -> ProviderDiscovery {
-    ProviderDiscovery {
-        id: ProviderId::new("docker"),
-        name: "Docker".to_owned(),
-        target_environment: TargetEnvironment::new("desktop-linux"),
-        version: None,
-        error: None,
-    }
+    ProviderDiscovery::new(
+        Provider::new(
+            ProviderId::new("docker"),
+            "Docker",
+            TargetEnvironment::new("desktop-linux"),
+            None,
+        ),
+        None,
+    )
 }
 
 /// One running container, carrying the Interactive Shell Docker offers inside

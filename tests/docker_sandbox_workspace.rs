@@ -42,14 +42,20 @@ async fn docker_sandbox_keeps_provider_version_separate_from_its_target_environm
         .await
         .expect("the fixture represents an installed sbx");
 
-    assert_eq!(discovered.id, ProviderId::new("docker-sandbox"));
-    assert_eq!(discovered.name, "Docker Sandbox");
     assert_eq!(
-        discovered.target_environment,
-        TargetEnvironment::new("local")
+        discovered.provider().id(),
+        &ProviderId::new("docker-sandbox")
     );
-    assert_eq!(discovered.version, Some(ProviderVersion::new("v0.37.0")));
-    assert_eq!(discovered.error, None);
+    assert_eq!(discovered.provider().name(), "Docker Sandbox");
+    assert_eq!(
+        discovered.provider().target_environment(),
+        &TargetEnvironment::new("local")
+    );
+    assert_eq!(
+        discovered.provider().version(),
+        Some(&ProviderVersion::new("v0.37.0"))
+    );
+    assert_eq!(discovered.error(), None);
 }
 
 /// sbx resolves a sandbox by name and by nothing else — the UUID it also
@@ -491,10 +497,16 @@ async fn runtime_with_builtin_providers_discovers_installed_docker_sandbox() {
     let discovered = runtime.discover().await;
 
     assert_eq!(discovered.len(), 1);
-    assert_eq!(discovered[0].id, ProviderId::new("docker-sandbox"));
-    assert_eq!(discovered[0].name, "Docker Sandbox");
-    assert_eq!(discovered[0].target_environment, "local");
-    assert_eq!(discovered[0].version, Some(ProviderVersion::new("v0.37.0")));
+    assert_eq!(
+        discovered[0].provider().id(),
+        &ProviderId::new("docker-sandbox")
+    );
+    assert_eq!(discovered[0].provider().name(), "Docker Sandbox");
+    assert_eq!(discovered[0].provider().target_environment(), &"local");
+    assert_eq!(
+        discovered[0].provider().version(),
+        Some(&ProviderVersion::new("v0.37.0"))
+    );
 }
 
 /// Closes the loop #29 asks for: an invoked Command, through the confirmation
@@ -927,11 +939,11 @@ async fn installed_docker_sandbox_that_cannot_list_stays_visible_with_an_actiona
         .await
         .expect("an installed sbx is never omitted");
 
-    assert_eq!(discovered.name, "Docker Sandbox");
-    assert_eq!(discovered.target_environment, "unavailable");
+    assert_eq!(discovered.provider().name(), "Docker Sandbox");
+    assert_eq!(discovered.provider().target_environment(), &"unavailable");
     assert_eq!(
         discovered
-            .error
+            .error()
             .expect("an unusable provider explains itself")
             .message,
         "Error: not signed in to Docker. Run `sbx ls` to verify sandboxd is running and you are signed in to Docker."
@@ -954,7 +966,7 @@ async fn an_sbx_that_cannot_be_started_names_docker_sandbox_in_the_error() {
 
     assert_eq!(
         discovered
-            .error
+            .error()
             .expect("a provider that cannot start explains itself")
             .message,
         "Docker Sandbox CLI could not be started: permission denied. Run `sbx ls` to verify sandboxd is running and you are signed in to Docker."
@@ -979,7 +991,7 @@ async fn a_silent_version_probe_failure_still_explains_itself() {
 
     assert_eq!(
         discovered
-            .error
+            .error()
             .expect("a silent failure still explains itself")
             .message,
         "Docker Sandbox could not report its version. Run `sbx ls` to verify sandboxd is running and you are signed in to Docker."

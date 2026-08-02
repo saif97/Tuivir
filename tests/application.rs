@@ -14,8 +14,8 @@ use virtui::{
     command::{Command, CommandRegistry, CommandScope},
     docker::DockerWorkspace,
     provider::{
-        DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderRequest, Resource,
-        ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourcePanelId,
+        DetailView, DetailViewId, Provider, ProviderDiscovery, ProviderId, ProviderRequest,
+        Resource, ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourcePanelId,
         ResourceState, ResourceTarget, TargetEnvironment, WorkspaceError, WorkspaceSnapshot,
     },
     runtime::{ProviderRuntime, RefreshTimer, ShellControl, handle_key},
@@ -53,33 +53,39 @@ fn foreground_of(state: &AppState, width: u16, height: u16, text: &str) -> Color
 }
 
 fn docker_discovery() -> ProviderDiscovery {
-    ProviderDiscovery {
-        id: ProviderId::new("docker"),
-        name: "Docker".to_owned(),
-        target_environment: TargetEnvironment::new("desktop-linux"),
-        version: None,
-        error: None,
-    }
+    ProviderDiscovery::new(
+        Provider::new(
+            ProviderId::new("docker"),
+            "Docker",
+            TargetEnvironment::new("desktop-linux"),
+            None,
+        ),
+        None,
+    )
 }
 
 fn fixture_discovery() -> ProviderDiscovery {
-    ProviderDiscovery {
-        id: ProviderId::new("fixture"),
-        name: "Fixture".to_owned(),
-        target_environment: TargetEnvironment::new("local"),
-        version: None,
-        error: None,
-    }
+    ProviderDiscovery::new(
+        Provider::new(
+            ProviderId::new("fixture"),
+            "Fixture",
+            TargetEnvironment::new("local"),
+            None,
+        ),
+        None,
+    )
 }
 
 fn incus_discovery() -> ProviderDiscovery {
-    ProviderDiscovery {
-        id: ProviderId::new("incus"),
-        name: "Incus".to_owned(),
-        target_environment: TargetEnvironment::new("local / default"),
-        version: None,
-        error: None,
-    }
+    ProviderDiscovery::new(
+        Provider::new(
+            ProviderId::new("incus"),
+            "Incus",
+            TargetEnvironment::new("local / default"),
+            None,
+        ),
+        None,
+    )
 }
 
 #[test]
@@ -1471,8 +1477,10 @@ fn resource_panel_keeps_its_navigation_shortcut_while_loading_or_unavailable() {
     loading_app.update(AppEvent::ProviderDiscovered(docker_discovery()));
     assert!(render_to_text(loading_app.state(), 100, 24).contains("[2] Resources"));
 
-    let mut unavailable = docker_discovery();
-    unavailable.error = Some(WorkspaceError::new("Docker is unavailable"));
+    let unavailable = ProviderDiscovery::new(
+        docker_discovery().provider().clone(),
+        Some(WorkspaceError::new("Docker is unavailable")),
+    );
     let mut error_app = App::new();
     error_app.update(AppEvent::ProviderDiscovered(unavailable));
     assert!(render_to_text(error_app.state(), 100, 24).contains("[2] Error"));

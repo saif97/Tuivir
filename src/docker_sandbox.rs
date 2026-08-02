@@ -6,7 +6,7 @@ use crate::{
     application::InteractiveShellProcess,
     cli::{CliRunner, ProcessError, ProcessSpec},
     provider::{
-        DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderVersion,
+        DetailView, DetailViewId, Provider, ProviderDiscovery, ProviderId, ProviderVersion,
         ProviderWorkspace, Resource, ResourceCommand, ResourceDetails, ResourceId, ResourcePanel,
         ResourcePanelId, ResourceState, ResourceTarget, TargetEnvironment, WorkspaceError,
         WorkspaceSnapshot, provider_cli_error,
@@ -169,16 +169,18 @@ fn refresh_error(message: impl AsRef<str>) -> WorkspaceError {
 }
 
 fn discovery_error(message: impl AsRef<str>) -> ProviderDiscovery {
-    ProviderDiscovery {
-        id: ProviderId::new(PROVIDER_ID),
-        name: PROVIDER_NAME.to_owned(),
-        target_environment: TargetEnvironment::new("unavailable"),
-        version: None,
-        error: Some(WorkspaceError::with_help(
+    ProviderDiscovery::new(
+        Provider::new(
+            ProviderId::new(PROVIDER_ID),
+            PROVIDER_NAME,
+            TargetEnvironment::new("unavailable"),
+            None,
+        ),
+        Some(WorkspaceError::with_help(
             message,
             "Run `sbx ls` to verify sandboxd is running and you are signed in to Docker.",
         )),
-    }
+    )
 }
 
 /// What `sbx ls` left behind when it could not list sandboxes, with no
@@ -275,13 +277,15 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
                 return Some(discovery_error(listing_message(&error)));
             }
 
-            Some(ProviderDiscovery {
-                id: self.id(),
-                name: PROVIDER_NAME.to_owned(),
-                target_environment: TargetEnvironment::new("local"),
-                version: Some(version),
-                error: None,
-            })
+            Some(ProviderDiscovery::new(
+                Provider::new(
+                    self.id(),
+                    PROVIDER_NAME,
+                    TargetEnvironment::new("local"),
+                    Some(version),
+                ),
+                None,
+            ))
         })
     }
 
