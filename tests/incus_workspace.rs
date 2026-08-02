@@ -6,7 +6,7 @@ use virtui::{
     incus::IncusWorkspace,
     provider::{
         DetailViewId, ProviderWorkspace, ResourceCommand, ResourceId, ResourcePanelId,
-        ResourceState,
+        ResourceState, ResourceTarget,
     },
     runtime::ProviderRuntime,
     ui::render_to_text,
@@ -14,6 +14,10 @@ use virtui::{
 
 mod common;
 use common::{FixtureCli, failure, failure_on_stdout, refresh_completed, success};
+
+fn target(panel_id: &str, resource_id: &str) -> ResourceTarget {
+    ResourceTarget::new(ResourcePanelId::new(panel_id), ResourceId::new(resource_id))
+}
 
 fn silent_failure() -> Result<ProcessOutput, ProcessError> {
     common::silent_failure(1)
@@ -29,8 +33,7 @@ async fn incus_start_generates_the_expected_cli_request() {
     IncusWorkspace
         .execute_command(
             &cli,
-            &ResourcePanelId::new("instances"),
-            &ResourceId::new("instance-a"),
+            &target("instances", "instance-a"),
             ResourceCommand::Start,
             ResourceState::Stopped,
         )
@@ -48,8 +51,7 @@ async fn incus_stop_generates_the_expected_cli_request() {
     IncusWorkspace
         .execute_command(
             &cli,
-            &ResourcePanelId::new("instances"),
-            &ResourceId::new("instance-a"),
+            &target("instances", "instance-a"),
             ResourceCommand::Stop,
             ResourceState::Running,
         )
@@ -67,8 +69,7 @@ async fn incus_restart_generates_the_expected_cli_request() {
     IncusWorkspace
         .execute_command(
             &cli,
-            &ResourcePanelId::new("instances"),
-            &ResourceId::new("instance-a"),
+            &target("instances", "instance-a"),
             ResourceCommand::Restart,
             ResourceState::Running,
         )
@@ -86,8 +87,7 @@ async fn incus_resume_generates_the_expected_cli_request() {
     IncusWorkspace
         .execute_command(
             &cli,
-            &ResourcePanelId::new("instances"),
-            &ResourceId::new("instance-a"),
+            &target("instances", "instance-a"),
             ResourceCommand::Resume,
             ResourceState::Paused,
         )
@@ -105,8 +105,7 @@ async fn deleting_a_stopped_instance_generates_the_expected_cli_request() {
     IncusWorkspace
         .execute_command(
             &cli,
-            &ResourcePanelId::new("instances"),
-            &ResourceId::new("instance-a"),
+            &target("instances", "instance-a"),
             ResourceCommand::Delete,
             ResourceState::Stopped,
         )
@@ -132,8 +131,7 @@ async fn deleting_an_instance_that_is_not_stopped_forces_removal() {
         IncusWorkspace
             .execute_command(
                 &cli,
-                &ResourcePanelId::new("instances"),
-                &ResourceId::new("instance-a"),
+                &target("instances", "instance-a"),
                 ResourceCommand::Delete,
                 state,
             )
@@ -446,8 +444,7 @@ async fn deleting_a_running_instance_forces_removal_without_a_second_query() {
     IncusWorkspace
         .execute_command(
             &cli,
-            &ResourcePanelId::new("instances"),
-            &ResourceId::new("instance-a"),
+            &target("instances", "instance-a"),
             ResourceCommand::Delete,
             ResourceState::Running,
         )
@@ -653,8 +650,7 @@ async fn a_silent_command_failure_names_the_operation_and_instance() {
     let error = IncusWorkspace
         .execute_command(
             &cli,
-            &ResourcePanelId::new("instances"),
-            &ResourceId::new("instance-a"),
+            &target("instances", "instance-a"),
             ResourceCommand::Restart,
             ResourceState::Running,
         )
@@ -674,8 +670,7 @@ async fn a_failed_command_reports_what_incus_wrote_to_stderr() {
     let error = IncusWorkspace
         .execute_command(
             &cli,
-            &ResourcePanelId::new("instances"),
-            &ResourceId::new("instance-a"),
+            &target("instances", "instance-a"),
             ResourceCommand::Delete,
             ResourceState::Stopped,
         )
@@ -700,8 +695,7 @@ async fn an_incus_cli_that_cannot_be_started_names_incus_in_the_error() {
     let error = IncusWorkspace
         .execute_command(
             &cli,
-            &ResourcePanelId::new("instances"),
-            &ResourceId::new("instance-a"),
+            &target("instances", "instance-a"),
             ResourceCommand::Stop,
             ResourceState::Running,
         )

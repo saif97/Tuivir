@@ -223,12 +223,15 @@ async fn runtime_executes_resource_command_and_publishes_its_completion() {
         completion,
         AppEvent::ResourceCommandCompleted {
             provider_id,
-            resource_id,
+            target,
             command: ResourceCommand::Restart,
             result: Ok(()),
             ..
         } if provider_id == ProviderId::new("docker")
-            && resource_id == ResourceId::new("container-a")
+            && target == ResourceTarget::new(
+                ResourcePanelId::new("containers"),
+                ResourceId::new("container-a"),
+            )
     ));
     assert_eq!(
         *commands.lock().expect("recorded command lock"),
@@ -412,12 +415,15 @@ fn restart_key_dispatches_the_selected_resource_command() {
         requests.as_slice(),
         [ProviderRequest::ExecuteResourceCommand {
             provider_id,
-            resource_id,
+            target,
             resource_name,
             command: ResourceCommand::Restart,
             ..
         }] if provider_id == &ProviderId::new("docker")
-            && resource_id == &ResourceId::new("container-a")
+            && target == &ResourceTarget::new(
+                ResourcePanelId::new("containers"),
+                ResourceId::new("container-a"),
+            )
             && resource_name == "api"
     ));
 }
@@ -440,11 +446,11 @@ fn start_key_dispatches_for_a_stopped_instance() {
         requests.as_slice(),
         [ProviderRequest::ExecuteResourceCommand {
             provider_id,
-            resource_id,
+            target,
             command: ResourceCommand::Start,
             ..
         }] if provider_id == &ProviderId::new("incus")
-            && resource_id == &ResourceId::new("instance-a")
+            && target.resource_id() == &ResourceId::new("instance-a")
     ));
 }
 
@@ -465,11 +471,11 @@ fn stop_key_dispatches_for_a_running_container() {
         requests.as_slice(),
         [ProviderRequest::ExecuteResourceCommand {
             provider_id,
-            resource_id,
+            target,
             command: ResourceCommand::Stop,
             ..
         }] if provider_id == &ProviderId::new("docker")
-            && resource_id == &ResourceId::new("container-a")
+            && target.resource_id() == &ResourceId::new("container-a")
     ));
 }
 
@@ -491,13 +497,13 @@ fn resume_key_dispatches_for_a_paused_container_and_carries_its_state() {
         requests.as_slice(),
         [ProviderRequest::ExecuteResourceCommand {
             provider_id,
-            resource_id,
+            target,
             resource_name,
             command: ResourceCommand::Resume,
             state: ResourceState::Paused,
             ..
         }] if provider_id == &ProviderId::new("docker")
-            && resource_id == &ResourceId::new("container-a")
+            && target.resource_id() == &ResourceId::new("container-a")
             && resource_name == "api"
     ));
 }
@@ -543,7 +549,7 @@ fn successful_resource_command_refreshes_the_active_workspace_and_preserves_sele
     let ProviderRequest::ExecuteResourceCommand {
         request_id,
         provider_id,
-        resource_id,
+        target,
         resource_name,
         command,
         ..
@@ -555,7 +561,7 @@ fn successful_resource_command_refreshes_the_active_workspace_and_preserves_sele
     let refresh = refresh_request(app.update(AppEvent::ResourceCommandCompleted {
         request_id,
         provider_id,
-        resource_id,
+        target,
         resource_name,
         command,
         result: Ok(()),
@@ -637,7 +643,7 @@ fn failed_resource_command_identifies_provider_resource_and_attempted_command() 
     let ProviderRequest::ExecuteResourceCommand {
         request_id,
         provider_id,
-        resource_id,
+        target,
         resource_name,
         command,
         ..
@@ -649,7 +655,7 @@ fn failed_resource_command_identifies_provider_resource_and_attempted_command() 
     let follow_up = app.update(AppEvent::ResourceCommandCompleted {
         request_id,
         provider_id,
-        resource_id,
+        target,
         resource_name,
         command,
         result: Err(WorkspaceError::new("permission denied")),
@@ -1159,12 +1165,12 @@ fn delete_requires_target_identifying_confirmation_before_dispatch() {
         confirmed_requests.as_slice(),
         [ProviderRequest::ExecuteResourceCommand {
             provider_id,
-            resource_id,
+            target,
             resource_name,
             command: ResourceCommand::Delete,
             ..
         }] if provider_id == &ProviderId::new("docker")
-            && resource_id == &ResourceId::new("container-a")
+            && target.resource_id() == &ResourceId::new("container-a")
             && resource_name == "api"
     ));
 }

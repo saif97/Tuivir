@@ -7,8 +7,8 @@ use crate::{
     provider::{
         DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderVersion,
         ProviderWorkspace, Resource, ResourceCommand, ResourceDetails, ResourceId, ResourcePanel,
-        ResourcePanelId, ResourceState, TargetEnvironment, WorkspaceError, WorkspaceSnapshot,
-        provider_cli_error,
+        ResourcePanelId, ResourceState, ResourceTarget, TargetEnvironment, WorkspaceError,
+        WorkspaceSnapshot, provider_cli_error,
     },
 };
 
@@ -323,12 +323,13 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
     fn execute_command<'a>(
         &'a self,
         cli: &'a dyn CliRunner,
-        panel_id: &'a ResourcePanelId,
-        resource_id: &'a ResourceId,
+        target: &'a ResourceTarget,
         command: ResourceCommand,
         _state: ResourceState,
     ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
+            let panel_id = target.panel_id();
+            let resource_id = target.resource_id();
             if panel_id.0 != SANDBOXES_PANEL_ID {
                 return Err(WorkspaceError::new(format!(
                     "Docker Sandbox has no {command} command for Resource Panel {panel_id}"

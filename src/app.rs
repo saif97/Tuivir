@@ -39,7 +39,7 @@ pub enum AppEvent {
     ResourceCommandCompleted {
         request_id: ProviderRequestId,
         provider_id: ProviderId,
-        resource_id: ResourceId,
+        target: ResourceTarget,
         resource_name: String,
         command: ResourceCommand,
         result: Result<(), WorkspaceError>,
@@ -156,7 +156,7 @@ pub struct RunningResourceCommand {
     pub request_id: ProviderRequestId,
     pub provider_id: ProviderId,
     pub provider_name: String,
-    pub resource_id: ResourceId,
+    pub target: ResourceTarget,
     pub resource_name: String,
     pub command: ResourceCommand,
 }
@@ -193,8 +193,7 @@ pub struct HelpOverlay {
 pub struct ResourceCommandInvocation {
     pub provider_id: ProviderId,
     pub provider_name: String,
-    pub panel_id: ResourcePanelId,
-    pub resource_id: ResourceId,
+    pub target: ResourceTarget,
     pub resource_name: String,
     pub command: ResourceCommand,
     /// What the Resource was doing when the Command was invoked, so the prompt
@@ -271,14 +270,14 @@ impl App {
             AppEvent::ResourceCommandCompleted {
                 request_id,
                 provider_id,
-                resource_id,
+                target,
                 resource_name,
                 command,
                 result,
             } => self.apply_resource_command_result(
                 request_id,
                 provider_id,
-                resource_id,
+                target,
                 resource_name,
                 command,
                 result,
@@ -575,7 +574,7 @@ impl App {
         &mut self,
         request_id: ProviderRequestId,
         provider_id: ProviderId,
-        resource_id: ResourceId,
+        target: ResourceTarget,
         resource_name: String,
         command: ResourceCommand,
         result: Result<(), WorkspaceError>,
@@ -597,7 +596,7 @@ impl App {
                 &provider_name,
                 &command.to_string(),
                 &resource_name,
-                &resource_id,
+                target.resource_id(),
                 &error.message,
             ));
             return Vec::new();
@@ -673,13 +672,10 @@ impl App {
         let Some(state) = resource.state else {
             return Vec::new();
         };
-        let panel_id = target.panel_id;
-        let resource_id = target.resource_id;
         let target = ResourceCommandInvocation {
             provider_id,
             provider_name,
-            panel_id,
-            resource_id,
+            target,
             resource_name,
             command,
             state,
@@ -709,7 +705,7 @@ impl App {
             request_id,
             provider_id: target.provider_id.clone(),
             provider_name: target.provider_name,
-            resource_id: target.resource_id.clone(),
+            target: target.target.clone(),
             resource_name: target.resource_name.clone(),
             command: target.command,
         });
@@ -717,8 +713,7 @@ impl App {
         vec![ProviderRequest::ExecuteResourceCommand {
             request_id,
             provider_id: target.provider_id,
-            panel_id: target.panel_id,
-            resource_id: target.resource_id,
+            target: target.target,
             resource_name: target.resource_name,
             command: target.command,
             state: target.state,

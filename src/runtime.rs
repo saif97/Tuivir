@@ -216,8 +216,7 @@ impl ProviderRuntime {
             ProviderRequest::ExecuteResourceCommand {
                 request_id,
                 provider_id,
-                panel_id,
-                resource_id,
+                target,
                 resource_name,
                 command,
                 state,
@@ -233,12 +232,12 @@ impl ProviderRuntime {
                 let cli = Arc::clone(&self.cli);
                 tokio::spawn(async move {
                     let result = workspace
-                        .execute_command(cli.as_ref(), &panel_id, &resource_id, command, state)
+                        .execute_command(cli.as_ref(), &target, command, state)
                         .await;
                     let _ = events.send(AppEvent::ResourceCommandCompleted {
                         request_id,
                         provider_id,
-                        resource_id,
+                        target,
                         resource_name,
                         command,
                         result,

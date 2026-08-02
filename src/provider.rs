@@ -147,8 +147,7 @@ pub enum ProviderRequest {
     ExecuteResourceCommand {
         request_id: ProviderRequestId,
         provider_id: ProviderId,
-        panel_id: ResourcePanelId,
-        resource_id: ResourceId,
+        target: ResourceTarget,
         resource_name: String,
         command: ResourceCommand,
         /// What the last refresh reported for this Resource, carried here so
@@ -450,8 +449,7 @@ pub trait ProviderWorkspace: Send + Sync {
     fn execute_command<'a>(
         &'a self,
         cli: &'a dyn CliRunner,
-        panel_id: &'a ResourcePanelId,
-        resource_id: &'a ResourceId,
+        target: &'a ResourceTarget,
         command: ResourceCommand,
         state: ResourceState,
     ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>>;
