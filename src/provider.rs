@@ -1,7 +1,10 @@
 use std::{fmt, future::Future, pin::Pin};
 
 use crate::cli::{CliRunner, ProcessError, ProcessSpec};
-pub use crate::domain::{Provider, ProviderId, ProviderVersion, TargetEnvironment};
+pub use crate::domain::{
+    DetailViewId, Provider, ProviderId, ProviderVersion, ResourceId, ResourcePanelId,
+    ResourceState, ResourceTarget, TargetEnvironment,
+};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 /// Identifies one asynchronous request sent to a Provider Workspace.
@@ -43,34 +46,6 @@ impl fmt::Display for ResourceCommand {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-/// What a Provider reported a Resource to be doing at the last refresh.
-///
-/// This is a provider-neutral vocabulary that each Provider Workspace maps its
-/// own status words into, so the shell can act on a Resource's state without
-/// branching on Provider identity. [`Resource::status`] keeps the Provider's
-/// own word for display.
-///
-/// Only [`ResourceState::Stopped`] is ever positively determined. Every other
-/// variant, `Unknown` included, means "not settled and stopped", which is what
-/// makes forcing a deletion the safe default: an unrecognised status can never
-/// masquerade as a stopped Resource.
-pub enum ResourceState {
-    Running,
-    /// Settled and not running: safe to remove without stopping anything first.
-    Stopped,
-    /// Suspended but still resident — Docker `paused`, Incus `Frozen`.
-    Paused,
-    /// Moving between states — Docker `restarting`/`removing`, Incus
-    /// `Starting`/`Stopping`/`Freezing`/`Thawing`.
-    Transitioning,
-    /// The Provider reports the Resource as unusable — Docker `dead`, Incus
-    /// `Error`.
-    Broken,
-    /// A status word this Provider Workspace does not recognise.
-    Unknown,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// A specific request the application asks a Provider Workspace to perform.
 ///
@@ -101,67 +76,6 @@ pub enum ProviderRequest {
     },
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-/// Stable provider-defined identity for one Resource Panel.
-pub struct ResourcePanelId(pub String);
-
-impl ResourcePanelId {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-}
-
-impl fmt::Display for ResourcePanelId {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(formatter)
-    }
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct ResourceId(pub String);
-
-impl ResourceId {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-}
-
-impl fmt::Display for ResourceId {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(formatter)
-    }
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-/// Identifies one Resource within its provider-defined Resource Panel.
-pub struct ResourceTarget {
-    panel_id: ResourcePanelId,
-    resource_id: ResourceId,
-}
-
-impl ResourceTarget {
-    pub fn new(panel_id: ResourcePanelId, resource_id: ResourceId) -> Self {
-        Self {
-            panel_id,
-            resource_id,
-        }
-    }
-
-    pub(crate) fn panel_id(&self) -> &ResourcePanelId {
-        &self.panel_id
-    }
-
-    pub(crate) fn resource_id(&self) -> &ResourceId {
-        &self.resource_id
-    }
-}
-
-impl fmt::Display for ResourceTarget {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.resource_id.fmt(formatter)
-    }
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// One selectable native resource in a Provider Workspace.
 pub struct Resource {
@@ -185,22 +99,6 @@ pub struct Resource {
     /// drifting: a Resource with no shell has nothing to run, so the operation
     /// is absent rather than offered and then refused.
     pub shell: Option<ProcessSpec>,
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-/// Identifies one detail view a Provider Workspace offers for its Resources.
-pub struct DetailViewId(pub String);
-
-impl DetailViewId {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-}
-
-impl fmt::Display for DetailViewId {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(formatter)
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -273,14 +171,14 @@ impl WorkspaceSnapshot {
     }
 
     pub(crate) fn panel_for(&self, target: &ResourceTarget) -> Option<&ResourcePanel> {
-        self.panel(&target.panel_id)
+        self.panel(target.panel_id())
     }
 
     pub fn resource(&self, target: &ResourceTarget) -> Option<&Resource> {
         self.panel_for(target)?
             .resources
             .iter()
-            .find(|resource| resource.id == target.resource_id)
+            .find(|resource| &resource.id == target.resource_id())
     }
 }
 
