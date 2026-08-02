@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use virtui::{
     application::{App, InteractiveShellProcess},
-    cli::{ProcessError, ProcessOutput, ProcessSpec},
     incus::IncusWorkspace,
+    infrastructure::process::{ProcessError, ProcessOutput, ProcessSpec},
     presentation::render_to_text,
     provider::{
         DetailViewId, ProviderWorkspace, ResourceCommand, ResourceId, ResourcePanelId,

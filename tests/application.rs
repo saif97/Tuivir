@@ -12,9 +12,11 @@ use virtui::{
         App, AppEvent, AppState, FocusedPane, InteractiveShellOutcome, InteractiveShellProcess,
         WorkspaceLoadState,
     },
-    cli::{CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec},
     command::{Command, CommandRegistry, CommandScope},
     docker::DockerWorkspace,
+    infrastructure::process::{
+        CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec,
+    },
     presentation::{render_foreground_colours, render_to_text},
     provider::{
         DetailView, DetailViewId, Provider, ProviderDiscovery, ProviderId, ProviderRequest,

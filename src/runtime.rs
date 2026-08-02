@@ -6,11 +6,11 @@ use tokio::time::{Instant, Interval, MissedTickBehavior};
 use crate::{
     application::InteractiveShellOutcome,
     application::{App, AppEvent},
-    cli::{CliRunner, InteractiveRunner},
     command::Command,
     docker::DockerWorkspace,
     docker_sandbox::DockerSandboxWorkspace,
     incus::IncusWorkspace,
+    infrastructure::process::{CliRunner, InteractiveRunner, ProcessSpec},
     presentation::key_from_event,
     provider::{ProviderDiscovery, ProviderId, ProviderRequest, ProviderWorkspace},
 };
@@ -94,7 +94,7 @@ pub fn open_pending_shell(
         return Ok(Vec::new());
     };
     terminal.suspend()?;
-    let process = crate::cli::ProcessSpec::from(&shell.process);
+    let process = ProcessSpec::from(&shell.process);
     let result = runner.run_interactive(&process);
     let resumed = take_the_terminal_back(terminal);
     // The application is told how the shell ended whether or not the screen came

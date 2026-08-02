@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 use crate::{
     application::InteractiveShellProcess,
-    cli::{CliRunner, ProcessError, ProcessSpec},
+    infrastructure::process::{CliRunner, ProcessError, ProcessSpec},
     provider::{
         DetailView, DetailViewId, Provider, ProviderDiscovery, ProviderId, ProviderVersion,
         ProviderWorkspace, Resource, ResourceCommand, ResourceDetails, ResourceId, ResourcePanel,

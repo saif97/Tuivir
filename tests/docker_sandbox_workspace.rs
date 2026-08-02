@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use virtui::{
     application::{App, InteractiveShellProcess},
-    cli::{ProcessError, ProcessFailure, ProcessSpec},
     command::Command,
     docker_sandbox::DockerSandboxWorkspace,
+    infrastructure::process::{ProcessError, ProcessFailure, ProcessSpec},
     presentation::render_to_text,
     provider::{
         DetailViewId, ProviderId, ProviderRequest, ProviderVersion, ProviderWorkspace,

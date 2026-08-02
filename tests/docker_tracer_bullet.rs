@@ -1,7 +1,7 @@
 use virtui::{
     application::{App, InteractiveShellProcess},
-    cli::{ProcessError, ProcessOutput, ProcessSpec},
     docker::DockerWorkspace,
+    infrastructure::process::{ProcessError, ProcessOutput, ProcessSpec},
     presentation::render_to_text,
     provider::{
         DetailViewId, ProviderWorkspace, Resource, ResourceCommand, ResourceId, ResourcePanelId,

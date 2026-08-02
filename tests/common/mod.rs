@@ -11,7 +11,9 @@ use std::{
     sync::{Mutex, MutexGuard},
 };
 
-use virtui::cli::{CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec};
+use virtui::infrastructure::process::{
+    CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec,
+};
 use virtui::{
     application::{App, AppEvent},
     provider::{

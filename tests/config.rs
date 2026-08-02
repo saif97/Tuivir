@@ -6,7 +6,7 @@ use std::{
 
 use virtui::{
     command::{Command, CommandScope},
-    config::{ConfigError, Env, FileSystemReader, LoadError, ReadFile, load},
+    infrastructure::config::{ConfigError, Env, FileSystemReader, LoadError, ReadFile, load},
     keys::Key,
     provider::ResourceCommand,
 };

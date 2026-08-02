@@ -14,7 +14,7 @@ use std::{
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use virtui::{
     application::{App, AppEvent, InteractiveShellProcess},
-    cli::{InteractiveRunner, ProcessError, ProcessFailure, ProcessSpec},
+    infrastructure::process::{InteractiveRunner, ProcessError, ProcessFailure, ProcessSpec},
     presentation::render_to_text,
     provider::{
         DetailView, Provider, ProviderDiscovery, ProviderId, ProviderRequest, Resource,

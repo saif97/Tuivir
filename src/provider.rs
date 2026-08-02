@@ -4,11 +4,11 @@ pub use crate::application::{
     DetailView, InteractiveShellProcess, ProviderRequest, ProviderRequestId, Resource,
     ResourceCommand, ResourceDetails, ResourcePanel, WorkspaceError, WorkspaceSnapshot,
 };
-use crate::cli::{CliRunner, ProcessError};
 pub use crate::domain::{
     DetailViewId, Provider, ProviderId, ProviderVersion, ResourceId, ResourcePanelId,
     ResourceState, ResourceTarget, TargetEnvironment,
 };
+use crate::infrastructure::process::{CliRunner, ProcessError};
 
 /// What a Provider CLI left behind, with no suggested next step attached.
 ///

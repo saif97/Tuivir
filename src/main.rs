@@ -18,9 +18,11 @@ use ratatui::DefaultTerminal;
 use tokio::sync::mpsc;
 use virtui::{
     application::{App, AppEvent},
-    cli::{CliRunner, TokioCliRunner},
     command::CommandRegistry,
-    config::{Env, FileSystemReader, load},
+    infrastructure::{
+        config::{Env, FileSystemReader, load},
+        process::{CliRunner, TokioCliRunner},
+    },
     presentation,
     provider::ProviderRequest,
     runtime::{
