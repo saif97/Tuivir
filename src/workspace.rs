@@ -452,7 +452,7 @@ impl ProviderWorkspaceState {
             .and_then(|selected| snapshot.resource(selected));
         let selected_panel = selected_target
             .as_ref()
-            .and_then(|selected| snapshot.panel(selected.panel_id()));
+            .and_then(|selected| snapshot.panel_for(selected));
         let selected_detail_view = self.selected_detail_view.as_ref().and_then(|selected| {
             selected_panel?
                 .detail_views
@@ -551,7 +551,7 @@ impl ProviderWorkspaceState {
         let offered = self
             .selected_resource_target()
             .as_ref()
-            .and_then(|selected| snapshot.panel(selected.panel_id()))
+            .and_then(|selected| snapshot.panel_for(selected))
             .map_or(&[][..], |panel| panel.detail_views.as_slice());
         let still_offered = self
             .selected_detail_view
@@ -570,7 +570,7 @@ impl ProviderWorkspaceState {
         let resource = snapshot.resource(&target)?;
         let view_id = self.selected_detail_view.as_ref()?;
         let view = snapshot
-            .panel(target.panel_id())?
+            .panel_for(&target)?
             .detail_views
             .iter()
             .find(|view| &view.id == view_id)?

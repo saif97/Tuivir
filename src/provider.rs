@@ -212,12 +212,18 @@ impl ResourceTarget {
         }
     }
 
-    pub fn panel_id(&self) -> &ResourcePanelId {
+    pub(crate) fn panel_id(&self) -> &ResourcePanelId {
         &self.panel_id
     }
 
-    pub fn resource_id(&self) -> &ResourceId {
+    pub(crate) fn resource_id(&self) -> &ResourceId {
         &self.resource_id
+    }
+}
+
+impl fmt::Display for ResourceTarget {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.resource_id.fmt(formatter)
     }
 }
 
@@ -331,11 +337,15 @@ impl WorkspaceSnapshot {
         self.panels.iter().find(|panel| &panel.id == panel_id)
     }
 
+    pub(crate) fn panel_for(&self, target: &ResourceTarget) -> Option<&ResourcePanel> {
+        self.panel(&target.panel_id)
+    }
+
     pub fn resource(&self, target: &ResourceTarget) -> Option<&Resource> {
-        self.panel(target.panel_id())?
+        self.panel_for(target)?
             .resources
             .iter()
-            .find(|resource| &resource.id == target.resource_id())
+            .find(|resource| resource.id == target.resource_id)
     }
 }
 

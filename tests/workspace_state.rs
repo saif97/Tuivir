@@ -56,8 +56,6 @@ fn a_resource_target_looks_up_one_panel_qualified_resource() {
         ResourceId::new("container-a"),
     );
 
-    assert_eq!(target.panel_id(), &ResourcePanelId::new("containers"));
-    assert_eq!(target.resource_id(), &ResourceId::new("container-a"));
     assert_eq!(
         snapshot
             .resource(&target)

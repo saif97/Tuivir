@@ -5,7 +5,7 @@ use crate::command::{Command, CommandRegistry, CommandScope, NUMBERED_RESOURCE_P
 use crate::keys::Key;
 use crate::provider::{
     DetailViewId, ProviderDiscovery, ProviderId, ProviderRequest, ProviderRequestId,
-    ResourceCommand, ResourceDetails, ResourceId, ResourceState, ResourceTarget, WorkspaceError,
+    ResourceCommand, ResourceDetails, ResourceState, ResourceTarget, WorkspaceError,
     WorkspaceSnapshot,
 };
 use crate::workspace::{DetailCompletion, ProviderWorkspaceState};
@@ -82,10 +82,10 @@ fn operation_failure(
     provider_name: &str,
     operation: &str,
     resource_name: &str,
-    resource_id: &ResourceId,
+    target: &ResourceTarget,
     reason: &str,
 ) -> String {
-    format!("{provider_name} {operation} failed for {resource_name} ({resource_id}): {reason}")
+    format!("{provider_name} {operation} failed for {resource_name} ({target}): {reason}")
 }
 
 #[derive(Default)]
@@ -587,7 +587,7 @@ impl App {
                 &running.provider_name,
                 &running.command.to_string(),
                 &running.resource_name,
-                running.target.resource_id(),
+                &running.target,
                 &error.message,
             ));
             return Vec::new();
@@ -626,7 +626,7 @@ impl App {
                 &shell.provider_name,
                 "shell",
                 &shell.resource_name,
-                shell.target.resource_id(),
+                &shell.target,
                 &reason,
             ));
         }

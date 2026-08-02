@@ -380,7 +380,10 @@ fn keyboard_commands_drive_navigation_manual_refresh_and_quit() {
     assert!(matches!(
         requests.as_slice(),
         [ProviderRequest::LoadResourceDetails { target, .. }]
-            if target.resource_id() == &ResourceId::new("container-b")
+            if target == &ResourceTarget::new(
+                ResourcePanelId::new("containers"),
+                ResourceId::new("container-b"),
+            )
     ));
     assert!(render_to_text(app.state(), 100, 24).contains("Image: alpine:3.21"));
 
@@ -450,7 +453,10 @@ fn start_key_dispatches_for_a_stopped_instance() {
             command: ResourceCommand::Start,
             ..
         }] if provider_id == &ProviderId::new("incus")
-            && target.resource_id() == &ResourceId::new("instance-a")
+            && target == &ResourceTarget::new(
+                ResourcePanelId::new("instances"),
+                ResourceId::new("instance-a"),
+            )
     ));
 }
 
@@ -475,7 +481,10 @@ fn stop_key_dispatches_for_a_running_container() {
             command: ResourceCommand::Stop,
             ..
         }] if provider_id == &ProviderId::new("docker")
-            && target.resource_id() == &ResourceId::new("container-a")
+            && target == &ResourceTarget::new(
+                ResourcePanelId::new("containers"),
+                ResourceId::new("container-a"),
+            )
     ));
 }
 
@@ -503,7 +512,10 @@ fn resume_key_dispatches_for_a_paused_container_and_carries_its_state() {
             state: ResourceState::Paused,
             ..
         }] if provider_id == &ProviderId::new("docker")
-            && target.resource_id() == &ResourceId::new("container-a")
+            && target == &ResourceTarget::new(
+                ResourcePanelId::new("containers"),
+                ResourceId::new("container-a"),
+            )
             && resource_name == "api"
     ));
 }
@@ -598,7 +610,13 @@ fn returning_from_a_shell_refreshes_the_active_workspace_and_preserves_selection
         KeyEvent::new(KeyCode::Char('E'), KeyModifiers::NONE),
     );
     let shell = app.take_pending_shell().expect("a shell to hand over to");
-    assert_eq!(shell.target.resource_id(), &ResourceId::new("container-b"));
+    assert_eq!(
+        shell.target,
+        ResourceTarget::new(
+            ResourcePanelId::new("containers"),
+            ResourceId::new("container-b"),
+        )
+    );
 
     let requests = app.update(AppEvent::ShellClosed {
         shell,
@@ -1255,7 +1273,10 @@ fn delete_requires_target_identifying_confirmation_before_dispatch() {
             command: ResourceCommand::Delete,
             ..
         }] if provider_id == &ProviderId::new("docker")
-            && target.resource_id() == &ResourceId::new("container-a")
+            && target == &ResourceTarget::new(
+                ResourcePanelId::new("containers"),
+                ResourceId::new("container-a"),
+            )
             && resource_name == "api"
     ));
 }
@@ -2234,7 +2255,10 @@ fn the_chosen_detail_view_survives_moving_to_another_resource() {
         matches!(
             requests.as_slice(),
             [ProviderRequest::LoadResourceDetails { target, view_id, .. }]
-                if target.resource_id() == &ResourceId::new("container-b")
+                if target == &ResourceTarget::new(
+                    ResourcePanelId::new("containers"),
+                    ResourceId::new("container-b"),
+                )
                     && view_id == &DetailViewId::new("stats")
         ),
         "unexpected requests: {requests:?}"
@@ -2436,7 +2460,10 @@ fn a_refresh_that_removes_the_selected_resource_loads_the_new_selections_details
         matches!(
             &reloaded,
             ProviderRequest::LoadResourceDetails { target, .. }
-                if target.resource_id() == &ResourceId::new("container-b")
+                if target == &ResourceTarget::new(
+                    ResourcePanelId::new("containers"),
+                    ResourceId::new("container-b"),
+                )
         ),
         "unexpected request: {reloaded:?}"
     );

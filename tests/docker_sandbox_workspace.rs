@@ -547,7 +547,13 @@ async fn deleting_a_sandbox_confirms_first_and_then_runs_the_expected_cli_reques
         panic!("confirming a deletion executes a Resource Command");
     };
     assert_eq!(provider_id, ProviderId::new("docker-sandbox"));
-    assert_eq!(target.resource_id(), &ResourceId::new("claude-virtui"));
+    assert_eq!(
+        target,
+        ResourceTarget::new(
+            ResourcePanelId::new("sandboxes"),
+            ResourceId::new("claude-virtui"),
+        )
+    );
     assert_eq!(command, ResourceCommand::Delete);
 
     // The request the shell produced reaches sbx as the arguments #29 names.

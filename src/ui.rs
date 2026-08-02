@@ -112,9 +112,7 @@ pub fn render(state: &AppState, frame: &mut Frame<'_>) {
         frame.render_widget(Clear, area);
         let mut lines = vec![Line::from(format!(
             "Delete {} resource {} ({})?",
-            confirmation.provider_name,
-            confirmation.resource_name,
-            confirmation.target.resource_id()
+            confirmation.provider_name, confirmation.resource_name, confirmation.target
         ))];
         // Deleting anything but a stopped Resource stops it first, so say so
         // before the single confirmation that authorises both. The wording
@@ -159,10 +157,7 @@ fn render_running_command_status(state: &AppState, frame: &mut Frame<'_>, area: 
         .map(|running| {
             format!(
                 "Running {} {} for {} ({})…",
-                running.provider_name,
-                running.command,
-                running.resource_name,
-                running.target.resource_id()
+                running.provider_name, running.command, running.resource_name, running.target
             )
         })
         .collect::<Vec<_>>()
