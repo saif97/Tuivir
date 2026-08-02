@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::config::ConfigError;
+use crate::application::KeybindingError;
 use crate::keys::Key;
 use crate::provider::ResourceCommand;
 
@@ -130,7 +130,7 @@ impl CommandRegistry {
     /// The table is a partial override: mentioning a Command replaces its
     /// complete key list, omitting it preserves the defaults, and an empty list
     /// leaves it unbound. Nothing is applied unless everything validates.
-    pub fn effective(overrides: &[(String, Vec<String>)]) -> Result<Self, Vec<ConfigError>> {
+    pub fn effective(overrides: &[(String, Vec<String>)]) -> Result<Self, Vec<KeybindingError>> {
         let mut registry = Self::builtin();
         let mut errors = Vec::new();
 
@@ -140,7 +140,7 @@ impl CommandRegistry {
                 .filter_map(|text| match Key::parse(text) {
                     Ok(key) => Some(key),
                     Err(invalid) => {
-                        errors.push(ConfigError::InvalidKey {
+                        errors.push(KeybindingError::InvalidKey {
                             id: id.clone(),
                             key: invalid.input,
                         });
@@ -155,7 +155,7 @@ impl CommandRegistry {
                 .find(|command| command.id == id)
             {
                 Some(command) => command.keys = parsed,
-                None => errors.push(ConfigError::UnknownCommand { id: id.clone() }),
+                None => errors.push(KeybindingError::UnknownCommand { id: id.clone() }),
             }
         }
 
@@ -173,14 +173,14 @@ impl CommandRegistry {
     ///
     /// A user who lists it explicitly keeps the position they chose; otherwise
     /// it is appended, so it is an invariant rather than a preferred hint.
-    fn reserve_emergency_quit(&mut self) -> Vec<ConfigError> {
+    fn reserve_emergency_quit(&mut self) -> Vec<KeybindingError> {
         let emergency = Self::emergency_quit_key();
         let stolen = self
             .commands
             .iter()
             .filter(|command| command.command != Command::Quit)
             .filter(|command| command.keys.contains(&emergency))
-            .map(|command| ConfigError::ReservedKey {
+            .map(|command| KeybindingError::ReservedKey {
                 id: command.id.to_owned(),
                 key: emergency.to_string(),
             })
@@ -202,12 +202,12 @@ impl CommandRegistry {
     /// Commands whose scopes cannot overlap are never reachable together, so
     /// they may share a key freely; those that can overlap would otherwise be
     /// resolved by registration order, which is a priority the user cannot see.
-    fn conflicting_keys(&self) -> Vec<ConfigError> {
+    fn conflicting_keys(&self) -> Vec<KeybindingError> {
         // Every (scope, key) a Command has claimed, against the Command that
         // claimed it first. Scopes come from the Commands themselves, so a new
         // scope cannot be left out of the check by forgetting to list it.
         let mut claimed: HashMap<(CommandScope, Key), &'static str> = HashMap::new();
-        let mut conflicts: Vec<ConfigError> = Vec::new();
+        let mut conflicts: Vec<KeybindingError> = Vec::new();
 
         for command in &self.commands {
             for scope in command.scopes {
@@ -227,7 +227,7 @@ impl CommandRegistry {
                     if first == command.id {
                         continue;
                     }
-                    let conflict = ConfigError::ConflictingKey {
+                    let conflict = KeybindingError::ConflictingKey {
                         key: key.to_string(),
                         first: first.to_owned(),
                         second: command.id.to_owned(),
@@ -302,7 +302,7 @@ fn effective_command(definition: &CommandDefinition) -> EffectiveCommand {
 ///
 /// Keys are compared after parsing, so two spellings of one key — `space` and a
 /// literal blank — are the duplicate they actually are.
-fn duplicate_keys(id: &str, keys: &[Key]) -> Vec<ConfigError> {
+fn duplicate_keys(id: &str, keys: &[Key]) -> Vec<KeybindingError> {
     let mut seen = Vec::new();
     let mut duplicated = Vec::new();
     for key in keys {
@@ -316,7 +316,7 @@ fn duplicate_keys(id: &str, keys: &[Key]) -> Vec<ConfigError> {
     }
     duplicated
         .into_iter()
-        .map(|key| ConfigError::DuplicateKey {
+        .map(|key| KeybindingError::DuplicateKey {
             id: id.to_owned(),
             key: key.to_string(),
         })
