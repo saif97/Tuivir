@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::cli::{ProcessError, ProcessSpec};
+use crate::application::{InteractiveShellOutcome, InteractiveShellProcess};
 use crate::command::{Command, CommandRegistry, CommandScope, NUMBERED_RESOURCE_PANEL_CAPACITY};
 use crate::keys::Key;
 use crate::provider::{
@@ -34,7 +34,7 @@ pub enum AppEvent {
     /// shell is long gone by then.
     ShellClosed {
         shell: PendingShell,
-        result: Result<(), ProcessError>,
+        outcome: InteractiveShellOutcome,
     },
     ResourceCommandCompleted {
         request_id: ProviderRequestId,
@@ -172,7 +172,7 @@ pub struct PendingShell {
     pub target: ResourceTarget,
     pub resource_name: String,
     /// The Provider CLI process that takes over the terminal.
-    pub process: ProcessSpec,
+    pub process: InteractiveShellProcess,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -259,7 +259,7 @@ impl App {
         match event {
             AppEvent::ProviderDiscovered(discovery) => self.handle_provider_discovered(discovery),
             AppEvent::RefreshTimerElapsed => self.refresh_active_provider(),
-            AppEvent::ShellClosed { shell, result } => self.apply_shell_closed(shell, result),
+            AppEvent::ShellClosed { shell, outcome } => self.apply_shell_closed(shell, outcome),
             AppEvent::RefreshCompleted {
                 request_id,
                 provider_id,
@@ -608,12 +608,12 @@ impl App {
     fn apply_shell_closed(
         &mut self,
         shell: PendingShell,
-        result: Result<(), ProcessError>,
+        outcome: InteractiveShellOutcome,
     ) -> Vec<ProviderRequest> {
         // Only a shell that never started is reported. One that ran did what
         // was asked of it whatever status it left, and clearing here would
         // dismiss a failure the user has not read yet.
-        if let Some(reason) = result.err().as_ref().and_then(ProcessError::start_failure) {
+        if let InteractiveShellOutcome::StartFailed(reason) = outcome {
             self.state.command_error = Some(operation_failure(
                 &shell.provider_name,
                 "shell",

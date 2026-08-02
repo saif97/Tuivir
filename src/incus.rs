@@ -3,6 +3,7 @@ use std::{future::Future, pin::Pin};
 use serde::Deserialize;
 
 use crate::{
+    application::InteractiveShellProcess,
     cli::{CliRunner, ProcessError, ProcessSpec},
     provider::{
         DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderWorkspace, Resource,
@@ -280,9 +281,9 @@ fn incus_commands(state: ResourceState) -> Vec<ResourceCommand> {
 /// process, so the shell worth giving the user is root's login shell: this is
 /// what Incus's own `shell` alias expands to, spelled out here so it does not
 /// depend on that alias surviving in the user's configuration.
-fn instance_shell(state: ResourceState, name: &str) -> Option<ProcessSpec> {
+fn instance_shell(state: ResourceState, name: &str) -> Option<InteractiveShellProcess> {
     (state == ResourceState::Running)
-        .then(|| ProcessSpec::new("incus", &["exec", name, "--", "su", "-l"]))
+        .then(|| InteractiveShellProcess::new("incus", &["exec", name, "--", "su", "-l"]))
 }
 
 fn discovery_error(message: impl AsRef<str>, command: &str) -> ProviderDiscovery {

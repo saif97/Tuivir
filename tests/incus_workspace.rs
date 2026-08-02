@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use virtui::{
     app::{App, AppEvent},
+    application::InteractiveShellProcess,
     cli::{ProcessError, ProcessOutput, ProcessSpec},
     incus::IncusWorkspace,
     provider::{
@@ -383,7 +384,7 @@ async fn only_a_running_instance_carries_an_interactive_shell() {
         shells,
         [(
             "api",
-            ProcessSpec::new("incus", &["exec", "api", "--", "su", "-l"]),
+            InteractiveShellProcess::new("incus", &["exec", "api", "--", "su", "-l"]),
         )]
     );
 }

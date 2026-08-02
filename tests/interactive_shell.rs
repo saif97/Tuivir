@@ -14,6 +14,7 @@ use std::{
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use virtui::{
     app::{App, AppEvent},
+    application::InteractiveShellProcess,
     cli::{InteractiveRunner, ProcessError, ProcessFailure, ProcessSpec},
     provider::{
         DetailView, ProviderDiscovery, ProviderId, ProviderRequest, Resource, ResourceCommand,
@@ -126,7 +127,7 @@ fn running_container() -> WorkspaceSnapshot {
                 state: Some(ResourceState::Running),
                 fields: vec![("Image".to_owned(), "nginx:1.27".to_owned())],
                 available_commands: vec![ResourceCommand::Stop],
-                shell: Some(ProcessSpec::new(
+                shell: Some(InteractiveShellProcess::new(
                     "docker",
                     &["exec", "-it", "container-a", "/bin/sh"],
                 )),

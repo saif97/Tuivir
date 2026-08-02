@@ -3,6 +3,7 @@ use std::{future::Future, pin::Pin};
 use serde::Deserialize;
 
 use crate::{
+    application::InteractiveShellProcess,
     cli::{CliRunner, ProcessError, ProcessSpec},
     provider::{
         DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderVersion,
@@ -142,9 +143,9 @@ fn sandbox_resource_state(status: &str) -> ResourceState {
 ///
 /// `bash` is what sbx's own documentation reaches for, and a sandbox is a
 /// prepared agent environment rather than a stripped image, so it is there.
-fn sandbox_shell(state: ResourceState, name: &str) -> Option<ProcessSpec> {
+fn sandbox_shell(state: ResourceState, name: &str) -> Option<InteractiveShellProcess> {
     matches!(state, ResourceState::Running | ResourceState::Stopped)
-        .then(|| ProcessSpec::new("sbx", &["exec", "-it", name, "bash"]))
+        .then(|| InteractiveShellProcess::new("sbx", &["exec", "-it", name, "bash"]))
 }
 
 /// The Commands a sandbox in this state can be asked to perform.

@@ -5,6 +5,7 @@ use tokio::time::{Instant, Interval, MissedTickBehavior};
 
 use crate::{
     app::{App, AppEvent},
+    application::InteractiveShellOutcome,
     cli::{CliRunner, InteractiveRunner},
     command::Command,
     docker::DockerWorkspace,
@@ -93,13 +94,18 @@ pub fn open_pending_shell(
         return Ok(Vec::new());
     };
     terminal.suspend()?;
-    let result = runner.run_interactive(&shell.process);
+    let process = crate::cli::ProcessSpec::from(&shell.process);
+    let result = runner.run_interactive(&process);
     let resumed = take_the_terminal_back(terminal);
     // The application is told how the shell ended whether or not the screen came
     // back. A host whose terminal is beyond saving is on its way out, and what
     // happened inside the shell is the one fact that would otherwise leave with
     // it unrecorded.
-    let requests = app.update(AppEvent::ShellClosed { shell, result });
+    let outcome = result.err().and_then(|error| error.start_failure()).map_or(
+        InteractiveShellOutcome::Exited,
+        InteractiveShellOutcome::StartFailed,
+    );
+    let requests = app.update(AppEvent::ShellClosed { shell, outcome });
     resumed?;
     Ok(requests)
 }

@@ -1,7 +1,7 @@
 use std::{future::Future, pin::Pin};
 
-pub use crate::application::ResourceCommand;
-use crate::cli::{CliRunner, ProcessError, ProcessSpec};
+pub use crate::application::{InteractiveShellProcess, ResourceCommand};
+use crate::cli::{CliRunner, ProcessError};
 pub use crate::domain::{
     DetailViewId, Provider, ProviderId, ProviderVersion, ResourceId, ResourcePanelId,
     ResourceState, ResourceTarget, TargetEnvironment,
@@ -75,7 +75,7 @@ pub struct Resource {
     /// what keeps availability and the command that implements it from
     /// drifting: a Resource with no shell has nothing to run, so the operation
     /// is absent rather than offered and then refused.
-    pub shell: Option<ProcessSpec>,
+    pub shell: Option<InteractiveShellProcess>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

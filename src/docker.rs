@@ -3,6 +3,7 @@ use std::{future::Future, pin::Pin};
 use serde::Deserialize;
 
 use crate::{
+    application::InteractiveShellProcess,
     cli::{CliRunner, ProcessError, ProcessSpec},
     provider::{
         DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderWorkspace, Resource,
@@ -364,9 +365,9 @@ fn docker_commands(state: ResourceState) -> Vec<ResourceCommand> {
 /// offers none. Plain `/bin/sh` is the shell that exists wherever any shell
 /// does, including the minimal images Docker containers are so often built
 /// from; reaching for a login shell instead would fail on exactly those.
-fn container_shell(state: ResourceState, resource_id: &str) -> Option<ProcessSpec> {
+fn container_shell(state: ResourceState, resource_id: &str) -> Option<InteractiveShellProcess> {
     (state == ResourceState::Running)
-        .then(|| ProcessSpec::new("docker", &["exec", "-it", resource_id, "/bin/sh"]))
+        .then(|| InteractiveShellProcess::new("docker", &["exec", "-it", resource_id, "/bin/sh"]))
 }
 
 fn discovery_with_error(message: impl Into<String>) -> ProviderDiscovery {

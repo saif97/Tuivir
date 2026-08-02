@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use virtui::{
     app::{App, AppEvent},
+    application::InteractiveShellProcess,
     cli::{ProcessError, ProcessFailure, ProcessSpec},
     command::Command,
     docker_sandbox::DockerSandboxWorkspace,
@@ -331,15 +332,15 @@ async fn every_recognised_sandbox_carries_an_interactive_shell() {
         [
             (
                 "running-sandbox",
-                ProcessSpec::new("sbx", &["exec", "-it", "running-sandbox", "bash"]),
+                InteractiveShellProcess::new("sbx", &["exec", "-it", "running-sandbox", "bash"],),
             ),
             (
                 "stopped-sandbox",
-                ProcessSpec::new("sbx", &["exec", "-it", "stopped-sandbox", "bash"]),
+                InteractiveShellProcess::new("sbx", &["exec", "-it", "stopped-sandbox", "bash"],),
             ),
             (
                 "shouting-sandbox",
-                ProcessSpec::new("sbx", &["exec", "-it", "shouting-sandbox", "bash"]),
+                InteractiveShellProcess::new("sbx", &["exec", "-it", "shouting-sandbox", "bash"],),
             ),
         ]
     );

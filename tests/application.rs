@@ -9,6 +9,7 @@ use ratatui::style::Color;
 use tokio::sync::{Notify, mpsc};
 use virtui::{
     app::{App, AppEvent, AppState, FocusedPane},
+    application::{InteractiveShellOutcome, InteractiveShellProcess},
     cli::{CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec},
     command::{Command, CommandRegistry, CommandScope},
     docker::DockerWorkspace,
@@ -614,7 +615,7 @@ fn returning_from_a_shell_refreshes_the_active_workspace_and_preserves_selection
 
     let requests = app.update(AppEvent::ShellClosed {
         shell,
-        result: Ok(()),
+        outcome: InteractiveShellOutcome::Exited,
     });
 
     let refresh = requests
@@ -1195,7 +1196,7 @@ fn the_shell_key_asks_for_the_terminal_for_the_selected_container() {
     assert_eq!(pending.resource_name, "api");
     assert_eq!(
         pending.process,
-        ProcessSpec::new("docker", &["exec", "-it", "container-a", "/bin/sh"])
+        InteractiveShellProcess::new("docker", &["exec", "-it", "container-a", "/bin/sh"])
     );
 }
 
@@ -1691,8 +1692,9 @@ fn container_snapshot(
                     state: Some(state),
                     fields: vec![("Image".to_owned(), (*image).to_owned())],
                     available_commands: available_commands.clone(),
-                    shell: (state == ResourceState::Running)
-                        .then(|| ProcessSpec::new("docker", &["exec", "-it", *id, "/bin/sh"])),
+                    shell: (state == ResourceState::Running).then(|| {
+                        InteractiveShellProcess::new("docker", &["exec", "-it", *id, "/bin/sh"])
+                    }),
                 })
                 .collect(),
         }],
@@ -1732,8 +1734,12 @@ fn incus_snapshot(instances: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
                         } else {
                             vec![ResourceCommand::Start, ResourceCommand::Delete]
                         },
-                        shell: running
-                            .then(|| ProcessSpec::new("incus", &["exec", *name, "--", "su", "-l"])),
+                        shell: running.then(|| {
+                            InteractiveShellProcess::new(
+                                "incus",
+                                &["exec", *name, "--", "su", "-l"],
+                            )
+                        }),
                     }
                 })
                 .collect(),
@@ -1766,7 +1772,7 @@ fn docker_multi_panel_snapshot() -> WorkspaceSnapshot {
                         ResourceCommand::Restart,
                         ResourceCommand::Delete,
                     ],
-                    shell: Some(ProcessSpec::new(
+                    shell: Some(InteractiveShellProcess::new(
                         "docker",
                         &["exec", "-it", "shared-id", "/bin/sh"],
                     )),

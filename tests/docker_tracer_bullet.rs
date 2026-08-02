@@ -1,5 +1,6 @@
 use virtui::{
     app::{App, AppEvent},
+    application::InteractiveShellProcess,
     cli::{ProcessError, ProcessOutput, ProcessSpec},
     docker::DockerWorkspace,
     provider::{
@@ -252,7 +253,10 @@ async fn only_a_running_container_carries_an_interactive_shell() {
         shells,
         [(
             "container-running",
-            ProcessSpec::new("docker", &["exec", "-it", "container-running", "/bin/sh"]),
+            InteractiveShellProcess::new(
+                "docker",
+                &["exec", "-it", "container-running", "/bin/sh"],
+            ),
         )]
     );
 }
