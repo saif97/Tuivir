@@ -198,11 +198,11 @@ async fn runtime_executes_resource_command_and_publishes_its_completion() {
     use std::time::Duration;
 
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
     let command = app.invoke(Command::Resource(ResourceCommand::Restart));
     let commands = Arc::new(Mutex::new(Vec::new()));
     let runtime = ProviderRuntime::new(
@@ -244,11 +244,11 @@ async fn a_resource_command_that_exits_non_zero_reaches_the_screen_as_a_failure(
     use std::time::Duration;
 
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
     let request = app
         .invoke(Command::Resource(ResourceCommand::Restart))
         .into_iter()
@@ -282,11 +282,11 @@ async fn active_workspace_refresh_is_due_every_two_seconds() {
     use std::time::Duration;
 
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
     let mut timer = RefreshTimer::new();
     let tick = timer.tick();
     tokio::pin!(tick);
@@ -306,14 +306,14 @@ async fn active_workspace_refresh_is_due_every_two_seconds() {
 #[tokio::test]
 async fn slow_provider_refresh_does_not_block_navigation() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[
             ("container-a", "api", "nginx:1.27"),
             ("container-b", "worker", "alpine:3.21"),
-        ])),
-    ));
+        ]),
+    );
     let refresh = refresh_request(app.invoke(Command::Refresh));
     let started = Arc::new(Notify::new());
     let release = Arc::new(Notify::new());
@@ -359,14 +359,14 @@ async fn provider_is_omitted_when_docker_cli_is_absent() {
 #[test]
 fn keyboard_commands_drive_navigation_manual_refresh_and_quit() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[
             ("container-a", "api", "nginx:1.27"),
             ("container-b", "worker", "alpine:3.21"),
-        ])),
-    ));
+        ]),
+    );
 
     let (control, requests) = handle_key(
         &mut app,
@@ -425,11 +425,11 @@ fn restart_key_dispatches_the_selected_resource_command() {
 #[test]
 fn start_key_dispatches_for_a_stopped_instance() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(incus_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(incus_snapshot(&[("instance-a", "gateway", "Stopped")])),
-    ));
+    ready_workspace(
+        &mut app,
+        incus_discovery(),
+        incus_snapshot(&[("instance-a", "gateway", "Stopped")]),
+    );
 
     let (_, requests) = handle_key(
         &mut app,
@@ -451,11 +451,11 @@ fn start_key_dispatches_for_a_stopped_instance() {
 #[test]
 fn stop_key_dispatches_for_a_running_container() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
     let (_, requests) = handle_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE),
@@ -476,11 +476,11 @@ fn stop_key_dispatches_for_a_running_container() {
 #[test]
 fn resume_key_dispatches_for_a_paused_container_and_carries_its_state() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(paused_snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        paused_snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
 
     let (_, requests) = handle_key(
         &mut app,
@@ -530,14 +530,14 @@ fn resume_key_dispatches_nothing_for_a_resource_that_is_not_paused() {
 #[test]
 fn successful_resource_command_refreshes_the_active_workspace_and_preserves_selection() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[
             ("container-a", "api", "nginx:1.27"),
             ("container-b", "worker", "alpine:3.21"),
-        ])),
-    ));
+        ]),
+    );
     app.invoke(Command::SelectNext);
     let request = app.invoke(Command::Resource(ResourceCommand::Restart));
     let ProviderRequest::ExecuteResourceCommand {
@@ -628,11 +628,11 @@ fn returning_from_a_shell_refreshes_the_active_workspace_and_preserves_selection
 #[test]
 fn failed_resource_command_identifies_provider_resource_and_attempted_command() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
     let request = app.invoke(Command::Resource(ResourceCommand::Restart));
     let ProviderRequest::ExecuteResourceCommand {
         request_id,
@@ -666,14 +666,14 @@ fn failed_resource_command_identifies_provider_resource_and_attempted_command() 
 #[test]
 fn selecting_another_resource_keeps_an_in_flight_resource_command() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[
             ("container-a", "api", "nginx:1.27"),
             ("container-b", "worker", "alpine:3.21"),
-        ])),
-    ));
+        ]),
+    );
     let restart = command_request(app.invoke(Command::Resource(ResourceCommand::Restart)));
 
     app.invoke(Command::SelectNext);
@@ -689,11 +689,11 @@ fn selecting_another_resource_keeps_an_in_flight_resource_command() {
 #[test]
 fn switching_provider_workspaces_keeps_an_in_flight_resource_command() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
     let restart = command_request(app.invoke(Command::Resource(ResourceCommand::Restart)));
     app.update(AppEvent::ProviderDiscovered(incus_discovery()));
     let incus_refresh = refresh_request(app.invoke(Command::NextWorkspace));
@@ -717,11 +717,11 @@ fn switching_provider_workspaces_keeps_an_in_flight_resource_command() {
 #[test]
 fn a_running_resource_command_shows_a_status_identifying_provider_resource_and_command() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
 
     app.invoke(Command::Resource(ResourceCommand::Restart));
 
@@ -735,11 +735,11 @@ fn a_running_resource_command_shows_a_status_identifying_provider_resource_and_c
 #[test]
 fn a_successful_resource_command_refreshes_only_its_own_provider_workspace() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
     let restart = command_request(app.invoke(Command::Resource(ResourceCommand::Restart)));
     app.update(AppEvent::ProviderDiscovered(incus_discovery()));
     let incus_refresh = refresh_request(app.invoke(Command::NextWorkspace));
@@ -759,11 +759,11 @@ fn a_successful_resource_command_refreshes_only_its_own_provider_workspace() {
 #[test]
 fn a_failed_resource_command_opens_an_error_popup_over_another_active_workspace() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
     let restart = command_request(app.invoke(Command::Resource(ResourceCommand::Restart)));
     app.update(AppEvent::ProviderDiscovered(incus_discovery()));
     let incus_refresh = refresh_request(app.invoke(Command::NextWorkspace));
@@ -791,11 +791,11 @@ fn a_failed_resource_command_opens_an_error_popup_over_another_active_workspace(
 #[test]
 fn escape_dismisses_the_command_failure_popup_without_quitting() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
     let restart = command_request(app.invoke(Command::Resource(ResourceCommand::Restart)));
     app.update(command_completed(
         restart,
@@ -820,11 +820,11 @@ fn escape_dismisses_the_command_failure_popup_without_quitting() {
 #[test]
 fn the_command_failure_popup_keeps_the_whole_message_on_a_narrow_terminal() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
     let restart = command_request(app.invoke(Command::Resource(ResourceCommand::Restart)));
 
     app.update(command_completed(
@@ -842,11 +842,11 @@ fn the_command_failure_popup_keeps_the_whole_message_on_a_narrow_terminal() {
 #[test]
 fn a_successful_resource_command_clears_its_status_without_opening_a_popup() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
     let restart = command_request(app.invoke(Command::Resource(ResourceCommand::Restart)));
     assert!(
         render_to_text(app.state(), 160, 24).contains("Running Docker restart for api"),
@@ -877,11 +877,11 @@ fn a_successful_resource_command_clears_its_status_without_opening_a_popup() {
 #[test]
 fn switching_providers_invalidates_a_refresh_but_not_a_running_resource_command() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
     let restart = command_request(app.invoke(Command::Resource(ResourceCommand::Restart)));
     let stale_docker = refresh_request(app.invoke(Command::Refresh));
     app.update(AppEvent::ProviderDiscovered(incus_discovery()));
@@ -930,11 +930,11 @@ fn switching_providers_invalidates_a_refresh_but_not_a_running_resource_command(
 #[test]
 fn question_mark_shows_registered_commands_for_the_focused_resource() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
 
     let (_, requests) = handle_key(
         &mut app,
@@ -1041,11 +1041,11 @@ fn help_offers_a_shell_only_while_the_resource_can_host_one() {
 #[test]
 fn question_mark_closes_the_help_overlay_when_it_is_already_open() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
 
     handle_key(
         &mut app,
@@ -1072,11 +1072,11 @@ fn question_mark_closes_the_help_overlay_when_it_is_already_open() {
 #[test]
 fn the_shell_key_asks_for_the_terminal_for_the_selected_container() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
 
     let (_, requests) = handle_key(
         &mut app,
@@ -1105,11 +1105,11 @@ fn the_shell_key_asks_for_the_terminal_for_the_selected_container() {
 #[test]
 fn unavailable_resource_command_is_disabled_in_help_and_does_not_dispatch() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
 
     let (_, requests) = handle_key(
         &mut app,
@@ -1131,11 +1131,11 @@ fn unavailable_resource_command_is_disabled_in_help_and_does_not_dispatch() {
 #[test]
 fn delete_requires_target_identifying_confirmation_before_dispatch() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
 
     let (_, delete_requests) = handle_key(
         &mut app,
@@ -1172,11 +1172,11 @@ fn delete_requires_target_identifying_confirmation_before_dispatch() {
 #[test]
 fn confirming_a_running_resource_warns_it_is_stopped_and_dispatches_its_state() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
 
     handle_key(
         &mut app,
@@ -1207,11 +1207,11 @@ fn confirming_a_running_resource_warns_it_is_stopped_and_dispatches_its_state() 
 #[test]
 fn confirming_a_paused_resource_warns_it_is_stopped_and_dispatches_its_state() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(paused_snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        paused_snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
 
     handle_key(
         &mut app,
@@ -1244,11 +1244,11 @@ fn confirming_a_paused_resource_warns_it_is_stopped_and_dispatches_its_state() {
 #[test]
 fn confirming_a_stopped_resource_promises_no_stop_and_dispatches_its_state() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(stopped_snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        stopped_snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
 
     handle_key(
         &mut app,
@@ -1281,11 +1281,11 @@ fn confirming_a_stopped_resource_promises_no_stop_and_dispatches_its_state() {
 #[test]
 fn n_cancels_delete_confirmation_without_dispatching() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
 
     handle_key(
         &mut app,
@@ -1307,11 +1307,11 @@ fn n_cancels_delete_confirmation_without_dispatching() {
 #[test]
 fn escape_cancels_delete_confirmation_without_dispatching() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
 
     handle_key(
         &mut app,
@@ -1330,11 +1330,11 @@ fn escape_cancels_delete_confirmation_without_dispatching() {
 #[test]
 fn provider_bar_precedes_the_workspace_panes() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
 
     let screen = render_to_text(app.state(), 100, 24);
     let mut lines = screen.lines();
@@ -1355,11 +1355,11 @@ fn provider_bar_precedes_the_workspace_panes() {
 #[test]
 fn numbered_panels_render_their_navigation_shortcuts() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
 
     let screen = render_to_text(app.state(), 100, 24);
     assert!(screen.starts_with("[1] Providers"));
@@ -1412,11 +1412,11 @@ fn each_resource_status_is_coloured_by_its_resource_state() {
 #[test]
 fn a_resource_name_is_left_uncoloured_by_its_resource_state() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
 
     assert_eq!(foreground_of(app.state(), 100, 24, "api"), Color::Reset);
 }
@@ -1424,11 +1424,11 @@ fn a_resource_name_is_left_uncoloured_by_its_resource_state() {
 #[test]
 fn bracket_keys_switch_the_active_workspace() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
     assert!(
         app.update(AppEvent::ProviderDiscovered(fixture_discovery()))
             .is_empty(),
@@ -1461,11 +1461,11 @@ fn bracket_keys_switch_the_active_workspace() {
 #[test]
 fn numbered_provider_panel_activates_incus_and_requests_its_refresh() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
     assert!(
         app.update(AppEvent::ProviderDiscovered(incus_discovery()))
             .is_empty(),
@@ -1771,11 +1771,7 @@ fn every_resource_panel_advertises_its_effective_focus_key() {
         CommandRegistry::effective(&[("focus.resources.2".to_owned(), vec!["f7".to_owned()])])
             .expect("a valid override");
     let mut app = App::with_registry(registry);
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(docker_multi_panel_snapshot()),
-    ));
+    ready_workspace(&mut app, docker_discovery(), docker_multi_panel_snapshot());
 
     let screen = render_to_text(app.state(), 80, 30);
 
@@ -1786,11 +1782,7 @@ fn every_resource_panel_advertises_its_effective_focus_key() {
 #[test]
 fn focus_has_a_non_colour_cue_on_every_pane() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(docker_multi_panel_snapshot()),
-    ));
+    ready_workspace(&mut app, docker_discovery(), docker_multi_panel_snapshot());
 
     let screen = render_to_text(app.state(), 80, 30);
     assert!(
@@ -1841,11 +1833,7 @@ fn a_workspace_over_the_numbered_panel_capacity_is_refused() {
 #[test]
 fn active_provider_and_target_environment_share_the_top_bar() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(docker_multi_panel_snapshot()),
-    ));
+    ready_workspace(&mut app, docker_discovery(), docker_multi_panel_snapshot());
 
     let screen = render_to_text(app.state(), 80, 30);
     assert!(
@@ -1882,11 +1870,7 @@ fn resource_panel_scroll_is_restored_when_focus_returns() {
 #[test]
 fn direct_focus_commands_target_each_resource_panel_and_details() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(docker_multi_panel_snapshot()),
-    ));
+    ready_workspace(&mut app, docker_discovery(), docker_multi_panel_snapshot());
 
     app.invoke(Command::FocusResourcePanel(1));
     assert_eq!(app.state().focused_pane, FocusedPane::Resources);
@@ -1900,11 +1884,7 @@ fn direct_focus_commands_target_each_resource_panel_and_details() {
 #[test]
 fn removing_the_focused_resource_panel_reconciles_its_command_scope() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(docker_multi_panel_snapshot()),
-    ));
+    ready_workspace(&mut app, docker_discovery(), docker_multi_panel_snapshot());
     app.invoke(Command::FocusResourcePanel(1));
     assert_eq!(app.active_scope(), CommandScope::ResourcePanel(1));
     let refresh = refresh_request(app.invoke(Command::Refresh));
@@ -1920,11 +1900,7 @@ fn removing_the_focused_resource_panel_reconciles_its_command_scope() {
 #[test]
 fn focus_cycles_through_provider_order_and_wraps() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(docker_multi_panel_snapshot()),
-    ));
+    ready_workspace(&mut app, docker_discovery(), docker_multi_panel_snapshot());
 
     let expected = [
         (FocusedPane::Resources, Some("images")),
@@ -2006,11 +1982,7 @@ fn every_workspace_and_resource_panel_restores_its_navigation_state() {
 #[test]
 fn selecting_an_image_routes_details_by_panel_and_resource() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(docker_multi_panel_snapshot()),
-    ));
+    ready_workspace(&mut app, docker_discovery(), docker_multi_panel_snapshot());
 
     let requests = app.invoke(Command::FocusResourcePanel(1));
 
@@ -2089,11 +2061,11 @@ fn the_detail_panel_reports_loading_and_then_the_providers_own_output() {
 #[test]
 fn moving_through_the_detail_views_loads_only_the_newly_visible_one() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
     app.invoke(Command::FocusDetails);
 
     let (_, requests) = handle_key(
@@ -2133,11 +2105,11 @@ fn moving_through_the_detail_views_loads_only_the_newly_visible_one() {
 #[test]
 fn detail_views_wrap_around_at_both_ends() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
 
     app.invoke(Command::PreviousDetailView);
     assert!(render_to_text(app.state(), 100, 24).contains("Logs  Stats  [ Inspect ]"));
@@ -2151,14 +2123,14 @@ fn detail_views_wrap_around_at_both_ends() {
 #[test]
 fn the_chosen_detail_view_survives_moving_to_another_resource() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[
             ("container-a", "api", "nginx:1.27"),
             ("container-b", "worker", "alpine:3.21"),
-        ])),
-    ));
+        ]),
+    );
     app.invoke(Command::NextDetailView);
 
     let requests = app.invoke(Command::SelectNext);
@@ -2539,11 +2511,11 @@ fn configured_detail_view_keys_change_dispatch_and_help_together() {
         CommandRegistry::effective(&[("detail.view.next".to_owned(), vec!["f12".to_owned()])])
             .expect("a valid override");
     let mut app = App::with_registry(registry);
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
 
     app.invoke(Command::FocusDetails);
     handle_key(&mut app, KeyEvent::new(KeyCode::F(12), KeyModifiers::NONE));
@@ -2602,14 +2574,14 @@ fn a_selected_instance_offers_incus_views_rather_than_docker_equivalents() {
 #[test]
 fn refresh_preserves_container_selection_by_stable_identity() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[
             ("container-a", "api", "nginx:1.27"),
             ("container-b", "worker", "alpine:3.21"),
-        ])),
-    ));
+        ]),
+    );
     app.invoke(Command::SelectNext);
     let refresh = refresh_request(app.invoke(Command::Refresh));
 
@@ -2632,14 +2604,14 @@ fn refresh_preserves_container_selection_by_stable_identity() {
 #[test]
 fn resource_navigation_changes_the_selected_details() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[
             ("container-a", "api", "nginx:1.27"),
             ("container-b", "worker", "alpine:3.21"),
-        ])),
-    ));
+        ]),
+    );
 
     app.invoke(Command::SelectNext);
     let worker = render_to_text(app.state(), 100, 24);
@@ -2653,14 +2625,14 @@ fn resource_navigation_changes_the_selected_details() {
 #[test]
 fn resource_navigation_keeps_earlier_rows_visible_until_the_selection_leaves_the_viewport() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[
             ("container-a", "api", "nginx:1.27"),
             ("container-b", "worker", "alpine:3.21"),
-        ])),
-    ));
+        ]),
+    );
 
     app.invoke(Command::SelectNext);
 
@@ -2894,11 +2866,11 @@ fn unbound_fast_navigation_neither_moves_the_selection_nor_appears_in_help() {
 #[test]
 fn ctrl_c_quits_even_while_a_confirmation_modal_is_open() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
     handle_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE),
@@ -2918,11 +2890,11 @@ fn ctrl_c_quits_even_while_a_confirmation_modal_is_open() {
 #[test]
 fn a_resource_command_key_does_not_dispatch_while_a_confirmation_modal_is_open() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
     handle_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE),
@@ -2948,11 +2920,11 @@ fn a_resource_command_key_does_not_dispatch_while_a_confirmation_modal_is_open()
 #[test]
 fn escape_does_not_quit_when_no_modal_is_open() {
     let mut app = App::new();
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
 
     let (control, requests) = handle_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
 
@@ -2966,11 +2938,11 @@ fn an_overridden_focus_key_renders_its_effective_hint() {
         CommandRegistry::effective(&[("focus.providers".to_owned(), vec!["f10".to_owned()])])
             .expect("a valid override");
     let mut app = App::with_registry(registry);
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
 
     let screen = render_to_text(app.state(), 100, 24);
     assert!(
@@ -2988,11 +2960,11 @@ fn an_unbound_focus_command_omits_its_inline_hint() {
     let registry =
         CommandRegistry::effective(&[("focus.resources".to_owned(), vec![])]).expect("unbinding");
     let mut app = App::with_registry(registry);
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
 
     let screen = render_to_text(app.state(), 100, 24);
     assert!(
@@ -3010,11 +2982,11 @@ fn one_override_changes_dispatch_help_and_the_inline_hint_together() {
     ])
     .expect("a valid override set");
     let mut app = App::with_registry(registry);
-    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
-    app.update(refresh_completed(
-        initial,
-        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    ));
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
 
     // The inline hint follows the override.
     let screen = render_to_text(app.state(), 100, 24);
