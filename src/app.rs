@@ -5,8 +5,8 @@ use crate::command::{Command, CommandRegistry, CommandScope, NUMBERED_RESOURCE_P
 use crate::keys::Key;
 use crate::provider::{
     DetailViewId, ProviderDiscovery, ProviderId, ProviderRequest, ProviderRequestId,
-    ResourceCommand, ResourceDetails, ResourceId, ResourcePanelId, ResourceState, ResourceTarget,
-    WorkspaceError, WorkspaceSnapshot,
+    ResourceCommand, ResourceDetails, ResourceState, ResourceTarget, WorkspaceError,
+    WorkspaceSnapshot,
 };
 use crate::workspace::{DetailCompletion, ProviderWorkspaceState};
 
@@ -39,8 +39,7 @@ pub enum AppEvent {
     ResourceCommandCompleted {
         request_id: ProviderRequestId,
         provider_id: ProviderId,
-        resource_id: ResourceId,
-        resource_name: String,
+        target: ResourceTarget,
         command: ResourceCommand,
         result: Result<(), WorkspaceError>,
     },
@@ -52,8 +51,7 @@ pub enum AppEvent {
     ResourceDetailsCompleted {
         request_id: ProviderRequestId,
         provider_id: ProviderId,
-        panel_id: ResourcePanelId,
-        resource_id: ResourceId,
+        target: ResourceTarget,
         view_id: DetailViewId,
         result: Result<ResourceDetails, WorkspaceError>,
     },
@@ -83,10 +81,10 @@ fn operation_failure(
     provider_name: &str,
     operation: &str,
     resource_name: &str,
-    resource_id: &ResourceId,
+    target: &ResourceTarget,
     reason: &str,
 ) -> String {
-    format!("{provider_name} {operation} failed for {resource_name} ({resource_id}): {reason}")
+    format!("{provider_name} {operation} failed for {resource_name} ({target}): {reason}")
 }
 
 #[derive(Default)]
@@ -156,7 +154,7 @@ pub struct RunningResourceCommand {
     pub request_id: ProviderRequestId,
     pub provider_id: ProviderId,
     pub provider_name: String,
-    pub resource_id: ResourceId,
+    pub target: ResourceTarget,
     pub resource_name: String,
     pub command: ResourceCommand,
 }
@@ -171,7 +169,7 @@ pub struct RunningResourceCommand {
 pub struct PendingShell {
     pub provider_id: ProviderId,
     pub provider_name: String,
-    pub resource_id: ResourceId,
+    pub target: ResourceTarget,
     pub resource_name: String,
     /// The Provider CLI process that takes over the terminal.
     pub process: ProcessSpec,
@@ -193,8 +191,7 @@ pub struct HelpOverlay {
 pub struct ResourceCommandInvocation {
     pub provider_id: ProviderId,
     pub provider_name: String,
-    pub panel_id: ResourcePanelId,
-    pub resource_id: ResourceId,
+    pub target: ResourceTarget,
     pub resource_name: String,
     pub command: ResourceCommand,
     /// What the Resource was doing when the Command was invoked, so the prompt
@@ -271,34 +268,20 @@ impl App {
             AppEvent::ResourceCommandCompleted {
                 request_id,
                 provider_id,
-                resource_id,
-                resource_name,
+                target,
                 command,
                 result,
-            } => self.apply_resource_command_result(
-                request_id,
-                provider_id,
-                resource_id,
-                resource_name,
-                command,
-                result,
-            ),
+            } => {
+                self.apply_resource_command_result(request_id, provider_id, target, command, result)
+            }
             AppEvent::ResourceDetailsCompleted {
                 request_id,
                 provider_id,
-                panel_id,
-                resource_id,
+                target,
                 view_id,
                 result,
             } => {
-                self.apply_details_completed(
-                    request_id,
-                    provider_id,
-                    panel_id,
-                    resource_id,
-                    view_id,
-                    result,
-                );
+                self.apply_details_completed(request_id, provider_id, target, view_id, result);
                 Vec::new()
             }
         }
@@ -528,8 +511,7 @@ impl App {
         vec![ProviderRequest::LoadResourceDetails {
             request_id,
             provider_id,
-            panel_id: target.panel_id,
-            resource_id: target.resource_id,
+            target,
             view_id,
         }]
     }
@@ -538,8 +520,7 @@ impl App {
         &mut self,
         request_id: ProviderRequestId,
         provider_id: ProviderId,
-        panel_id: ResourcePanelId,
-        resource_id: ResourceId,
+        target: ResourceTarget,
         view_id: DetailViewId,
         result: Result<ResourceDetails, WorkspaceError>,
     ) {
@@ -554,7 +535,7 @@ impl App {
         provider.complete_detail_load(DetailCompletion::new(
             request_id,
             provider_id,
-            ResourceTarget::new(panel_id, resource_id),
+            target,
             view_id,
             result,
         ));
@@ -575,8 +556,7 @@ impl App {
         &mut self,
         request_id: ProviderRequestId,
         provider_id: ProviderId,
-        resource_id: ResourceId,
-        resource_name: String,
+        target: ResourceTarget,
         command: ResourceCommand,
         result: Result<(), WorkspaceError>,
     ) -> Vec<ProviderRequest> {
@@ -585,25 +565,27 @@ impl App {
             .running_commands
             .iter()
             .position(|running| {
-                running.request_id == request_id && running.provider_id == provider_id
+                running.request_id == request_id
+                    && running.provider_id == provider_id
+                    && running.target == target
+                    && running.command == command
             })
             .map(|index| self.state.running_commands.remove(index))
         else {
             return Vec::new();
         };
-        let provider_name = running.provider_name;
         if let Err(error) = result {
             self.state.command_error = Some(operation_failure(
-                &provider_name,
-                &command.to_string(),
-                &resource_name,
-                &resource_id,
+                &running.provider_name,
+                &running.command.to_string(),
+                &running.resource_name,
+                &running.target,
                 &error.message,
             ));
             return Vec::new();
         }
         self.state.command_error = None;
-        if !self.is_active_provider(&provider_id) {
+        if !self.is_active_provider(&running.provider_id) {
             return Vec::new();
         }
         self.refresh_active_provider()
@@ -636,7 +618,7 @@ impl App {
                 &shell.provider_name,
                 "shell",
                 &shell.resource_name,
-                &shell.resource_id,
+                &shell.target,
                 &reason,
             ));
         }
@@ -673,13 +655,10 @@ impl App {
         let Some(state) = resource.state else {
             return Vec::new();
         };
-        let panel_id = target.panel_id;
-        let resource_id = target.resource_id;
         let target = ResourceCommandInvocation {
             provider_id,
             provider_name,
-            panel_id,
-            resource_id,
+            target,
             resource_name,
             command,
             state,
@@ -709,7 +688,7 @@ impl App {
             request_id,
             provider_id: target.provider_id.clone(),
             provider_name: target.provider_name,
-            resource_id: target.resource_id.clone(),
+            target: target.target.clone(),
             resource_name: target.resource_name.clone(),
             command: target.command,
         });
@@ -717,9 +696,7 @@ impl App {
         vec![ProviderRequest::ExecuteResourceCommand {
             request_id,
             provider_id: target.provider_id,
-            panel_id: target.panel_id,
-            resource_id: target.resource_id,
-            resource_name: target.resource_name,
+            target: target.target,
             command: target.command,
             state: target.state,
         }]
@@ -741,18 +718,20 @@ impl App {
         };
         let provider_id = provider.id().clone();
         let provider_name = provider.name().to_owned();
+        let Some(target) = provider.selected_resource_target() else {
+            return;
+        };
         let Some(resource) = self.selected_resource() else {
             return;
         };
         let Some(process) = resource.shell.clone() else {
             return;
         };
-        let resource_id = resource.id.clone();
         let resource_name = resource.name.clone();
         self.state.pending_shell = Some(PendingShell {
             provider_id,
             provider_name,
-            resource_id,
+            target,
             resource_name,
             process,
         });

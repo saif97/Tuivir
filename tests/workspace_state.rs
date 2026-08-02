@@ -1,8 +1,8 @@
 use virtui::{
     provider::{
         DetailView, ProviderDiscovery, ProviderId, ProviderRequestId, Resource, ResourceDetails,
-        ResourceId, ResourcePanel, ResourcePanelId, TargetEnvironment, WorkspaceError,
-        WorkspaceSnapshot,
+        ResourceId, ResourcePanel, ResourcePanelId, ResourceTarget, TargetEnvironment,
+        WorkspaceError, WorkspaceSnapshot,
     },
     workspace::{DetailContent, ProviderWorkspaceState, WorkspaceLoadState},
 };
@@ -46,6 +46,22 @@ fn workspace() -> ProviderWorkspaceState {
         version: None,
         error: None,
     })
+}
+
+#[test]
+fn a_resource_target_looks_up_one_panel_qualified_resource() {
+    let snapshot = snapshot();
+    let target = ResourceTarget::new(
+        ResourcePanelId::new("containers"),
+        ResourceId::new("container-a"),
+    );
+
+    assert_eq!(
+        snapshot
+            .resource(&target)
+            .map(|resource| resource.name.as_str()),
+        Some("api")
+    );
 }
 
 #[test]

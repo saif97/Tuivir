@@ -144,15 +144,13 @@ pub fn command_completed(request: ProviderRequest, result: Result<(), WorkspaceE
         ProviderRequest::ExecuteResourceCommand {
             request_id,
             provider_id,
-            resource_id,
-            resource_name,
+            target,
             command,
             ..
         } => AppEvent::ResourceCommandCompleted {
             request_id,
             provider_id,
-            resource_id,
-            resource_name,
+            target,
             command,
             result,
         },
@@ -177,14 +175,12 @@ pub fn details_completed(
         ProviderRequest::LoadResourceDetails {
             request_id,
             provider_id,
-            panel_id,
-            resource_id,
+            target,
             view_id,
         } => AppEvent::ResourceDetailsCompleted {
             request_id,
             provider_id,
-            panel_id,
-            resource_id,
+            target,
             view_id,
             result,
         },

@@ -7,7 +7,8 @@ use crate::{
     provider::{
         DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderWorkspace, Resource,
         ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourcePanelId,
-        ResourceState, TargetEnvironment, WorkspaceError, WorkspaceSnapshot, provider_cli_error,
+        ResourceState, ResourceTarget, TargetEnvironment, WorkspaceError, WorkspaceSnapshot,
+        provider_cli_error,
     },
 };
 
@@ -140,12 +141,13 @@ impl ProviderWorkspace for IncusWorkspace {
     fn execute_command<'a>(
         &'a self,
         cli: &'a dyn CliRunner,
-        panel_id: &'a ResourcePanelId,
-        resource_id: &'a ResourceId,
+        target: &'a ResourceTarget,
         command: ResourceCommand,
         state: ResourceState,
     ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
+            let panel_id = target.panel_id();
+            let resource_id = target.resource_id();
             if panel_id.0 != INSTANCES_PANEL_ID {
                 return Err(WorkspaceError::new(format!(
                     "Incus has no {command} command for Resource Panel {panel_id}"
@@ -181,11 +183,12 @@ impl ProviderWorkspace for IncusWorkspace {
     fn load_details<'a>(
         &'a self,
         cli: &'a dyn CliRunner,
-        panel_id: &'a ResourcePanelId,
-        resource_id: &'a ResourceId,
+        target: &'a ResourceTarget,
         view_id: &'a DetailViewId,
     ) -> Pin<Box<dyn Future<Output = Result<ResourceDetails, WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
+            let panel_id = target.panel_id();
+            let resource_id = target.resource_id();
             if panel_id.0 != INSTANCES_PANEL_ID {
                 return Err(WorkspaceError::new(format!(
                     "Incus has no {view_id} view for Resource Panel {panel_id}"

@@ -223,12 +223,15 @@ async fn runtime_executes_resource_command_and_publishes_its_completion() {
         completion,
         AppEvent::ResourceCommandCompleted {
             provider_id,
-            resource_id,
+            target,
             command: ResourceCommand::Restart,
             result: Ok(()),
             ..
         } if provider_id == ProviderId::new("docker")
-            && resource_id == ResourceId::new("container-a")
+            && target == ResourceTarget::new(
+                ResourcePanelId::new("containers"),
+                ResourceId::new("container-a"),
+            )
     ));
     assert_eq!(
         *commands.lock().expect("recorded command lock"),
@@ -376,8 +379,11 @@ fn keyboard_commands_drive_navigation_manual_refresh_and_quit() {
     // Moving the selection asks only for the newly selected Resource's details.
     assert!(matches!(
         requests.as_slice(),
-        [ProviderRequest::LoadResourceDetails { resource_id, .. }]
-            if resource_id == &ResourceId::new("container-b")
+        [ProviderRequest::LoadResourceDetails { target, .. }]
+            if target == &ResourceTarget::new(
+                ResourcePanelId::new("containers"),
+                ResourceId::new("container-b"),
+            )
     ));
     assert!(render_to_text(app.state(), 100, 24).contains("Image: alpine:3.21"));
 
@@ -412,13 +418,14 @@ fn restart_key_dispatches_the_selected_resource_command() {
         requests.as_slice(),
         [ProviderRequest::ExecuteResourceCommand {
             provider_id,
-            resource_id,
-            resource_name,
+            target,
             command: ResourceCommand::Restart,
             ..
         }] if provider_id == &ProviderId::new("docker")
-            && resource_id == &ResourceId::new("container-a")
-            && resource_name == "api"
+            && target == &ResourceTarget::new(
+                ResourcePanelId::new("containers"),
+                ResourceId::new("container-a"),
+            )
     ));
 }
 
@@ -440,11 +447,14 @@ fn start_key_dispatches_for_a_stopped_instance() {
         requests.as_slice(),
         [ProviderRequest::ExecuteResourceCommand {
             provider_id,
-            resource_id,
+            target,
             command: ResourceCommand::Start,
             ..
         }] if provider_id == &ProviderId::new("incus")
-            && resource_id == &ResourceId::new("instance-a")
+            && target == &ResourceTarget::new(
+                ResourcePanelId::new("instances"),
+                ResourceId::new("instance-a"),
+            )
     ));
 }
 
@@ -465,11 +475,14 @@ fn stop_key_dispatches_for_a_running_container() {
         requests.as_slice(),
         [ProviderRequest::ExecuteResourceCommand {
             provider_id,
-            resource_id,
+            target,
             command: ResourceCommand::Stop,
             ..
         }] if provider_id == &ProviderId::new("docker")
-            && resource_id == &ResourceId::new("container-a")
+            && target == &ResourceTarget::new(
+                ResourcePanelId::new("containers"),
+                ResourceId::new("container-a"),
+            )
     ));
 }
 
@@ -491,14 +504,15 @@ fn resume_key_dispatches_for_a_paused_container_and_carries_its_state() {
         requests.as_slice(),
         [ProviderRequest::ExecuteResourceCommand {
             provider_id,
-            resource_id,
-            resource_name,
+            target,
             command: ResourceCommand::Resume,
             state: ResourceState::Paused,
             ..
         }] if provider_id == &ProviderId::new("docker")
-            && resource_id == &ResourceId::new("container-a")
-            && resource_name == "api"
+            && target == &ResourceTarget::new(
+                ResourcePanelId::new("containers"),
+                ResourceId::new("container-a"),
+            )
     ));
 }
 
@@ -543,8 +557,7 @@ fn successful_resource_command_refreshes_the_active_workspace_and_preserves_sele
     let ProviderRequest::ExecuteResourceCommand {
         request_id,
         provider_id,
-        resource_id,
-        resource_name,
+        target,
         command,
         ..
     } = request.into_iter().next().expect("restart request")
@@ -555,8 +568,7 @@ fn successful_resource_command_refreshes_the_active_workspace_and_preserves_sele
     let refresh = refresh_request(app.update(AppEvent::ResourceCommandCompleted {
         request_id,
         provider_id,
-        resource_id,
-        resource_name,
+        target,
         command,
         result: Ok(()),
     }));
@@ -592,7 +604,13 @@ fn returning_from_a_shell_refreshes_the_active_workspace_and_preserves_selection
         KeyEvent::new(KeyCode::Char('E'), KeyModifiers::NONE),
     );
     let shell = app.take_pending_shell().expect("a shell to hand over to");
-    assert_eq!(shell.resource_id, ResourceId::new("container-b"));
+    assert_eq!(
+        shell.target,
+        ResourceTarget::new(
+            ResourcePanelId::new("containers"),
+            ResourceId::new("container-b"),
+        )
+    );
 
     let requests = app.update(AppEvent::ShellClosed {
         shell,
@@ -637,8 +655,7 @@ fn failed_resource_command_identifies_provider_resource_and_attempted_command() 
     let ProviderRequest::ExecuteResourceCommand {
         request_id,
         provider_id,
-        resource_id,
-        resource_name,
+        target,
         command,
         ..
     } = request.into_iter().next().expect("restart request")
@@ -649,8 +666,7 @@ fn failed_resource_command_identifies_provider_resource_and_attempted_command() 
     let follow_up = app.update(AppEvent::ResourceCommandCompleted {
         request_id,
         provider_id,
-        resource_id,
-        resource_name,
+        target,
         command,
         result: Err(WorkspaceError::new("permission denied")),
     });
@@ -683,6 +699,81 @@ fn selecting_another_resource_keeps_an_in_flight_resource_command() {
         follow_up.len(),
         1,
         "the completed Resource Command still refreshes its Provider Workspace"
+    );
+}
+
+#[test]
+fn a_resource_command_completion_for_another_target_stays_late() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+    let restart = command_request(app.invoke(Command::Resource(ResourceCommand::Restart)));
+    let ProviderRequest::ExecuteResourceCommand {
+        request_id,
+        provider_id,
+        command,
+        ..
+    } = &restart
+    else {
+        panic!("expected Resource Command request");
+    };
+
+    let requests = app.update(AppEvent::ResourceCommandCompleted {
+        request_id: *request_id,
+        provider_id: provider_id.clone(),
+        target: ResourceTarget::new(
+            ResourcePanelId::new("images"),
+            ResourceId::new("container-a"),
+        ),
+        command: *command,
+        result: Ok(()),
+    });
+
+    assert!(requests.is_empty());
+    assert_eq!(app.state().running_commands.len(), 1);
+    assert_eq!(
+        app.update(command_completed(restart, Ok(()))).len(),
+        1,
+        "the matching completion still refreshes its Provider Workspace"
+    );
+}
+
+#[test]
+fn a_resource_command_completion_for_another_command_stays_late() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(AppEvent::ProviderDiscovered(docker_discovery())));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+    let restart = command_request(app.invoke(Command::Resource(ResourceCommand::Restart)));
+    let ProviderRequest::ExecuteResourceCommand {
+        request_id,
+        provider_id,
+        target,
+        ..
+    } = &restart
+    else {
+        panic!("expected Resource Command request");
+    };
+
+    let requests = app.update(AppEvent::ResourceCommandCompleted {
+        request_id: *request_id,
+        provider_id: provider_id.clone(),
+        target: target.clone(),
+        command: ResourceCommand::Stop,
+        result: Ok(()),
+    });
+
+    assert!(requests.is_empty());
+    assert_eq!(app.state().running_commands.len(), 1);
+    assert_eq!(
+        app.update(command_completed(restart, Ok(()))).len(),
+        1,
+        "the matching completion still refreshes its Provider Workspace"
     );
 }
 
@@ -1094,7 +1185,13 @@ fn the_shell_key_asks_for_the_terminal_for_the_selected_container() {
         .expect("a shell waiting for the terminal");
     assert_eq!(pending.provider_id, ProviderId::new("docker"));
     assert_eq!(pending.provider_name, "Docker");
-    assert_eq!(pending.resource_id, ResourceId::new("container-a"));
+    assert_eq!(
+        pending.target,
+        ResourceTarget::new(
+            ResourcePanelId::new("containers"),
+            ResourceId::new("container-a"),
+        )
+    );
     assert_eq!(pending.resource_name, "api");
     assert_eq!(
         pending.process,
@@ -1159,13 +1256,14 @@ fn delete_requires_target_identifying_confirmation_before_dispatch() {
         confirmed_requests.as_slice(),
         [ProviderRequest::ExecuteResourceCommand {
             provider_id,
-            resource_id,
-            resource_name,
+            target,
             command: ResourceCommand::Delete,
             ..
         }] if provider_id == &ProviderId::new("docker")
-            && resource_id == &ResourceId::new("container-a")
-            && resource_name == "api"
+            && target == &ResourceTarget::new(
+                ResourcePanelId::new("containers"),
+                ResourceId::new("container-a"),
+            )
     ));
 }
 
@@ -1734,11 +1832,14 @@ fn settling_on_a_resource_requests_only_the_visible_detail_view() {
             &requests[0],
             ProviderRequest::LoadResourceDetails {
                 provider_id,
-                resource_id,
+                target,
                 view_id,
                 ..
             } if provider_id == &ProviderId::new("docker")
-                && resource_id == &ResourceId::new("container-a")
+                && target == &ResourceTarget::new(
+                    ResourcePanelId::new("containers"),
+                    ResourceId::new("container-a"),
+                )
                 && view_id == &DetailViewId::new("logs")
         ),
         "unexpected request: {:?}",
@@ -1990,12 +2091,13 @@ fn selecting_an_image_routes_details_by_panel_and_resource() {
         matches!(
             requests.as_slice(),
             [ProviderRequest::LoadResourceDetails {
-                panel_id,
-                resource_id,
+                target,
                 view_id,
                 ..
-            }] if panel_id == &ResourcePanelId::new("images")
-                && resource_id == &ResourceId::new("shared-id")
+            }] if target == &ResourceTarget::new(
+                    ResourcePanelId::new("images"),
+                    ResourceId::new("shared-id"),
+                )
                 && view_id == &DetailViewId::new("inspect")
         ),
         "unexpected requests: {requests:?}"
@@ -2138,8 +2240,11 @@ fn the_chosen_detail_view_survives_moving_to_another_resource() {
     assert!(
         matches!(
             requests.as_slice(),
-            [ProviderRequest::LoadResourceDetails { resource_id, view_id, .. }]
-                if resource_id == &ResourceId::new("container-b")
+            [ProviderRequest::LoadResourceDetails { target, view_id, .. }]
+                if target == &ResourceTarget::new(
+                    ResourcePanelId::new("containers"),
+                    ResourceId::new("container-b"),
+                )
                     && view_id == &DetailViewId::new("stats")
         ),
         "unexpected requests: {requests:?}"
@@ -2340,8 +2445,11 @@ fn a_refresh_that_removes_the_selected_resource_loads_the_new_selections_details
     assert!(
         matches!(
             &reloaded,
-            ProviderRequest::LoadResourceDetails { resource_id, .. }
-                if resource_id == &ResourceId::new("container-b")
+            ProviderRequest::LoadResourceDetails { target, .. }
+                if target == &ResourceTarget::new(
+                    ResourcePanelId::new("containers"),
+                    ResourceId::new("container-b"),
+                )
         ),
         "unexpected request: {reloaded:?}"
     );

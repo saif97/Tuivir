@@ -147,9 +147,7 @@ pub enum ProviderRequest {
     ExecuteResourceCommand {
         request_id: ProviderRequestId,
         provider_id: ProviderId,
-        panel_id: ResourcePanelId,
-        resource_id: ResourceId,
-        resource_name: String,
+        target: ResourceTarget,
         command: ResourceCommand,
         /// What the last refresh reported for this Resource, carried here so
         /// the Provider Workspace never re-queries it while dispatching.
@@ -162,8 +160,7 @@ pub enum ProviderRequest {
     LoadResourceDetails {
         request_id: ProviderRequestId,
         provider_id: ProviderId,
-        panel_id: ResourcePanelId,
-        resource_id: ResourceId,
+        target: ResourceTarget,
         view_id: DetailViewId,
     },
 }
@@ -202,8 +199,8 @@ impl fmt::Display for ResourceId {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 /// Identifies one Resource within its provider-defined Resource Panel.
 pub struct ResourceTarget {
-    pub panel_id: ResourcePanelId,
-    pub resource_id: ResourceId,
+    panel_id: ResourcePanelId,
+    resource_id: ResourceId,
 }
 
 impl ResourceTarget {
@@ -212,6 +209,20 @@ impl ResourceTarget {
             panel_id,
             resource_id,
         }
+    }
+
+    pub(crate) fn panel_id(&self) -> &ResourcePanelId {
+        &self.panel_id
+    }
+
+    pub(crate) fn resource_id(&self) -> &ResourceId {
+        &self.resource_id
+    }
+}
+
+impl fmt::Display for ResourceTarget {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.resource_id.fmt(formatter)
     }
 }
 
@@ -325,15 +336,15 @@ impl WorkspaceSnapshot {
         self.panels.iter().find(|panel| &panel.id == panel_id)
     }
 
-    pub fn resource(
-        &self,
-        panel_id: &ResourcePanelId,
-        resource_id: &ResourceId,
-    ) -> Option<&Resource> {
-        self.panel(panel_id)?
+    pub(crate) fn panel_for(&self, target: &ResourceTarget) -> Option<&ResourcePanel> {
+        self.panel(&target.panel_id)
+    }
+
+    pub fn resource(&self, target: &ResourceTarget) -> Option<&Resource> {
+        self.panel_for(target)?
             .resources
             .iter()
-            .find(|resource| &resource.id == resource_id)
+            .find(|resource| resource.id == target.resource_id)
     }
 }
 
@@ -446,8 +457,7 @@ pub trait ProviderWorkspace: Send + Sync {
     fn execute_command<'a>(
         &'a self,
         cli: &'a dyn CliRunner,
-        panel_id: &'a ResourcePanelId,
-        resource_id: &'a ResourceId,
+        target: &'a ResourceTarget,
         command: ResourceCommand,
         state: ResourceState,
     ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>>;
@@ -459,8 +469,7 @@ pub trait ProviderWorkspace: Send + Sync {
     fn load_details<'a>(
         &'a self,
         cli: &'a dyn CliRunner,
-        panel_id: &'a ResourcePanelId,
-        resource_id: &'a ResourceId,
+        target: &'a ResourceTarget,
         view_id: &'a DetailViewId,
     ) -> Pin<Box<dyn Future<Output = Result<ResourceDetails, WorkspaceError>> + Send + 'a>>;
 }

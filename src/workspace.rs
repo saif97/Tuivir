@@ -449,10 +449,10 @@ impl ProviderWorkspaceState {
         let selected_target = self.selected_resource_target();
         let selected_resource = selected_target
             .as_ref()
-            .and_then(|selected| snapshot.resource(&selected.panel_id, &selected.resource_id));
+            .and_then(|selected| snapshot.resource(selected));
         let selected_panel = selected_target
             .as_ref()
-            .and_then(|selected| snapshot.panel(&selected.panel_id));
+            .and_then(|selected| snapshot.panel_for(selected));
         let selected_detail_view = self.selected_detail_view.as_ref().and_then(|selected| {
             selected_panel?
                 .detail_views
@@ -525,7 +525,7 @@ impl ProviderWorkspaceState {
         let WorkspaceLoadState::Ready(snapshot) = &self.load_state else {
             return None;
         };
-        snapshot.resource(&target.panel_id, &target.resource_id)
+        snapshot.resource(&target)
     }
 
     fn invalidate_detail_when_target_changes<R>(
@@ -551,7 +551,7 @@ impl ProviderWorkspaceState {
         let offered = self
             .selected_resource_target()
             .as_ref()
-            .and_then(|selected| snapshot.panel(&selected.panel_id))
+            .and_then(|selected| snapshot.panel_for(selected))
             .map_or(&[][..], |panel| panel.detail_views.as_slice());
         let still_offered = self
             .selected_detail_view
@@ -567,10 +567,10 @@ impl ProviderWorkspaceState {
             return None;
         };
         let target = self.selected_resource_target()?;
-        let resource = snapshot.resource(&target.panel_id, &target.resource_id)?;
+        let resource = snapshot.resource(&target)?;
         let view_id = self.selected_detail_view.as_ref()?;
         let view = snapshot
-            .panel(&target.panel_id)?
+            .panel_for(&target)?
             .detail_views
             .iter()
             .find(|view| &view.id == view_id)?

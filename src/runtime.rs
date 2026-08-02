@@ -216,9 +216,7 @@ impl ProviderRuntime {
             ProviderRequest::ExecuteResourceCommand {
                 request_id,
                 provider_id,
-                panel_id,
-                resource_id,
-                resource_name,
+                target,
                 command,
                 state,
             } => {
@@ -233,13 +231,12 @@ impl ProviderRuntime {
                 let cli = Arc::clone(&self.cli);
                 tokio::spawn(async move {
                     let result = workspace
-                        .execute_command(cli.as_ref(), &panel_id, &resource_id, command, state)
+                        .execute_command(cli.as_ref(), &target, command, state)
                         .await;
                     let _ = events.send(AppEvent::ResourceCommandCompleted {
                         request_id,
                         provider_id,
-                        resource_id,
-                        resource_name,
+                        target,
                         command,
                         result,
                     });
@@ -248,8 +245,7 @@ impl ProviderRuntime {
             ProviderRequest::LoadResourceDetails {
                 request_id,
                 provider_id,
-                panel_id,
-                resource_id,
+                target,
                 view_id,
             } => {
                 let Some(workspace) = self.workspace(&provider_id) else {
@@ -258,13 +254,12 @@ impl ProviderRuntime {
                 let cli = Arc::clone(&self.cli);
                 tokio::spawn(async move {
                     let result = workspace
-                        .load_details(cli.as_ref(), &panel_id, &resource_id, &view_id)
+                        .load_details(cli.as_ref(), &target, &view_id)
                         .await;
                     let _ = events.send(AppEvent::ResourceDetailsCompleted {
                         request_id,
                         provider_id,
-                        panel_id,
-                        resource_id,
+                        target,
                         view_id,
                         result,
                     });
