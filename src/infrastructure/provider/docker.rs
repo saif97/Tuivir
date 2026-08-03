@@ -141,7 +141,7 @@ impl ProviderWorkspace for DockerWorkspace {
                     })?;
                     let state = docker_resource_state(&row.state);
                     let available_commands =
-                        lifecycle_commands(state, LifecycleCommandPolicy::Restartable);
+                        lifecycle_commands(state, LifecycleCommandPolicy::RestartAndResume);
                     let shell = container_shell(state, &row.id);
                     Ok(Resource {
                         id: ResourceId::new(row.id),

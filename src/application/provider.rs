@@ -17,7 +17,7 @@ const UNSETTLED: &[ResourceCommand] = &[ResourceCommand::Delete];
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// The real lifecycle difference between Provider command sets.
 pub enum LifecycleCommandPolicy {
-    Restartable,
+    RestartAndResume,
     StartStop,
 }
 
@@ -27,12 +27,12 @@ pub fn lifecycle_commands(
     policy: LifecycleCommandPolicy,
 ) -> &'static [ResourceCommand] {
     match state {
-        ResourceState::Running if policy == LifecycleCommandPolicy::Restartable => {
+        ResourceState::Running if policy == LifecycleCommandPolicy::RestartAndResume => {
             RUNNING_RESTARTABLE
         }
         ResourceState::Running => RUNNING_START_STOP,
         ResourceState::Stopped => STOPPED,
-        ResourceState::Paused if policy == LifecycleCommandPolicy::Restartable => PAUSED,
+        ResourceState::Paused if policy == LifecycleCommandPolicy::RestartAndResume => PAUSED,
         ResourceState::Paused => UNSETTLED,
         ResourceState::Transitioning | ResourceState::Broken | ResourceState::Unknown => UNSETTLED,
     }

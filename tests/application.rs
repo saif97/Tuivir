@@ -132,7 +132,10 @@ fn first_available_provider_becomes_the_active_workspace() {
 #[test]
 fn lifecycle_commands_share_one_policy_with_only_real_provider_differences() {
     assert_eq!(
-        lifecycle_commands(ResourceState::Running, LifecycleCommandPolicy::Restartable),
+        lifecycle_commands(
+            ResourceState::Running,
+            LifecycleCommandPolicy::RestartAndResume,
+        ),
         [
             ResourceCommand::Stop,
             ResourceCommand::Restart,
@@ -149,7 +152,10 @@ fn lifecycle_commands_share_one_policy_with_only_real_provider_differences() {
         "a Provider without pause/resume support must not inherit Resume",
     );
     assert_eq!(
-        lifecycle_commands(ResourceState::Unknown, LifecycleCommandPolicy::Restartable),
+        lifecycle_commands(
+            ResourceState::Unknown,
+            LifecycleCommandPolicy::RestartAndResume,
+        ),
         [ResourceCommand::Delete]
     );
 }
@@ -1781,7 +1787,7 @@ fn container_snapshot(
         ResourceState::Broken => "dead",
         ResourceState::Unknown => "teleporting",
     };
-    let available_commands = lifecycle_commands(state, LifecycleCommandPolicy::Restartable);
+    let available_commands = lifecycle_commands(state, LifecycleCommandPolicy::RestartAndResume);
     WorkspaceSnapshot {
         panels: vec![ResourcePanel {
             id: ResourcePanelId::new("containers"),
@@ -1841,7 +1847,7 @@ fn incus_snapshot(instances: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
                             } else {
                                 ResourceState::Stopped
                             },
-                            LifecycleCommandPolicy::Restartable,
+                            LifecycleCommandPolicy::RestartAndResume,
                         ),
                         shell: running.then(|| {
                             InteractiveShellProcess::new(

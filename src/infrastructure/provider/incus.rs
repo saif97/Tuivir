@@ -104,7 +104,7 @@ impl ProviderWorkspace for IncusWorkspace {
                 .map(|row| {
                     let state = incus_resource_state(&row.status);
                     let available_commands =
-                        lifecycle_commands(state, LifecycleCommandPolicy::Restartable);
+                        lifecycle_commands(state, LifecycleCommandPolicy::RestartAndResume);
                     let shell = instance_shell(state, &row.name);
                     Resource {
                         id: ResourceId::new(&row.name),
