@@ -144,6 +144,11 @@ fn lifecycle_commands_share_one_policy_with_only_real_provider_differences() {
         [ResourceCommand::Stop, ResourceCommand::Delete]
     );
     assert_eq!(
+        lifecycle_commands(ResourceState::Paused, LifecycleCommandPolicy::StartStop),
+        [ResourceCommand::Delete],
+        "a Provider without pause/resume support must not inherit Resume",
+    );
+    assert_eq!(
         lifecycle_commands(ResourceState::Unknown, LifecycleCommandPolicy::Restartable),
         [ResourceCommand::Delete]
     );

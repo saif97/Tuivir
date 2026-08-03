@@ -32,7 +32,8 @@ pub fn lifecycle_commands(
         }
         ResourceState::Running => RUNNING_START_STOP,
         ResourceState::Stopped => STOPPED,
-        ResourceState::Paused => PAUSED,
+        ResourceState::Paused if policy == LifecycleCommandPolicy::Restartable => PAUSED,
+        ResourceState::Paused => UNSETTLED,
         ResourceState::Transitioning | ResourceState::Broken | ResourceState::Unknown => UNSETTLED,
     }
 }
