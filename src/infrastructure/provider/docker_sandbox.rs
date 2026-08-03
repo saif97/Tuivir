@@ -240,15 +240,12 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
             // one whose daemon is down or whose login has lapsed.
             let version = match cli.run(ProcessSpec::new("sbx", &["version"])).await {
                 Err(ProcessError::ExecutableNotFound) => return None,
-                Err(ProcessError::SpawnFailed(message)) => {
-                    return Some(discovery_error(format!(
-                        "{PROVIDER_NAME} CLI could not be started: {message}"
+                Err(error) => {
+                    return Some(discovery_error(provider_cli_error(
+                        PROVIDER_NAME,
+                        &error,
+                        "Docker Sandbox could not report its version",
                     )));
-                }
-                Err(ProcessError::Exited(failure)) => {
-                    return Some(discovery_error(
-                        failure.message_or("Docker Sandbox could not report its version"),
-                    ));
                 }
                 Ok(output) => sbx_version(&output.stdout),
             };

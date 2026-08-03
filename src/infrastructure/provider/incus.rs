@@ -47,36 +47,26 @@ impl ProviderWorkspace for IncusWorkspace {
             );
             let remote = match remote {
                 Err(ProcessError::ExecutableNotFound) => return None,
-                Err(ProcessError::SpawnFailed(message)) => {
+                Err(error) => {
                     return Some(discovery_error(
-                        format!("{PROVIDER_NAME} CLI could not be started: {message}"),
-                        "incus remote get-default",
-                    ));
-                }
-                Err(ProcessError::Exited(failure)) => {
-                    return Some(discovery_error(
-                        failure.message_or("Incus could not report its default remote"),
+                        provider_cli_error(
+                            PROVIDER_NAME,
+                            &error,
+                            "Incus could not report its default remote",
+                        ),
                         "incus remote get-default",
                     ));
                 }
                 Ok(output) => output.stdout.trim().to_owned(),
             };
             let project = match project {
-                Err(ProcessError::ExecutableNotFound) => {
+                Err(error) => {
                     return Some(discovery_error(
-                        format!("{PROVIDER_NAME} CLI is no longer available"),
-                        "incus project get-current",
-                    ));
-                }
-                Err(ProcessError::SpawnFailed(message)) => {
-                    return Some(discovery_error(
-                        format!("{PROVIDER_NAME} CLI could not be started: {message}"),
-                        "incus project get-current",
-                    ));
-                }
-                Err(ProcessError::Exited(failure)) => {
-                    return Some(discovery_error(
-                        failure.message_or("Incus could not report the current project"),
+                        provider_cli_error(
+                            PROVIDER_NAME,
+                            &error,
+                            "Incus could not report the current project",
+                        ),
                         "incus project get-current",
                     ));
                 }

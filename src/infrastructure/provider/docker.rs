@@ -66,12 +66,11 @@ impl ProviderWorkspace for DockerWorkspace {
 
             match result {
                 Err(ProcessError::ExecutableNotFound) => None,
-                Err(ProcessError::SpawnFailed(message)) => Some(discovery_with_error(format!(
-                    "{PROVIDER_NAME} CLI could not be started: {message}"
+                Err(error) => Some(discovery_with_error(provider_cli_error(
+                    PROVIDER_NAME,
+                    &error,
+                    "Docker could not report its current context",
                 ))),
-                Err(ProcessError::Exited(failure)) => Some(discovery_with_error(
-                    failure.message_or("Docker could not report its current context"),
-                )),
                 Ok(output) => Some(ProviderDiscovery::new(
                     Provider::new(
                         self.id(),
