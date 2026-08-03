@@ -11,9 +11,9 @@ use tokio::sync::{Barrier, Notify, mpsc};
 use virtui::{
     application::{
         App, AppEvent, AppState, Command, CommandRegistry, CommandScope, DetailView, FocusedPane,
-        InteractiveShellOutcome, InteractiveShellProcess, ProviderRequest, Resource,
-        ResourceCommand, ResourceDetails, ResourcePanel, WorkspaceError, WorkspaceLoadState,
-        WorkspaceSnapshot,
+        InteractiveShellOutcome, InteractiveShellProcess, LifecycleCommandPolicy, ProviderRequest,
+        Resource, ResourceCommand, ResourceDetails, ResourcePanel, WorkspaceError,
+        WorkspaceLoadState, WorkspaceSnapshot, lifecycle_commands,
     },
     domain::{
         DetailViewId, Provider, ProviderId, ResourceId, ResourcePanelId, ResourceState,
@@ -121,6 +121,26 @@ fn first_available_provider_becomes_the_active_workspace() {
     app.update(docker_discovery().into_event());
 
     assert_eq!(app.state().active_provider, Some(0));
+}
+
+#[test]
+fn lifecycle_commands_share_one_policy_with_only_real_provider_differences() {
+    assert_eq!(
+        lifecycle_commands(ResourceState::Running, LifecycleCommandPolicy::Restartable),
+        [
+            ResourceCommand::Stop,
+            ResourceCommand::Restart,
+            ResourceCommand::Delete,
+        ]
+    );
+    assert_eq!(
+        lifecycle_commands(ResourceState::Running, LifecycleCommandPolicy::StartStop),
+        [ResourceCommand::Stop, ResourceCommand::Delete]
+    );
+    assert_eq!(
+        lifecycle_commands(ResourceState::Unknown, LifecycleCommandPolicy::Restartable),
+        [ResourceCommand::Delete]
+    );
 }
 
 struct DelayedCli {
@@ -1742,27 +1762,15 @@ fn container_snapshot(
     containers: &[(&str, &str, &str)],
     state: ResourceState,
 ) -> WorkspaceSnapshot {
-    let (status, available_commands) = match state {
-        ResourceState::Running => (
-            "running",
-            vec![
-                ResourceCommand::Stop,
-                ResourceCommand::Restart,
-                ResourceCommand::Delete,
-            ],
-        ),
-        ResourceState::Stopped => (
-            "exited",
-            vec![ResourceCommand::Start, ResourceCommand::Delete],
-        ),
-        ResourceState::Paused => (
-            "paused",
-            vec![ResourceCommand::Resume, ResourceCommand::Delete],
-        ),
-        ResourceState::Transitioning => ("restarting", vec![ResourceCommand::Delete]),
-        ResourceState::Broken => ("dead", vec![ResourceCommand::Delete]),
-        ResourceState::Unknown => ("teleporting", vec![ResourceCommand::Delete]),
+    let status = match state {
+        ResourceState::Running => "running",
+        ResourceState::Stopped => "exited",
+        ResourceState::Paused => "paused",
+        ResourceState::Transitioning => "restarting",
+        ResourceState::Broken => "dead",
+        ResourceState::Unknown => "teleporting",
     };
+    let available_commands = lifecycle_commands(state, LifecycleCommandPolicy::Restartable);
     WorkspaceSnapshot {
         panels: vec![ResourcePanel {
             id: ResourcePanelId::new("containers"),
@@ -1781,7 +1789,7 @@ fn container_snapshot(
                     state: Some(state),
                     fields: vec![("Image", (*image).to_owned())],
                     snapshot_details: Vec::new(),
-                    available_commands: available_commands.clone(),
+                    available_commands,
                     shell: (state == ResourceState::Running).then(|| {
                         InteractiveShellProcess::new("docker", &["exec", "-it", *id, "/bin/sh"])
                     }),
@@ -1816,15 +1824,14 @@ fn incus_snapshot(instances: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
                         }),
                         fields: vec![("Type", "container".to_owned())],
                         snapshot_details: Vec::new(),
-                        available_commands: if running {
-                            vec![
-                                ResourceCommand::Stop,
-                                ResourceCommand::Restart,
-                                ResourceCommand::Delete,
-                            ]
-                        } else {
-                            vec![ResourceCommand::Start, ResourceCommand::Delete]
-                        },
+                        available_commands: lifecycle_commands(
+                            if running {
+                                ResourceState::Running
+                            } else {
+                                ResourceState::Stopped
+                            },
+                            LifecycleCommandPolicy::Restartable,
+                        ),
                         shell: running.then(|| {
                             InteractiveShellProcess::new(
                                 "incus",
@@ -1859,7 +1866,7 @@ fn docker_multi_panel_snapshot() -> WorkspaceSnapshot {
                         ("Status", "Up 3 hours".to_owned()),
                     ],
                     snapshot_details: Vec::new(),
-                    available_commands: vec![
+                    available_commands: &[
                         ResourceCommand::Stop,
                         ResourceCommand::Restart,
                         ResourceCommand::Delete,
@@ -1886,7 +1893,7 @@ fn docker_multi_panel_snapshot() -> WorkspaceSnapshot {
                         ("Size", "192MB".to_owned()),
                     ],
                     snapshot_details: Vec::new(),
-                    available_commands: Vec::new(),
+                    available_commands: &[],
                     shell: None,
                 }],
             },

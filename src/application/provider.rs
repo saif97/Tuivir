@@ -4,6 +4,39 @@ use crate::domain::{
 
 use super::{InteractiveShellProcess, ResourceCommand};
 
+const RUNNING_RESTARTABLE: &[ResourceCommand] = &[
+    ResourceCommand::Stop,
+    ResourceCommand::Restart,
+    ResourceCommand::Delete,
+];
+const RUNNING_START_STOP: &[ResourceCommand] = &[ResourceCommand::Stop, ResourceCommand::Delete];
+const STOPPED: &[ResourceCommand] = &[ResourceCommand::Start, ResourceCommand::Delete];
+const PAUSED: &[ResourceCommand] = &[ResourceCommand::Resume, ResourceCommand::Delete];
+const UNSETTLED: &[ResourceCommand] = &[ResourceCommand::Delete];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// The real lifecycle difference between Provider command sets.
+pub enum LifecycleCommandPolicy {
+    Restartable,
+    StartStop,
+}
+
+/// Derives allocation-free Resource Commands from shared lifecycle policy.
+pub fn lifecycle_commands(
+    state: ResourceState,
+    policy: LifecycleCommandPolicy,
+) -> &'static [ResourceCommand] {
+    match state {
+        ResourceState::Running if policy == LifecycleCommandPolicy::Restartable => {
+            RUNNING_RESTARTABLE
+        }
+        ResourceState::Running => RUNNING_START_STOP,
+        ResourceState::Stopped => STOPPED,
+        ResourceState::Paused => PAUSED,
+        ResourceState::Transitioning | ResourceState::Broken | ResourceState::Unknown => UNSETTLED,
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 /// Identifies one asynchronous request sent to a Provider Workspace.
 ///
@@ -64,7 +97,7 @@ pub struct Resource {
     /// Detail content already carried by this application-owned snapshot.
     pub snapshot_details: Vec<(DetailViewId, ResourceDetails)>,
     /// Lifecycle Commands currently available for this provider Resource.
-    pub available_commands: Vec<ResourceCommand>,
+    pub available_commands: &'static [ResourceCommand],
     /// The Interactive Shell this Provider offers inside the Resource now.
     pub shell: Option<InteractiveShellProcess>,
 }

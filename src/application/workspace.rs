@@ -203,18 +203,14 @@ impl ProviderWorkspaceState {
             let Some(panel) = snapshot.panel(panel_id) else {
                 return false;
             };
-            let offered = panel
-                .detail_views
-                .iter()
-                .map(|view| view.id.clone())
-                .collect::<Vec<_>>();
             workspace.focused_resource_panel = Some(panel_id.clone());
             let still_offered = workspace
                 .selected_detail_view
                 .as_ref()
-                .is_some_and(|selected| offered.contains(selected));
+                .is_some_and(|selected| panel.detail_views.iter().any(|view| &view.id == selected));
             if !still_offered {
-                workspace.selected_detail_view = offered.into_iter().next();
+                workspace.selected_detail_view =
+                    panel.detail_views.first().map(|view| view.id.clone());
             }
             true
         })

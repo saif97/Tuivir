@@ -757,7 +757,7 @@ impl App {
             return;
         };
         let target = resource.name.clone();
-        let available_commands = resource.available_commands.clone();
+        let available_commands = resource.available_commands;
         let offers_a_shell = resource.shell.is_some();
         let panel_count = self
             .state

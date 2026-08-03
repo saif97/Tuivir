@@ -178,7 +178,7 @@ fn running_container() -> WorkspaceSnapshot {
                 state: Some(ResourceState::Running),
                 fields: vec![("Image", "nginx:1.27".to_owned())],
                 snapshot_details: Vec::new(),
-                available_commands: vec![ResourceCommand::Stop],
+                available_commands: &[ResourceCommand::Stop],
                 shell: Some(InteractiveShellProcess::new(
                     "docker",
                     &["exec", "-it", "container-a", "/bin/sh"],

@@ -363,7 +363,7 @@ async fn command_availability_follows_the_last_refreshed_state() {
         snapshot
             .targets()
             .map(|(_, resource)| resource)
-            .map(|resource| (resource.name.as_str(), resource.available_commands.clone()))
+            .map(|resource| (resource.name.as_str(), resource.available_commands.to_vec()))
             .collect::<Vec<_>>(),
         [
             (

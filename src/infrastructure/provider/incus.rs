@@ -3,7 +3,7 @@ use std::{future::Future, pin::Pin};
 use serde::Deserialize;
 
 use crate::{
-    application::InteractiveShellProcess,
+    application::{InteractiveShellProcess, LifecycleCommandPolicy, lifecycle_commands},
     infrastructure::process::{CliRunner, ProcessError, ProcessSpec},
     infrastructure::provider::{
         DetailView, DetailViewId, Provider, ProviderDiscovery, ProviderId, ProviderWorkspace,
@@ -110,7 +110,8 @@ impl ProviderWorkspace for IncusWorkspace {
                 .into_iter()
                 .map(|row| {
                     let state = incus_resource_state(&row.status);
-                    let available_commands = incus_commands(state);
+                    let available_commands =
+                        lifecycle_commands(state, LifecycleCommandPolicy::Restartable);
                     let shell = instance_shell(state, &row.name);
                     Resource {
                         id: ResourceId::new(&row.name),
@@ -246,32 +247,21 @@ fn instance_detail_views() -> Vec<DetailView> {
 /// alongside the transitional ones an operation passes through; anything else
 /// is deliberately left `Unknown` rather than assumed to be stopped.
 fn incus_resource_state(status: &str) -> ResourceState {
-    match status.to_ascii_lowercase().as_str() {
-        "running" => ResourceState::Running,
-        "stopped" => ResourceState::Stopped,
-        "frozen" => ResourceState::Paused,
-        "starting" | "stopping" | "freezing" | "thawing" => ResourceState::Transitioning,
-        "error" => ResourceState::Broken,
-        _ => ResourceState::Unknown,
-    }
-}
-
-fn incus_commands(state: ResourceState) -> Vec<ResourceCommand> {
-    match state {
-        ResourceState::Running => vec![
-            ResourceCommand::Stop,
-            ResourceCommand::Restart,
-            ResourceCommand::Delete,
-        ],
-        ResourceState::Stopped => vec![ResourceCommand::Start, ResourceCommand::Delete],
-        // A frozen instance resumes rather than starts: `incus start` fails
-        // against it, and `incus unfreeze` fails against everything else.
-        ResourceState::Paused => vec![ResourceCommand::Resume, ResourceCommand::Delete],
-        // A transitioning, errored, or unrecognised instance has no lifecycle
-        // Command that reliably applies. Deletion always does.
-        ResourceState::Transitioning | ResourceState::Broken | ResourceState::Unknown => {
-            vec![ResourceCommand::Delete]
-        }
+    if status.eq_ignore_ascii_case("running") {
+        ResourceState::Running
+    } else if status.eq_ignore_ascii_case("stopped") {
+        ResourceState::Stopped
+    } else if status.eq_ignore_ascii_case("frozen") {
+        ResourceState::Paused
+    } else if ["starting", "stopping", "freezing", "thawing"]
+        .iter()
+        .any(|transition| status.eq_ignore_ascii_case(transition))
+    {
+        ResourceState::Transitioning
+    } else if status.eq_ignore_ascii_case("error") {
+        ResourceState::Broken
+    } else {
+        ResourceState::Unknown
     }
 }
 

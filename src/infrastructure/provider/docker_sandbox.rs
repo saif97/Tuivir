@@ -3,7 +3,7 @@ use std::{future::Future, pin::Pin};
 use serde::Deserialize;
 
 use crate::{
-    application::InteractiveShellProcess,
+    application::{InteractiveShellProcess, LifecycleCommandPolicy, lifecycle_commands},
     infrastructure::process::{CliRunner, ProcessError, ProcessSpec},
     infrastructure::provider::{
         DetailView, DetailViewId, Provider, ProviderDiscovery, ProviderId, ProviderVersion,
@@ -122,10 +122,12 @@ fn sandbox_detail_views() -> Vec<DetailView> {
 /// `Paused`. Anything else is deliberately left `Unknown` rather than assumed
 /// to be stopped.
 fn sandbox_resource_state(status: &str) -> ResourceState {
-    match status.to_ascii_lowercase().as_str() {
-        "running" => ResourceState::Running,
-        "stopped" => ResourceState::Stopped,
-        _ => ResourceState::Unknown,
+    if status.eq_ignore_ascii_case("running") {
+        ResourceState::Running
+    } else if status.eq_ignore_ascii_case("stopped") {
+        ResourceState::Stopped
+    } else {
+        ResourceState::Unknown
     }
 }
 
@@ -149,17 +151,6 @@ fn sandbox_shell(state: ResourceState, name: &str) -> Option<InteractiveShellPro
 /// sbx offers no restart and no pause, so Running and Stopped are the only
 /// states with a lifecycle Command beyond deletion. Anything not settled and
 /// stopped keeps only Delete, which always applies.
-fn sandbox_commands(state: ResourceState) -> Vec<ResourceCommand> {
-    match state {
-        ResourceState::Running => vec![ResourceCommand::Stop, ResourceCommand::Delete],
-        ResourceState::Stopped => vec![ResourceCommand::Start, ResourceCommand::Delete],
-        ResourceState::Paused
-        | ResourceState::Transitioning
-        | ResourceState::Broken
-        | ResourceState::Unknown => vec![ResourceCommand::Delete],
-    }
-}
-
 fn refresh_error(message: impl AsRef<str>) -> WorkspaceError {
     WorkspaceError::with_help(message, REFRESH_HELP)
 }
@@ -292,7 +283,10 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
                         state: Some(state),
                         fields,
                         snapshot_details,
-                        available_commands: sandbox_commands(state),
+                        available_commands: lifecycle_commands(
+                            state,
+                            LifecycleCommandPolicy::StartStop,
+                        ),
                         shell,
                     }
                 })

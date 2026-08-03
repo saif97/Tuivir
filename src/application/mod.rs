@@ -17,8 +17,8 @@ pub use command::{
 pub use key::{InvalidKey, Key, Named};
 pub use keybinding::KeybindingError;
 pub use provider::{
-    DetailView, ProviderRequest, ProviderRequestId, Resource, ResourceDetails, ResourcePanel,
-    WorkspaceError, WorkspaceSnapshot,
+    DetailView, LifecycleCommandPolicy, ProviderRequest, ProviderRequestId, Resource,
+    ResourceDetails, ResourcePanel, WorkspaceError, WorkspaceSnapshot, lifecycle_commands,
 };
 pub use shell::{InteractiveShellOutcome, InteractiveShellProcess};
 pub use workspace::{

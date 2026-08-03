@@ -3,7 +3,7 @@ use std::{future::Future, pin::Pin};
 use serde::Deserialize;
 
 use crate::{
-    application::InteractiveShellProcess,
+    application::{InteractiveShellProcess, LifecycleCommandPolicy, lifecycle_commands},
     infrastructure::process::{CliRunner, ProcessError, ProcessSpec},
     infrastructure::provider::{
         DetailView, DetailViewId, Provider, ProviderDiscovery, ProviderId, ProviderWorkspace,
@@ -138,7 +138,8 @@ impl ProviderWorkspace for DockerWorkspace {
                         )
                     })?;
                     let state = docker_resource_state(&row.state);
-                    let available_commands = docker_commands(state);
+                    let available_commands =
+                        lifecycle_commands(state, LifecycleCommandPolicy::Restartable);
                     let shell = container_shell(state, &row.id);
                     Ok(Resource {
                         id: ResourceId::new(row.id),
@@ -185,7 +186,7 @@ impl ProviderWorkspace for DockerWorkspace {
                             ("Size", row.size),
                         ],
                         snapshot_details: Vec::new(),
-                        available_commands: Vec::new(),
+                        available_commands: &[],
                         shell: None,
                     })
                 })
@@ -331,32 +332,18 @@ fn container_detail_views() -> Vec<DetailView> {
 /// `removing`, `exited`, and `dead`; anything else is deliberately left
 /// `Unknown` rather than assumed to be stopped.
 fn docker_resource_state(state: &str) -> ResourceState {
-    match state.to_ascii_lowercase().as_str() {
-        "running" => ResourceState::Running,
-        "exited" | "created" => ResourceState::Stopped,
-        "paused" => ResourceState::Paused,
-        "restarting" | "removing" => ResourceState::Transitioning,
-        "dead" => ResourceState::Broken,
-        _ => ResourceState::Unknown,
-    }
-}
-
-fn docker_commands(state: ResourceState) -> Vec<ResourceCommand> {
-    match state {
-        ResourceState::Running => vec![
-            ResourceCommand::Stop,
-            ResourceCommand::Restart,
-            ResourceCommand::Delete,
-        ],
-        ResourceState::Stopped => vec![ResourceCommand::Start, ResourceCommand::Delete],
-        // A paused container resumes rather than starts: `docker container
-        // start` fails against it, and `unpause` fails against everything else.
-        ResourceState::Paused => vec![ResourceCommand::Resume, ResourceCommand::Delete],
-        // A transitioning, dead, or unrecognised container has no lifecycle
-        // Command that reliably applies. Deletion always does.
-        ResourceState::Transitioning | ResourceState::Broken | ResourceState::Unknown => {
-            vec![ResourceCommand::Delete]
-        }
+    if state.eq_ignore_ascii_case("running") {
+        ResourceState::Running
+    } else if state.eq_ignore_ascii_case("exited") || state.eq_ignore_ascii_case("created") {
+        ResourceState::Stopped
+    } else if state.eq_ignore_ascii_case("paused") {
+        ResourceState::Paused
+    } else if state.eq_ignore_ascii_case("restarting") || state.eq_ignore_ascii_case("removing") {
+        ResourceState::Transitioning
+    } else if state.eq_ignore_ascii_case("dead") {
+        ResourceState::Broken
+    } else {
+        ResourceState::Unknown
     }
 }
 
