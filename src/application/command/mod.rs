@@ -1,3 +1,5 @@
+//! Command registration, configuration policy, dispatch, and display metadata.
+
 use std::{collections::HashMap, fmt};
 
 mod defaults;
