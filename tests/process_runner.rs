@@ -1,4 +1,6 @@
-use virtui::cli::{CliRunner, InteractiveRunner, ProcessError, ProcessSpec, TokioCliRunner};
+use virtui::infrastructure::process::{
+    CliRunner, InteractiveRunner, ProcessError, ProcessSpec, TokioCliRunner,
+};
 
 #[tokio::test]
 async fn a_zero_exit_succeeds_and_preserves_both_streams_untrimmed() {

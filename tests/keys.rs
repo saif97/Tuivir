@@ -1,5 +1,8 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use virtui::keys::{Key, Named};
+use virtui::{
+    application::{Key, Named},
+    presentation::key_from_event,
+};
 
 /// A key press is shown to the user exactly as it is written in configuration,
 /// so an inline hint can never drift from the file that produced it.
@@ -54,7 +57,7 @@ fn terminal_input_is_normalised_to_the_configured_key() {
         ),
     ] {
         assert_eq!(
-            Key::from_event(event),
+            key_from_event(event),
             Some(expected),
             "{event:?} should normalise to {expected}"
         );
@@ -70,14 +73,14 @@ fn a_key_release_is_not_input() {
         KeyEventKind::Release,
     );
 
-    assert_eq!(Key::from_event(release), None);
+    assert_eq!(key_from_event(release), None);
 }
 
 #[test]
 fn an_unrepresentable_key_press_is_ignored_rather_than_guessed() {
     let media = KeyEvent::new(KeyCode::CapsLock, KeyModifiers::NONE);
 
-    assert_eq!(Key::from_event(media), None);
+    assert_eq!(key_from_event(media), None);
 }
 
 #[test]
@@ -204,7 +207,7 @@ fn every_configurable_key_matches_the_press_that_produces_it() {
     ] {
         let configured = Key::parse(text).unwrap_or_else(|_| panic!("{text} is a key"));
         assert_eq!(
-            Key::from_event(event),
+            key_from_event(event),
             Some(configured),
             "configuring {text:?} must match the key its press produces"
         );

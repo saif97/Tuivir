@@ -1,12 +1,11 @@
 use virtui::{
-    app::{App, AppEvent},
-    cli::{ProcessError, ProcessOutput, ProcessSpec},
-    docker::DockerWorkspace,
-    provider::{
-        DetailViewId, ProviderWorkspace, Resource, ResourceCommand, ResourceId, ResourcePanelId,
-        ResourceState, ResourceTarget,
+    application::{App, InteractiveShellProcess, Resource, ResourceCommand},
+    domain::{DetailViewId, ResourceId, ResourcePanelId, ResourceState, ResourceTarget},
+    infrastructure::{
+        process::{ProcessError, ProcessOutput, ProcessSpec},
+        provider::{DockerWorkspace, ProviderWorkspace},
     },
-    ui::render_to_text,
+    presentation::render_to_text,
 };
 
 mod common;
@@ -252,7 +251,10 @@ async fn only_a_running_container_carries_an_interactive_shell() {
         shells,
         [(
             "container-running",
-            ProcessSpec::new("docker", &["exec", "-it", "container-running", "/bin/sh"]),
+            InteractiveShellProcess::new(
+                "docker",
+                &["exec", "-it", "container-running", "/bin/sh"],
+            ),
         )]
     );
 }
@@ -773,7 +775,7 @@ async fn discovered_docker_workspace_renders_target_environment_and_containers()
         .await
         .expect("the fixture represents an installed Docker CLI");
     let mut app = App::new();
-    let requests = app.update(AppEvent::ProviderDiscovered(discovered));
+    let requests = app.update(discovered.into_event());
     let request = requests
         .into_iter()
         .next()
@@ -821,7 +823,7 @@ async fn reachable_docker_without_containers_renders_a_distinct_empty_state() {
     let discovered = docker.discover(&cli).await.expect("Docker is installed");
     let mut app = App::new();
     let request = app
-        .update(AppEvent::ProviderDiscovered(discovered))
+        .update(discovered.into_event())
         .into_iter()
         .next()
         .expect("initial refresh");
@@ -843,7 +845,7 @@ async fn installed_but_unreachable_docker_stays_visible_with_actionable_error() 
     let discovered = docker.discover(&cli).await.expect("Docker is installed");
     let mut app = App::new();
 
-    let requests = app.update(AppEvent::ProviderDiscovered(discovered));
+    let requests = app.update(discovered.into_event());
 
     assert!(
         requests.is_empty(),
@@ -867,7 +869,7 @@ async fn unreachable_docker_without_stderr_reports_what_it_printed_on_stdout() {
         .await
         .expect("Docker is installed");
 
-    let error = discovered.error.expect("the provider exposes its error");
+    let error = discovered.error().expect("the provider exposes its error");
     assert!(
         error.message.contains("the context store is unreadable"),
         "workspace error: {}",
@@ -888,7 +890,7 @@ async fn docker_that_fails_silently_at_discovery_still_explains_itself() {
         .await
         .expect("Docker is installed");
 
-    let error = discovered.error.expect("the provider exposes its error");
+    let error = discovered.error().expect("the provider exposes its error");
     assert!(
         error
             .message
@@ -896,7 +898,7 @@ async fn docker_that_fails_silently_at_discovery_still_explains_itself() {
         "workspace error: {}",
         error.message
     );
-    assert_eq!(discovered.target_environment, "unavailable");
+    assert_eq!(discovered.provider().target_environment(), None);
 }
 
 #[tokio::test]
@@ -925,7 +927,7 @@ async fn failed_container_refresh_identifies_docker_command_and_target() {
     let discovered = docker.discover(&cli).await.expect("Docker is installed");
     let mut app = App::new();
     let request = app
-        .update(AppEvent::ProviderDiscovered(discovered))
+        .update(discovered.into_event())
         .into_iter()
         .next()
         .expect("initial refresh");

@@ -1,8 +1,5 @@
-use virtui::{
-    command::{Command, CommandRegistry, CommandScope},
-    config::ConfigError,
-    keys::Key,
-    provider::ResourceCommand,
+use virtui::application::{
+    Command, CommandRegistry, CommandScope, Key, KeybindingError, ResourceCommand,
 };
 
 fn key(text: &str) -> Key {
@@ -28,7 +25,7 @@ fn effective(overrides: &[(&str, &[&str])]) -> CommandRegistry {
 
 /// Layers a `[keybindings]` table over the compiled defaults, expecting it to
 /// be refused.
-fn rejected(overrides: &[(&str, &[&str])]) -> Vec<ConfigError> {
+fn rejected(overrides: &[(&str, &[&str])]) -> Vec<KeybindingError> {
     let overrides = overrides
         .iter()
         .map(|(id, keys)| {
@@ -86,7 +83,7 @@ fn no_other_command_may_claim_ctrl_c() {
 
     assert_eq!(
         errors,
-        vec![ConfigError::ReservedKey {
+        vec![KeybindingError::ReservedKey {
             id: "resource.delete".to_owned(),
             key: "ctrl+c".to_owned(),
         }]
@@ -99,7 +96,7 @@ fn no_other_command_may_claim_ctrl_c() {
 fn a_key_repeated_within_one_command_is_rejected() {
     assert_eq!(
         rejected(&[("resource.stop", &["x", "x"])]),
-        vec![ConfigError::DuplicateKey {
+        vec![KeybindingError::DuplicateKey {
             id: "resource.stop".to_owned(),
             key: "x".to_owned(),
         }]
@@ -113,7 +110,7 @@ fn a_key_repeated_within_one_command_is_rejected() {
 fn two_spellings_of_one_key_are_still_a_duplicate() {
     assert_eq!(
         rejected(&[("app.help", &["space", " "])]),
-        vec![ConfigError::DuplicateKey {
+        vec![KeybindingError::DuplicateKey {
             id: "app.help".to_owned(),
             key: "space".to_owned(),
         }]
@@ -127,7 +124,7 @@ fn two_spellings_of_one_key_are_still_a_duplicate() {
 fn one_key_bound_to_two_commands_in_one_scope_is_rejected() {
     assert_eq!(
         rejected(&[("resource.stop", &["j"])]),
-        vec![ConfigError::ConflictingKey {
+        vec![KeybindingError::ConflictingKey {
             key: "j".to_owned(),
             first: "selection.next".to_owned(),
             second: "resource.stop".to_owned(),

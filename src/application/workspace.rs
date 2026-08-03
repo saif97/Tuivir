@@ -1,7 +1,12 @@
-use crate::provider::{
-    DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderRequestId, ProviderVersion,
-    Resource, ResourceDetails, ResourceId, ResourcePanel, ResourcePanelId, ResourceTarget,
-    TargetEnvironment, WorkspaceError, WorkspaceSnapshot,
+use crate::{
+    application::{
+        DetailView, ProviderRequestId, Resource, ResourceDetails, ResourcePanel, WorkspaceError,
+        WorkspaceSnapshot,
+    },
+    domain::{
+        DetailViewId, Provider, ProviderId, ProviderVersion, ResourceId, ResourcePanelId,
+        ResourceTarget, TargetEnvironment,
+    },
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -95,12 +100,9 @@ impl DetailCompletion {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-/// All UI-neutral presentation state for one Provider Workspace.
+/// All presentation-neutral state for one Provider Workspace.
 pub struct ProviderWorkspaceState {
-    id: ProviderId,
-    name: String,
-    target_environment: TargetEnvironment,
-    version: Option<ProviderVersion>,
+    provider: Provider,
     load_state: WorkspaceLoadState,
     focused_resource_panel: Option<ResourcePanelId>,
     panel_navigation: Vec<ResourcePanelNavigation>,
@@ -110,15 +112,10 @@ pub struct ProviderWorkspaceState {
 }
 
 impl ProviderWorkspaceState {
-    pub fn new(discovery: ProviderDiscovery) -> Self {
-        let load_state = discovery
-            .error
-            .map_or(WorkspaceLoadState::Loading, WorkspaceLoadState::Error);
+    pub fn new(provider: Provider, error: Option<WorkspaceError>) -> Self {
+        let load_state = error.map_or(WorkspaceLoadState::Loading, WorkspaceLoadState::Error);
         Self {
-            id: discovery.id,
-            name: discovery.name,
-            target_environment: discovery.target_environment,
-            version: discovery.version,
+            provider,
             load_state,
             focused_resource_panel: None,
             panel_navigation: Vec::new(),
@@ -133,19 +130,19 @@ impl ProviderWorkspaceState {
     }
 
     pub fn id(&self) -> &ProviderId {
-        &self.id
+        self.provider.id()
     }
 
     pub fn name(&self) -> &str {
-        &self.name
+        self.provider.name()
     }
 
-    pub fn target_environment(&self) -> &TargetEnvironment {
-        &self.target_environment
+    pub fn target_environment(&self) -> Option<&TargetEnvironment> {
+        self.provider.target_environment()
     }
 
     pub fn version(&self) -> Option<&ProviderVersion> {
-        self.version.as_ref()
+        self.provider.version()
     }
 
     pub fn focused_resource_panel(&self) -> Option<&ResourcePanelId> {
@@ -345,7 +342,7 @@ impl ProviderWorkspaceState {
 
         let load = DetailLoad {
             request_id,
-            provider_id: self.id.clone(),
+            provider_id: self.provider.id().clone(),
             target: detail_target.clone(),
         };
         self.details = Some(ResourceDetailsState {
@@ -467,10 +464,10 @@ impl ProviderWorkspaceState {
             })
         });
         WorkspaceView {
-            id: &self.id,
-            name: &self.name,
-            target_environment: &self.target_environment,
-            version: self.version.as_ref(),
+            id: self.provider.id(),
+            name: self.provider.name(),
+            target_environment: self.provider.target_environment(),
+            version: self.provider.version(),
             focused_resource_panel: self.focused_resource_panel.as_ref(),
             panels: snapshot
                 .panels
@@ -498,12 +495,14 @@ impl ProviderWorkspaceState {
     /// Projects the Provider Workspace into one coherent presentation state.
     pub fn presentation(&self) -> WorkspacePresentation<'_> {
         match &self.load_state {
-            WorkspaceLoadState::Loading => WorkspacePresentation::Loading { name: &self.name },
+            WorkspaceLoadState::Loading => WorkspacePresentation::Loading {
+                name: self.provider.name(),
+            },
             WorkspaceLoadState::Ready(snapshot) => {
                 WorkspacePresentation::Ready(self.view(snapshot))
             }
             WorkspaceLoadState::Error(error) => WorkspacePresentation::Error {
-                name: &self.name,
+                name: self.provider.name(),
                 error,
             },
         }
@@ -583,7 +582,7 @@ impl ProviderWorkspaceState {
 pub struct WorkspaceView<'a> {
     pub id: &'a ProviderId,
     pub name: &'a str,
-    pub target_environment: &'a TargetEnvironment,
+    pub target_environment: Option<&'a TargetEnvironment>,
     pub version: Option<&'a ProviderVersion>,
     pub focused_resource_panel: Option<&'a ResourcePanelId>,
     pub panels: Vec<ResourcePanelView<'a>>,

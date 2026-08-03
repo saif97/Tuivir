@@ -11,12 +11,14 @@ use std::{
     sync::{Mutex, MutexGuard},
 };
 
-use virtui::cli::{CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec};
+use virtui::infrastructure::process::{
+    CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec,
+};
 use virtui::{
-    app::{App, AppEvent},
-    provider::{
-        ProviderDiscovery, ProviderRequest, ResourceDetails, WorkspaceError, WorkspaceSnapshot,
+    application::{
+        App, AppEvent, ProviderRequest, ResourceDetails, WorkspaceError, WorkspaceSnapshot,
     },
+    infrastructure::provider::ProviderDiscovery,
 };
 
 /// A [`CliRunner`] that answers a fixed script of commands in order.
@@ -126,7 +128,7 @@ pub fn ready_workspace(
     discovery: ProviderDiscovery,
     snapshot: WorkspaceSnapshot,
 ) -> Vec<ProviderRequest> {
-    let refresh = refresh_request(app.update(AppEvent::ProviderDiscovered(discovery)));
+    let refresh = refresh_request(app.update(discovery.into_event()));
     app.update(refresh_completed(refresh, Ok(snapshot)))
 }
 

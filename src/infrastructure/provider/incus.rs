@@ -3,10 +3,11 @@ use std::{future::Future, pin::Pin};
 use serde::Deserialize;
 
 use crate::{
-    cli::{CliRunner, ProcessError, ProcessSpec},
-    provider::{
-        DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderWorkspace, Resource,
-        ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourcePanelId,
+    application::InteractiveShellProcess,
+    infrastructure::process::{CliRunner, ProcessError, ProcessSpec},
+    infrastructure::provider::{
+        DetailView, DetailViewId, Provider, ProviderDiscovery, ProviderId, ProviderWorkspace,
+        Resource, ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourcePanelId,
         ResourceState, ResourceTarget, TargetEnvironment, WorkspaceError, WorkspaceSnapshot,
         provider_cli_error,
     },
@@ -84,13 +85,15 @@ impl ProviderWorkspace for IncusWorkspace {
                 Ok(output) => output.stdout.trim().to_owned(),
             };
 
-            Some(ProviderDiscovery {
-                id: self.id(),
-                name: PROVIDER_NAME.to_owned(),
-                target_environment: TargetEnvironment::new(format!("{remote} / {project}")),
-                version: None,
-                error: None,
-            })
+            Some(ProviderDiscovery::new(
+                Provider::new(
+                    self.id(),
+                    PROVIDER_NAME,
+                    Some(TargetEnvironment::new(format!("{remote} / {project}"))),
+                    None,
+                ),
+                None,
+            ))
         })
     }
 
@@ -280,22 +283,19 @@ fn incus_commands(state: ResourceState) -> Vec<ResourceCommand> {
 /// process, so the shell worth giving the user is root's login shell: this is
 /// what Incus's own `shell` alias expands to, spelled out here so it does not
 /// depend on that alias surviving in the user's configuration.
-fn instance_shell(state: ResourceState, name: &str) -> Option<ProcessSpec> {
+fn instance_shell(state: ResourceState, name: &str) -> Option<InteractiveShellProcess> {
     (state == ResourceState::Running)
-        .then(|| ProcessSpec::new("incus", &["exec", name, "--", "su", "-l"]))
+        .then(|| InteractiveShellProcess::new("incus", &["exec", name, "--", "su", "-l"]))
 }
 
 fn discovery_error(message: impl AsRef<str>, command: &str) -> ProviderDiscovery {
-    ProviderDiscovery {
-        id: ProviderId::new(PROVIDER_ID),
-        name: PROVIDER_NAME.to_owned(),
-        target_environment: TargetEnvironment::new("unavailable"),
-        version: None,
-        error: Some(WorkspaceError::with_help(
+    ProviderDiscovery::new(
+        Provider::new(ProviderId::new(PROVIDER_ID), PROVIDER_NAME, None, None),
+        Some(WorkspaceError::with_help(
             message,
             &format!("Run `{command}` to verify the selected Target Environment."),
         )),
-    }
+    )
 }
 
 /// A failed listing, carrying help only where it applies.

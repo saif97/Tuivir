@@ -1,17 +1,17 @@
 use std::sync::Arc;
 
 use virtui::{
-    app::{App, AppEvent},
-    cli::{ProcessError, ProcessFailure, ProcessSpec},
-    command::Command,
-    docker_sandbox::DockerSandboxWorkspace,
-    provider::{
-        DetailViewId, ProviderId, ProviderRequest, ProviderVersion, ProviderWorkspace,
-        ResourceCommand, ResourceId, ResourcePanelId, ResourceState, ResourceTarget,
-        TargetEnvironment,
+    application::{App, Command, InteractiveShellProcess, ProviderRequest, ResourceCommand},
+    domain::{
+        DetailViewId, ProviderId, ProviderVersion, ResourceId, ResourcePanelId, ResourceState,
+        ResourceTarget,
     },
-    runtime::ProviderRuntime,
-    ui::render_to_text,
+    infrastructure::runtime::ProviderRuntime,
+    infrastructure::{
+        process::{ProcessError, ProcessFailure, ProcessSpec},
+        provider::{DockerSandboxWorkspace, ProviderWorkspace},
+    },
+    presentation::render_to_text,
 };
 
 mod common;
@@ -41,14 +41,17 @@ async fn docker_sandbox_keeps_provider_version_separate_from_its_target_environm
         .await
         .expect("the fixture represents an installed sbx");
 
-    assert_eq!(discovered.id, ProviderId::new("docker-sandbox"));
-    assert_eq!(discovered.name, "Docker Sandbox");
     assert_eq!(
-        discovered.target_environment,
-        TargetEnvironment::new("local")
+        discovered.provider().id(),
+        &ProviderId::new("docker-sandbox")
     );
-    assert_eq!(discovered.version, Some(ProviderVersion::new("v0.37.0")));
-    assert_eq!(discovered.error, None);
+    assert_eq!(discovered.provider().name(), "Docker Sandbox");
+    assert_eq!(discovered.provider().target_environment(), None);
+    assert_eq!(
+        discovered.provider().version(),
+        Some(&ProviderVersion::new("v0.37.0"))
+    );
+    assert_eq!(discovered.error(), None);
 }
 
 /// sbx resolves a sandbox by name and by nothing else — the UUID it also
@@ -331,15 +334,15 @@ async fn every_recognised_sandbox_carries_an_interactive_shell() {
         [
             (
                 "running-sandbox",
-                ProcessSpec::new("sbx", &["exec", "-it", "running-sandbox", "bash"]),
+                InteractiveShellProcess::new("sbx", &["exec", "-it", "running-sandbox", "bash"],),
             ),
             (
                 "stopped-sandbox",
-                ProcessSpec::new("sbx", &["exec", "-it", "stopped-sandbox", "bash"]),
+                InteractiveShellProcess::new("sbx", &["exec", "-it", "stopped-sandbox", "bash"],),
             ),
             (
                 "shouting-sandbox",
-                ProcessSpec::new("sbx", &["exec", "-it", "shouting-sandbox", "bash"]),
+                InteractiveShellProcess::new("sbx", &["exec", "-it", "shouting-sandbox", "bash"],),
             ),
         ]
     );
@@ -390,7 +393,7 @@ async fn command_availability_follows_the_last_refreshed_state() {
 }
 
 #[tokio::test]
-async fn discovered_docker_sandbox_renders_target_environment_and_sandboxes() {
+async fn discovered_docker_sandbox_omits_an_unselected_environment() {
     let cli = FixtureCli::new([
         (
             ProcessSpec::new("sbx", &["version"]),
@@ -413,7 +416,7 @@ async fn discovered_docker_sandbox_renders_target_environment_and_sandboxes() {
         .expect("the fixture represents an installed sbx");
     let mut app = App::new();
     let request = app
-        .update(AppEvent::ProviderDiscovered(discovered))
+        .update(discovered.into_event())
         .into_iter()
         .next()
         .expect("discovery requests the first workspace refresh");
@@ -421,7 +424,8 @@ async fn discovered_docker_sandbox_renders_target_environment_and_sandboxes() {
 
     let screen = render_to_text(app.state(), 100, 24);
     assert!(screen.contains("Docker Sandbox"), "{screen}");
-    assert!(screen.contains("[ Docker Sandbox · local ]"), "{screen}");
+    assert!(screen.contains("[ Docker Sandbox ]"), "{screen}");
+    assert!(!screen.contains("Docker Sandbox ·"), "{screen}");
     assert!(screen.contains("Sandboxes"), "{screen}");
     assert!(screen.contains("claude-virtui"), "{screen}");
     assert!(screen.contains("running"), "{screen}");
@@ -448,14 +452,14 @@ async fn reachable_docker_sandbox_without_sandboxes_renders_a_distinct_empty_sta
     let discovered = sandboxes.discover(&cli).await.expect("sbx is installed");
     let mut app = App::new();
     let request = app
-        .update(AppEvent::ProviderDiscovered(discovered))
+        .update(discovered.into_event())
         .into_iter()
         .next()
         .expect("initial refresh");
     app.update(refresh_completed(request, sandboxes.refresh(&cli).await));
 
     let screen = render_to_text(app.state(), 100, 24);
-    assert!(screen.contains("[ Docker Sandbox · local ]"), "{screen}");
+    assert!(screen.contains("[ Docker Sandbox ]"), "{screen}");
     assert!(
         screen.contains("No Docker Sandbox sandboxes found"),
         "{screen}"
@@ -490,10 +494,16 @@ async fn runtime_with_builtin_providers_discovers_installed_docker_sandbox() {
     let discovered = runtime.discover().await;
 
     assert_eq!(discovered.len(), 1);
-    assert_eq!(discovered[0].id, ProviderId::new("docker-sandbox"));
-    assert_eq!(discovered[0].name, "Docker Sandbox");
-    assert_eq!(discovered[0].target_environment, "local");
-    assert_eq!(discovered[0].version, Some(ProviderVersion::new("v0.37.0")));
+    assert_eq!(
+        discovered[0].provider().id(),
+        &ProviderId::new("docker-sandbox")
+    );
+    assert_eq!(discovered[0].provider().name(), "Docker Sandbox");
+    assert_eq!(discovered[0].provider().target_environment(), None);
+    assert_eq!(
+        discovered[0].provider().version(),
+        Some(&ProviderVersion::new("v0.37.0"))
+    );
 }
 
 /// Closes the loop #29 asks for: an invoked Command, through the confirmation
@@ -519,7 +529,7 @@ async fn deleting_a_sandbox_confirms_first_and_then_runs_the_expected_cli_reques
     let discovered = sandboxes.discover(&cli).await.expect("sbx is installed");
     let mut app = App::new();
     let request = app
-        .update(AppEvent::ProviderDiscovered(discovered))
+        .update(discovered.into_event())
         .into_iter()
         .next()
         .expect("initial refresh");
@@ -589,7 +599,7 @@ async fn starting_an_already_running_sandbox_is_not_offered_and_issues_nothing()
     let discovered = sandboxes.discover(&cli).await.expect("sbx is installed");
     let mut app = App::new();
     let request = app
-        .update(AppEvent::ProviderDiscovered(discovered))
+        .update(discovered.into_event())
         .into_iter()
         .next()
         .expect("initial refresh");
@@ -926,11 +936,11 @@ async fn installed_docker_sandbox_that_cannot_list_stays_visible_with_an_actiona
         .await
         .expect("an installed sbx is never omitted");
 
-    assert_eq!(discovered.name, "Docker Sandbox");
-    assert_eq!(discovered.target_environment, "unavailable");
+    assert_eq!(discovered.provider().name(), "Docker Sandbox");
+    assert_eq!(discovered.provider().target_environment(), None);
     assert_eq!(
         discovered
-            .error
+            .error()
             .expect("an unusable provider explains itself")
             .message,
         "Error: not signed in to Docker. Run `sbx ls` to verify sandboxd is running and you are signed in to Docker."
@@ -953,7 +963,7 @@ async fn an_sbx_that_cannot_be_started_names_docker_sandbox_in_the_error() {
 
     assert_eq!(
         discovered
-            .error
+            .error()
             .expect("a provider that cannot start explains itself")
             .message,
         "Docker Sandbox CLI could not be started: permission denied. Run `sbx ls` to verify sandboxd is running and you are signed in to Docker."
@@ -978,7 +988,7 @@ async fn a_silent_version_probe_failure_still_explains_itself() {
 
     assert_eq!(
         discovered
-            .error
+            .error()
             .expect("a silent failure still explains itself")
             .message,
         "Docker Sandbox could not report its version. Run `sbx ls` to verify sandboxd is running and you are signed in to Docker."

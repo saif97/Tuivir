@@ -1,13 +1,42 @@
-use std::collections::HashMap;
+//! Command registration, configuration policy, dispatch, and display metadata.
 
-use crate::config::ConfigError;
-use crate::keys::Key;
-use crate::provider::ResourceCommand;
+use std::{collections::HashMap, fmt};
+
+mod defaults;
+
+pub use defaults::NUMBERED_RESOURCE_PANEL_CAPACITY;
+use defaults::{BUILTIN_COMMANDS, CommandDefinition, RESOURCE_PANEL_FOCUS_COMMANDS, WORKSPACE};
+
+use super::{Key, KeybindingError};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ResourceCommand {
+    Start,
+    Stop,
+    Restart,
+    /// Returns a suspended Resource to running — Docker `unpause`, Incus
+    /// `unfreeze`.
+    Resume,
+    Delete,
+}
+
+impl fmt::Display for ResourceCommand {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = match self {
+            Self::Start => "start",
+            Self::Stop => "stop",
+            Self::Restart => "restart",
+            Self::Resume => "resume",
+            Self::Delete => "delete",
+        };
+        formatter.write_str(name)
+    }
+}
 
 /// One registered user intention.
 ///
 /// A Command is what the user meant, not what happened: facts and asynchronous
-/// completions stay in [`crate::app::AppEvent`].
+/// completions stay in [`crate::application::AppEvent`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Command {
     Quit,
@@ -130,7 +159,7 @@ impl CommandRegistry {
     /// The table is a partial override: mentioning a Command replaces its
     /// complete key list, omitting it preserves the defaults, and an empty list
     /// leaves it unbound. Nothing is applied unless everything validates.
-    pub fn effective(overrides: &[(String, Vec<String>)]) -> Result<Self, Vec<ConfigError>> {
+    pub fn effective(overrides: &[(String, Vec<String>)]) -> Result<Self, Vec<KeybindingError>> {
         let mut registry = Self::builtin();
         let mut errors = Vec::new();
 
@@ -140,7 +169,7 @@ impl CommandRegistry {
                 .filter_map(|text| match Key::parse(text) {
                     Ok(key) => Some(key),
                     Err(invalid) => {
-                        errors.push(ConfigError::InvalidKey {
+                        errors.push(KeybindingError::InvalidKey {
                             id: id.clone(),
                             key: invalid.input,
                         });
@@ -155,11 +184,11 @@ impl CommandRegistry {
                 .find(|command| command.id == id)
             {
                 Some(command) => command.keys = parsed,
-                None => errors.push(ConfigError::UnknownCommand { id: id.clone() }),
+                None => errors.push(KeybindingError::UnknownCommand { id: id.clone() }),
             }
         }
 
-        errors.extend(registry.reserve_emergency_quit());
+        registry.enforce_emergency_quit(&mut errors);
         errors.extend(registry.conflicting_keys());
 
         if errors.is_empty() {
@@ -173,28 +202,20 @@ impl CommandRegistry {
     ///
     /// A user who lists it explicitly keeps the position they chose; otherwise
     /// it is appended, so it is an invariant rather than a preferred hint.
-    fn reserve_emergency_quit(&mut self) -> Vec<ConfigError> {
+    fn enforce_emergency_quit(&mut self, errors: &mut Vec<KeybindingError>) {
         let emergency = Self::emergency_quit_key();
-        let stolen = self
-            .commands
-            .iter()
-            .filter(|command| command.command != Command::Quit)
-            .filter(|command| command.keys.contains(&emergency))
-            .map(|command| ConfigError::ReservedKey {
-                id: command.id.to_owned(),
-                key: emergency.to_string(),
-            })
-            .collect();
-
-        if let Some(quit) = self
-            .commands
-            .iter_mut()
-            .find(|command| command.command == Command::Quit)
-            && !quit.keys.contains(&emergency)
-        {
-            quit.keys.push(emergency);
+        for command in &mut self.commands {
+            if command.command == Command::Quit {
+                if !command.keys.contains(&emergency) {
+                    command.keys.push(emergency);
+                }
+            } else if command.keys.contains(&emergency) {
+                errors.push(KeybindingError::ReservedKey {
+                    id: command.id.to_owned(),
+                    key: emergency.to_string(),
+                });
+            }
         }
-        stolen
     }
 
     /// Reports every key claimed by two Commands that share a scope.
@@ -202,12 +223,12 @@ impl CommandRegistry {
     /// Commands whose scopes cannot overlap are never reachable together, so
     /// they may share a key freely; those that can overlap would otherwise be
     /// resolved by registration order, which is a priority the user cannot see.
-    fn conflicting_keys(&self) -> Vec<ConfigError> {
+    fn conflicting_keys(&self) -> Vec<KeybindingError> {
         // Every (scope, key) a Command has claimed, against the Command that
         // claimed it first. Scopes come from the Commands themselves, so a new
         // scope cannot be left out of the check by forgetting to list it.
         let mut claimed: HashMap<(CommandScope, Key), &'static str> = HashMap::new();
-        let mut conflicts: Vec<ConfigError> = Vec::new();
+        let mut conflicts: Vec<KeybindingError> = Vec::new();
 
         for command in &self.commands {
             for scope in command.scopes {
@@ -227,7 +248,7 @@ impl CommandRegistry {
                     if first == command.id {
                         continue;
                     }
-                    let conflict = ConfigError::ConflictingKey {
+                    let conflict = KeybindingError::ConflictingKey {
                         key: key.to_string(),
                         first: first.to_owned(),
                         second: command.id.to_owned(),
@@ -302,7 +323,7 @@ fn effective_command(definition: &CommandDefinition) -> EffectiveCommand {
 ///
 /// Keys are compared after parsing, so two spellings of one key — `space` and a
 /// literal blank — are the duplicate they actually are.
-fn duplicate_keys(id: &str, keys: &[Key]) -> Vec<ConfigError> {
+fn duplicate_keys(id: &str, keys: &[Key]) -> Vec<KeybindingError> {
     let mut seen = Vec::new();
     let mut duplicated = Vec::new();
     for key in keys {
@@ -316,280 +337,9 @@ fn duplicate_keys(id: &str, keys: &[Key]) -> Vec<ConfigError> {
     }
     duplicated
         .into_iter()
-        .map(|key| ConfigError::DuplicateKey {
+        .map(|key| KeybindingError::DuplicateKey {
             id: id.to_owned(),
             key: key.to_string(),
         })
         .collect()
 }
-
-struct CommandDefinition {
-    id: &'static str,
-    description: &'static str,
-    command: Command,
-    scopes: &'static [CommandScope],
-    default_keys: &'static [&'static str],
-}
-
-struct ResourcePanelFocusDefinition {
-    id: &'static str,
-    description: &'static str,
-    default_key: &'static str,
-}
-
-const RESOURCE_PANEL_FOCUS_COMMANDS: &[ResourcePanelFocusDefinition] = &[
-    ResourcePanelFocusDefinition {
-        id: "focus.resources",
-        description: "Focus first Resource Panel",
-        default_key: "2",
-    },
-    ResourcePanelFocusDefinition {
-        id: "focus.resources.2",
-        description: "Focus second Resource Panel",
-        default_key: "3",
-    },
-    ResourcePanelFocusDefinition {
-        id: "focus.resources.3",
-        description: "Focus third Resource Panel",
-        default_key: "4",
-    },
-    ResourcePanelFocusDefinition {
-        id: "focus.resources.4",
-        description: "Focus fourth Resource Panel",
-        default_key: "5",
-    },
-    ResourcePanelFocusDefinition {
-        id: "focus.resources.5",
-        description: "Focus fifth Resource Panel",
-        default_key: "6",
-    },
-    ResourcePanelFocusDefinition {
-        id: "focus.resources.6",
-        description: "Focus sixth Resource Panel",
-        default_key: "7",
-    },
-    ResourcePanelFocusDefinition {
-        id: "focus.resources.7",
-        description: "Focus seventh Resource Panel",
-        default_key: "8",
-    },
-    ResourcePanelFocusDefinition {
-        id: "focus.resources.8",
-        description: "Focus eighth Resource Panel",
-        default_key: "9",
-    },
-    ResourcePanelFocusDefinition {
-        id: "focus.resources.9",
-        description: "Focus ninth Resource Panel",
-        default_key: "0",
-    },
-];
-
-/// A Provider Workspace may expose at most this many Resource Panels so every
-/// one retains a single-key numbered focus Command and visible hint.
-pub const NUMBERED_RESOURCE_PANEL_CAPACITY: usize = RESOURCE_PANEL_FOCUS_COMMANDS.len();
-
-/// Every scope in which the user is working inside a Provider Workspace rather
-/// than answering a modal.
-const WORKSPACE: &[CommandScope] = &[
-    CommandScope::ProviderSelector,
-    CommandScope::ResourceView,
-    CommandScope::Details,
-];
-const SELECTABLE: &[CommandScope] = &[CommandScope::ProviderSelector, CommandScope::ResourceView];
-const RESOURCE_VIEW: &[CommandScope] = &[CommandScope::ResourceView];
-const DETAILS: &[CommandScope] = &[CommandScope::Details];
-/// Every modal scope. A modal replaces the workspace scope while it is open.
-const MODAL: &[CommandScope] = &[
-    CommandScope::Confirmation,
-    CommandScope::CommandFailure,
-    CommandScope::HelpOverlay,
-];
-
-/// Defaults follow lazydocker wherever an equivalent Command exists.
-const BUILTIN_COMMANDS: &[CommandDefinition] = &[
-    CommandDefinition {
-        id: "app.quit",
-        description: "Quit",
-        command: Command::Quit,
-        scopes: WORKSPACE,
-        default_keys: &["q"],
-    },
-    CommandDefinition {
-        id: "app.help",
-        description: "Help",
-        command: Command::ToggleHelp,
-        scopes: &[
-            CommandScope::ProviderSelector,
-            CommandScope::ResourceView,
-            CommandScope::Details,
-            CommandScope::HelpOverlay,
-        ],
-        default_keys: &["?"],
-    },
-    CommandDefinition {
-        id: "app.refresh",
-        // Plain `r` stays lazydocker's Restart in a resource view.
-        description: "Refresh",
-        command: Command::Refresh,
-        scopes: WORKSPACE,
-        default_keys: &["ctrl+r"],
-    },
-    CommandDefinition {
-        id: "focus.providers",
-        description: "Focus providers",
-        command: Command::FocusProviders,
-        scopes: WORKSPACE,
-        default_keys: &["1"],
-    },
-    CommandDefinition {
-        id: "focus.details",
-        description: "Focus Details",
-        command: Command::FocusDetails,
-        scopes: WORKSPACE,
-        default_keys: &["enter"],
-    },
-    CommandDefinition {
-        id: "focus.next",
-        description: "Focus next Pane",
-        command: Command::FocusNextPane,
-        scopes: WORKSPACE,
-        default_keys: &["tab"],
-    },
-    CommandDefinition {
-        id: "focus.previous",
-        description: "Focus previous Pane",
-        command: Command::FocusPreviousPane,
-        scopes: WORKSPACE,
-        default_keys: &["shift+tab"],
-    },
-    CommandDefinition {
-        id: "selection.next",
-        description: "Select next",
-        command: Command::SelectNext,
-        scopes: SELECTABLE,
-        default_keys: &["j", "down"],
-    },
-    CommandDefinition {
-        id: "selection.previous",
-        description: "Select previous",
-        command: Command::SelectPrevious,
-        scopes: SELECTABLE,
-        default_keys: &["k", "up"],
-    },
-    CommandDefinition {
-        id: "selection.next.fast",
-        description: "Select five ahead",
-        command: Command::SelectNextFast,
-        scopes: RESOURCE_VIEW,
-        default_keys: &["J"],
-    },
-    CommandDefinition {
-        id: "selection.previous.fast",
-        description: "Select five back",
-        command: Command::SelectPreviousFast,
-        scopes: RESOURCE_VIEW,
-        default_keys: &["K"],
-    },
-    CommandDefinition {
-        id: "workspace.next",
-        description: "Next workspace",
-        command: Command::NextWorkspace,
-        scopes: WORKSPACE,
-        default_keys: &["]"],
-    },
-    CommandDefinition {
-        id: "workspace.previous",
-        description: "Previous workspace",
-        command: Command::PreviousWorkspace,
-        scopes: WORKSPACE,
-        default_keys: &["["],
-    },
-    // lazydocker's own `[`/`]` already move the Active Workspace here, so the
-    // detail views take the horizontal keys next to them instead.
-    CommandDefinition {
-        id: "detail.view.next",
-        description: "Next detail view",
-        command: Command::NextDetailView,
-        scopes: DETAILS,
-        default_keys: &["l", "right"],
-    },
-    CommandDefinition {
-        id: "detail.view.previous",
-        description: "Previous detail view",
-        command: Command::PreviousDetailView,
-        scopes: DETAILS,
-        default_keys: &["h", "left"],
-    },
-    CommandDefinition {
-        id: "detail.scroll.down",
-        description: "Scroll details down",
-        command: Command::ScrollDetailsDown,
-        scopes: DETAILS,
-        default_keys: &["ctrl+d", "pagedown"],
-    },
-    CommandDefinition {
-        id: "detail.scroll.up",
-        description: "Scroll details up",
-        command: Command::ScrollDetailsUp,
-        scopes: DETAILS,
-        default_keys: &["ctrl+u", "pageup"],
-    },
-    CommandDefinition {
-        id: "modal.confirm",
-        description: "Confirm",
-        command: Command::Confirm,
-        scopes: MODAL,
-        default_keys: &["y", "enter"],
-    },
-    CommandDefinition {
-        id: "modal.cancel",
-        // `Esc` leads, so it is the hint a modal shows for backing out.
-        description: "Cancel",
-        command: Command::Cancel,
-        scopes: MODAL,
-        default_keys: &["esc", "n"],
-    },
-    CommandDefinition {
-        id: "resource.start",
-        description: "Start",
-        command: Command::Resource(ResourceCommand::Start),
-        scopes: &[CommandScope::ResourceView],
-        default_keys: &["S"],
-    },
-    CommandDefinition {
-        id: "resource.stop",
-        description: "Stop",
-        command: Command::Resource(ResourceCommand::Stop),
-        scopes: &[CommandScope::ResourceView],
-        default_keys: &["s"],
-    },
-    CommandDefinition {
-        id: "resource.restart",
-        description: "Restart",
-        command: Command::Resource(ResourceCommand::Restart),
-        scopes: &[CommandScope::ResourceView],
-        default_keys: &["r"],
-    },
-    CommandDefinition {
-        id: "resource.resume",
-        description: "Resume",
-        command: Command::Resource(ResourceCommand::Resume),
-        scopes: &[CommandScope::ResourceView],
-        default_keys: &["p"],
-    },
-    CommandDefinition {
-        id: "resource.shell",
-        description: "Shell",
-        command: Command::OpenShell,
-        scopes: RESOURCE_VIEW,
-        default_keys: &["E"],
-    },
-    CommandDefinition {
-        id: "resource.delete",
-        description: "Delete",
-        command: Command::Resource(ResourceCommand::Delete),
-        scopes: &[CommandScope::ResourceView],
-        default_keys: &["d"],
-    },
-];

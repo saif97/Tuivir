@@ -5,8 +5,12 @@ Virtui is a terminal environment for inspecting and operating resources managed 
 ## Language
 
 **Provider**:
-An installed system that owns and operates resources, such as Docker, Incus, or Docker Sandbox.
+An installed system that owns and operates resources, such as Docker, Incus, or Docker Sandbox. Its domain record keeps its stable identity and display name together with its optional Target Environment and Provider Version.
 _Avoid_: Backend, runtime, engine
+
+**Provider Discovery**:
+Infrastructure evidence that a Provider is installed, together with an actionable availability failure when it was found but cannot currently be reached. Discovery wraps a Provider; it is not a second copy of Provider metadata. An absent Provider CLI produces no discovery.
+_Avoid_: Provider state, provider model
 
 **Provider Version**:
 Build information reported by an installed Provider. It describes the Provider itself and never identifies the Target Environment that owns the Resources Virtui operates.
@@ -15,6 +19,10 @@ _Avoid_: Target version, environment version
 **Provider Workspace**:
 The provider-specific view of its native resources and operations within Virtui.
 _Avoid_: Provider tab, unified resource view
+
+**Provider Workspace State**:
+Application-owned load and navigation state for one discovered Provider Workspace. It owns the Provider domain record alongside its current snapshot, focus, selection, detail loading, and errors; it does not duplicate Provider metadata.
+_Avoid_: Provider Discovery, Provider
 
 **Active Workspace**:
 The single provider workspace currently visible and being refreshed. Inactive workspaces remain idle.
@@ -33,7 +41,7 @@ A provider-defined Pane containing one kind of Resource, such as Docker Containe
 _Avoid_: Resource pane, resource list
 
 **Target Environment**:
-The Docker context or Incus remote and project already selected through the provider's CLI configuration.
+The environment already selected through a Provider's CLI configuration, such as a Docker context or an Incus remote and project. Some Providers do not select one.
 _Avoid_: Cluster, server, connection
 
 **Command**:

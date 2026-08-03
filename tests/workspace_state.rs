@@ -1,10 +1,11 @@
 use virtui::{
-    provider::{
-        DetailView, ProviderDiscovery, ProviderId, ProviderRequestId, Resource, ResourceDetails,
-        ResourceId, ResourcePanel, ResourcePanelId, ResourceTarget, TargetEnvironment,
-        WorkspaceError, WorkspaceSnapshot,
+    application::{
+        DetailContent, DetailView, ProviderRequestId, ProviderWorkspaceState, Resource,
+        ResourceDetails, ResourcePanel, WorkspaceError, WorkspaceLoadState, WorkspaceSnapshot,
     },
-    workspace::{DetailContent, ProviderWorkspaceState, WorkspaceLoadState},
+    domain::{
+        Provider, ProviderId, ResourceId, ResourcePanelId, ResourceTarget, TargetEnvironment,
+    },
 };
 
 fn resource(id: &str, name: &str) -> Resource {
@@ -39,13 +40,15 @@ fn snapshot() -> WorkspaceSnapshot {
 }
 
 fn workspace() -> ProviderWorkspaceState {
-    ProviderWorkspaceState::new(ProviderDiscovery {
-        id: ProviderId::new("docker"),
-        name: "Docker".to_owned(),
-        target_environment: TargetEnvironment::new("desktop-linux"),
-        version: None,
-        error: None,
-    })
+    ProviderWorkspaceState::new(
+        Provider::new(
+            ProviderId::new("docker"),
+            "Docker",
+            Some(TargetEnvironment::new("desktop-linux")),
+            None,
+        ),
+        None,
+    )
 }
 
 #[test]
@@ -77,7 +80,7 @@ fn reconciling_the_first_snapshot_projects_one_coherent_workspace_view() {
     assert_eq!(view.id, &ProviderId::new("docker"));
     assert_eq!(
         view.target_environment,
-        &TargetEnvironment::new("desktop-linux")
+        Some(&TargetEnvironment::new("desktop-linux"))
     );
     assert_eq!(
         view.focused_resource_panel,

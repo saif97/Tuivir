@@ -3,10 +3,11 @@ use std::{future::Future, pin::Pin};
 use serde::Deserialize;
 
 use crate::{
-    cli::{CliRunner, ProcessError, ProcessSpec},
-    provider::{
-        DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderWorkspace, Resource,
-        ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourcePanelId,
+    application::InteractiveShellProcess,
+    infrastructure::process::{CliRunner, ProcessError, ProcessSpec},
+    infrastructure::provider::{
+        DetailView, DetailViewId, Provider, ProviderDiscovery, ProviderId, ProviderWorkspace,
+        Resource, ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourcePanelId,
         ResourceState, ResourceTarget, TargetEnvironment, WorkspaceError, WorkspaceSnapshot,
         provider_cli_error,
     },
@@ -71,13 +72,15 @@ impl ProviderWorkspace for DockerWorkspace {
                 Err(ProcessError::Exited(failure)) => Some(discovery_with_error(
                     failure.message_or("Docker could not report its current context"),
                 )),
-                Ok(output) => Some(ProviderDiscovery {
-                    id: self.id(),
-                    name: PROVIDER_NAME.to_owned(),
-                    target_environment: TargetEnvironment::new(output.stdout.trim()),
-                    version: None,
-                    error: None,
-                }),
+                Ok(output) => Some(ProviderDiscovery::new(
+                    Provider::new(
+                        self.id(),
+                        PROVIDER_NAME,
+                        Some(TargetEnvironment::new(output.stdout.trim())),
+                        None,
+                    ),
+                    None,
+                )),
             }
         })
     }
@@ -364,23 +367,20 @@ fn docker_commands(state: ResourceState) -> Vec<ResourceCommand> {
 /// offers none. Plain `/bin/sh` is the shell that exists wherever any shell
 /// does, including the minimal images Docker containers are so often built
 /// from; reaching for a login shell instead would fail on exactly those.
-fn container_shell(state: ResourceState, resource_id: &str) -> Option<ProcessSpec> {
+fn container_shell(state: ResourceState, resource_id: &str) -> Option<InteractiveShellProcess> {
     (state == ResourceState::Running)
-        .then(|| ProcessSpec::new("docker", &["exec", "-it", resource_id, "/bin/sh"]))
+        .then(|| InteractiveShellProcess::new("docker", &["exec", "-it", resource_id, "/bin/sh"]))
 }
 
 fn discovery_with_error(message: impl Into<String>) -> ProviderDiscovery {
     let message = message.into();
-    ProviderDiscovery {
-        id: ProviderId::new(PROVIDER_ID),
-        name: PROVIDER_NAME.to_owned(),
-        target_environment: TargetEnvironment::new("unavailable"),
-        version: None,
-        error: Some(WorkspaceError::with_help(
+    ProviderDiscovery::new(
+        Provider::new(ProviderId::new(PROVIDER_ID), PROVIDER_NAME, None, None),
+        Some(WorkspaceError::with_help(
             message,
             "Run `docker context show` to verify the selected context and ensure Docker is running.",
         )),
-    }
+    )
 }
 
 /// A failed listing, carrying help only where it applies.

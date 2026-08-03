@@ -1,5 +1,7 @@
 use std::{future::Future, io, pin::Pin, process::Stdio};
 
+use crate::application::InteractiveShellProcess;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// A program and explicit argument list, never a shell command string.
 pub struct ProcessSpec {
@@ -12,6 +14,15 @@ impl ProcessSpec {
         Self {
             program: program.to_owned(),
             args: args.iter().map(|arg| (*arg).to_owned()).collect(),
+        }
+    }
+}
+
+impl From<&InteractiveShellProcess> for ProcessSpec {
+    fn from(process: &InteractiveShellProcess) -> Self {
+        Self {
+            program: process.program().to_owned(),
+            args: process.args().to_vec(),
         }
     }
 }

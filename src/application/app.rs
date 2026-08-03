@@ -1,14 +1,12 @@
 use std::collections::HashMap;
 
-use crate::cli::{ProcessError, ProcessSpec};
-use crate::command::{Command, CommandRegistry, CommandScope, NUMBERED_RESOURCE_PANEL_CAPACITY};
-use crate::keys::Key;
-use crate::provider::{
-    DetailViewId, ProviderDiscovery, ProviderId, ProviderRequest, ProviderRequestId,
-    ResourceCommand, ResourceDetails, ResourceState, ResourceTarget, WorkspaceError,
-    WorkspaceSnapshot,
+use super::workspace::{DetailCompletion, ProviderWorkspaceState};
+use super::{
+    Command, CommandRegistry, CommandScope, InteractiveShellOutcome, InteractiveShellProcess, Key,
+    NUMBERED_RESOURCE_PANEL_CAPACITY, ProviderRequest, ProviderRequestId, ResourceCommand,
+    ResourceDetails, WorkspaceError, WorkspaceSnapshot,
 };
-use crate::workspace::{DetailCompletion, ProviderWorkspaceState};
+use crate::domain::{DetailViewId, Provider, ProviderId, ResourceState, ResourceTarget};
 
 /// Facts the application receives: provider discovery, the refresh clock, and
 /// asynchronous completions.
@@ -16,7 +14,10 @@ use crate::workspace::{DetailCompletion, ProviderWorkspaceState};
 /// User intentions are [`Command`]s, resolved from keys, not events. Keeping
 /// the two separate means a keypress never looks like a completed refresh.
 pub enum AppEvent {
-    ProviderDiscovered(ProviderDiscovery),
+    ProviderDiscovered {
+        provider: Provider,
+        error: Option<WorkspaceError>,
+    },
     RefreshTimerElapsed,
     /// The result of an earlier [`ProviderRequest::RefreshWorkspace`].
     ///
@@ -34,7 +35,7 @@ pub enum AppEvent {
     /// shell is long gone by then.
     ShellClosed {
         shell: PendingShell,
-        result: Result<(), ProcessError>,
+        outcome: InteractiveShellOutcome,
     },
     ResourceCommandCompleted {
         request_id: ProviderRequestId,
@@ -172,7 +173,7 @@ pub struct PendingShell {
     pub target: ResourceTarget,
     pub resource_name: String,
     /// The Provider CLI process that takes over the terminal.
-    pub process: ProcessSpec,
+    pub process: InteractiveShellProcess,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -257,9 +258,11 @@ impl App {
 
     fn apply(&mut self, event: AppEvent) -> Vec<ProviderRequest> {
         match event {
-            AppEvent::ProviderDiscovered(discovery) => self.handle_provider_discovered(discovery),
+            AppEvent::ProviderDiscovered { provider, error } => {
+                self.handle_provider_discovered(provider, error)
+            }
             AppEvent::RefreshTimerElapsed => self.refresh_active_provider(),
-            AppEvent::ShellClosed { shell, result } => self.apply_shell_closed(shell, result),
+            AppEvent::ShellClosed { shell, outcome } => self.apply_shell_closed(shell, outcome),
             AppEvent::RefreshCompleted {
                 request_id,
                 provider_id,
@@ -435,13 +438,17 @@ impl App {
         }
     }
 
-    fn handle_provider_discovered(&mut self, discovery: ProviderDiscovery) -> Vec<ProviderRequest> {
+    fn handle_provider_discovered(
+        &mut self,
+        provider: Provider,
+        error: Option<WorkspaceError>,
+    ) -> Vec<ProviderRequest> {
         let activates_provider = self.state.active_provider.is_none();
-        let should_refresh_active_provider = activates_provider && discovery.error.is_none();
-        let provider_id = discovery.id.clone();
+        let should_refresh_active_provider = activates_provider && error.is_none();
+        let provider_id = provider.id().clone();
         self.state
             .providers
-            .push(ProviderWorkspaceState::new(discovery));
+            .push(ProviderWorkspaceState::new(provider, error));
         if activates_provider {
             self.state.active_provider = Some(self.state.providers.len() - 1);
         }
@@ -608,12 +615,12 @@ impl App {
     fn apply_shell_closed(
         &mut self,
         shell: PendingShell,
-        result: Result<(), ProcessError>,
+        outcome: InteractiveShellOutcome,
     ) -> Vec<ProviderRequest> {
         // Only a shell that never started is reported. One that ran did what
         // was asked of it whatever status it left, and clearing here would
         // dismiss a failure the user has not read yet.
-        if let Some(reason) = result.err().as_ref().and_then(ProcessError::start_failure) {
+        if let InteractiveShellOutcome::StartFailed(reason) = outcome {
             self.state.command_error = Some(operation_failure(
                 &shell.provider_name,
                 "shell",
@@ -789,7 +796,7 @@ impl App {
         });
     }
 
-    fn selected_resource(&self) -> Option<&crate::provider::Resource> {
+    fn selected_resource(&self) -> Option<&super::Resource> {
         let provider = self
             .state
             .active_provider

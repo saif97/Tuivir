@@ -1,15 +1,14 @@
 use std::sync::Arc;
 
 use virtui::{
-    app::{App, AppEvent},
-    cli::{ProcessError, ProcessOutput, ProcessSpec},
-    incus::IncusWorkspace,
-    provider::{
-        DetailViewId, ProviderWorkspace, ResourceCommand, ResourceId, ResourcePanelId,
-        ResourceState, ResourceTarget,
+    application::{App, InteractiveShellProcess, ResourceCommand},
+    domain::{
+        DetailViewId, ResourceId, ResourcePanelId, ResourceState, ResourceTarget, TargetEnvironment,
     },
-    runtime::ProviderRuntime,
-    ui::render_to_text,
+    infrastructure::process::{ProcessError, ProcessOutput, ProcessSpec},
+    infrastructure::provider::{IncusWorkspace, ProviderWorkspace},
+    infrastructure::runtime::ProviderRuntime,
+    presentation::render_to_text,
 };
 
 mod common;
@@ -383,7 +382,7 @@ async fn only_a_running_instance_carries_an_interactive_shell() {
         shells,
         [(
             "api",
-            ProcessSpec::new("incus", &["exec", "api", "--", "su", "-l"]),
+            InteractiveShellProcess::new("incus", &["exec", "api", "--", "su", "-l"]),
         )]
     );
 }
@@ -470,7 +469,7 @@ async fn discovered_incus_workspace_renders_target_environment_and_instances() {
         .expect("the fixture represents an installed Incus CLI");
     let mut app = App::new();
     let request = app
-        .update(AppEvent::ProviderDiscovered(discovered))
+        .update(discovered.into_event())
         .into_iter()
         .next()
         .expect("discovery requests the first workspace refresh");
@@ -507,7 +506,7 @@ async fn reachable_incus_without_instances_renders_a_distinct_empty_state() {
     let discovered = incus.discover(&cli).await.expect("Incus is installed");
     let mut app = App::new();
     let request = app
-        .update(AppEvent::ProviderDiscovered(discovered))
+        .update(discovered.into_event())
         .into_iter()
         .next()
         .expect("initial refresh");
@@ -539,7 +538,7 @@ async fn installed_but_unreachable_incus_stays_visible_with_provider_specific_er
 
     let discovered = incus.discover(&cli).await.expect("Incus is installed");
     let mut app = App::new();
-    let requests = app.update(AppEvent::ProviderDiscovered(discovered));
+    let requests = app.update(discovered.into_event());
 
     assert!(
         requests.is_empty(),
@@ -568,8 +567,8 @@ async fn incus_with_unreadable_current_project_stays_visible() {
 
     let discovered = incus.discover(&cli).await.expect("Incus is installed");
 
-    assert_eq!(discovered.name, "Incus");
-    let error = discovered.error.expect("the provider exposes its error");
+    assert_eq!(discovered.provider().name(), "Incus");
+    let error = discovered.error().expect("the provider exposes its error");
     assert!(
         error
             .message
@@ -714,7 +713,7 @@ async fn a_silent_discovery_failure_names_the_probe_that_failed() {
         .await
         .expect("Incus is installed");
 
-    let error = discovered.error.expect("the provider exposes its error");
+    let error = discovered.error().expect("the provider exposes its error");
     assert_eq!(
         error.message,
         "Incus could not report its default remote. Run `incus remote get-default` to verify the selected Target Environment."
@@ -739,7 +738,7 @@ async fn incus_that_disappears_during_discovery_stays_visible_with_an_error() {
         .await
         .expect("the initial probe already proved Incus was installed");
 
-    let error = discovered.error.expect("the provider exposes its error");
+    let error = discovered.error().expect("the provider exposes its error");
     assert!(
         error.message.contains("Incus CLI is no longer available"),
         "workspace error: {}",
@@ -773,6 +772,9 @@ async fn runtime_with_builtin_providers_discovers_installed_incus() {
     let discovered = runtime.discover().await;
 
     assert_eq!(discovered.len(), 1);
-    assert_eq!(discovered[0].name, "Incus");
-    assert_eq!(discovered[0].target_environment, "local / default");
+    assert_eq!(discovered[0].provider().name(), "Incus");
+    assert_eq!(
+        discovered[0].provider().target_environment(),
+        Some(&TargetEnvironment::new("local / default"))
+    );
 }

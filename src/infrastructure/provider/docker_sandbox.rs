@@ -3,12 +3,13 @@ use std::{future::Future, pin::Pin};
 use serde::Deserialize;
 
 use crate::{
-    cli::{CliRunner, ProcessError, ProcessSpec},
-    provider::{
-        DetailView, DetailViewId, ProviderDiscovery, ProviderId, ProviderVersion,
+    application::InteractiveShellProcess,
+    infrastructure::process::{CliRunner, ProcessError, ProcessSpec},
+    infrastructure::provider::{
+        DetailView, DetailViewId, Provider, ProviderDiscovery, ProviderId, ProviderVersion,
         ProviderWorkspace, Resource, ResourceCommand, ResourceDetails, ResourceId, ResourcePanel,
-        ResourcePanelId, ResourceState, ResourceTarget, TargetEnvironment, WorkspaceError,
-        WorkspaceSnapshot, provider_cli_error,
+        ResourcePanelId, ResourceState, ResourceTarget, WorkspaceError, WorkspaceSnapshot,
+        provider_cli_error,
     },
 };
 
@@ -142,9 +143,9 @@ fn sandbox_resource_state(status: &str) -> ResourceState {
 ///
 /// `bash` is what sbx's own documentation reaches for, and a sandbox is a
 /// prepared agent environment rather than a stripped image, so it is there.
-fn sandbox_shell(state: ResourceState, name: &str) -> Option<ProcessSpec> {
+fn sandbox_shell(state: ResourceState, name: &str) -> Option<InteractiveShellProcess> {
     matches!(state, ResourceState::Running | ResourceState::Stopped)
-        .then(|| ProcessSpec::new("sbx", &["exec", "-it", name, "bash"]))
+        .then(|| InteractiveShellProcess::new("sbx", &["exec", "-it", name, "bash"]))
 }
 
 /// The Commands a sandbox in this state can be asked to perform.
@@ -168,16 +169,13 @@ fn refresh_error(message: impl AsRef<str>) -> WorkspaceError {
 }
 
 fn discovery_error(message: impl AsRef<str>) -> ProviderDiscovery {
-    ProviderDiscovery {
-        id: ProviderId::new(PROVIDER_ID),
-        name: PROVIDER_NAME.to_owned(),
-        target_environment: TargetEnvironment::new("unavailable"),
-        version: None,
-        error: Some(WorkspaceError::with_help(
+    ProviderDiscovery::new(
+        Provider::new(ProviderId::new(PROVIDER_ID), PROVIDER_NAME, None, None),
+        Some(WorkspaceError::with_help(
             message,
             "Run `sbx ls` to verify sandboxd is running and you are signed in to Docker.",
         )),
-    }
+    )
 }
 
 /// What `sbx ls` left behind when it could not list sandboxes, with no
@@ -274,13 +272,10 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
                 return Some(discovery_error(listing_message(&error)));
             }
 
-            Some(ProviderDiscovery {
-                id: self.id(),
-                name: PROVIDER_NAME.to_owned(),
-                target_environment: TargetEnvironment::new("local"),
-                version: Some(version),
-                error: None,
-            })
+            Some(ProviderDiscovery::new(
+                Provider::new(self.id(), PROVIDER_NAME, None, Some(version)),
+                None,
+            ))
         })
     }
 

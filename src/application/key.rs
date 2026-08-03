@@ -1,7 +1,5 @@
 use std::fmt;
 
-use crossterm::event::{KeyCode as TerminalCode, KeyEvent, KeyEventKind, KeyModifiers};
-
 /// One key combination, in the registry's own vocabulary.
 ///
 /// Raw terminal input is normalized into this type at the runtime adapter, so
@@ -133,43 +131,6 @@ impl Key {
             (true, _) => return Err(InvalidKey::new(text)),
         };
         Ok(Self { code, ctrl, alt })
-    }
-
-    /// Normalizes a terminal key event into the registry's vocabulary.
-    ///
-    /// Returns `None` for anything that is not a representable press, so an
-    /// unknown event is ignored rather than guessed at.
-    pub fn from_event(event: KeyEvent) -> Option<Self> {
-        if event.kind != KeyEventKind::Press {
-            return None;
-        }
-        let code = match event.code {
-            // A shifted character already arrives as the character it produces,
-            // so the shift modifier carries no further information.
-            TerminalCode::Char(character) => KeyCode::Character(character),
-            TerminalCode::Backspace => KeyCode::Named(Named::Backspace),
-            TerminalCode::Enter => KeyCode::Named(Named::Enter),
-            TerminalCode::Esc => KeyCode::Named(Named::Esc),
-            TerminalCode::Tab => KeyCode::Named(Named::Tab),
-            TerminalCode::BackTab => KeyCode::Named(Named::BackTab),
-            TerminalCode::Left => KeyCode::Named(Named::Left),
-            TerminalCode::Right => KeyCode::Named(Named::Right),
-            TerminalCode::Up => KeyCode::Named(Named::Up),
-            TerminalCode::Down => KeyCode::Named(Named::Down),
-            TerminalCode::Home => KeyCode::Named(Named::Home),
-            TerminalCode::End => KeyCode::Named(Named::End),
-            TerminalCode::PageUp => KeyCode::Named(Named::PageUp),
-            TerminalCode::PageDown => KeyCode::Named(Named::PageDown),
-            TerminalCode::Insert => KeyCode::Named(Named::Insert),
-            TerminalCode::Delete => KeyCode::Named(Named::Delete),
-            TerminalCode::F(number @ 1..=12) => KeyCode::Named(Named::Function(number)),
-            _ => return None,
-        };
-        Some(Self {
-            code,
-            ctrl: event.modifiers.contains(KeyModifiers::CONTROL),
-            alt: event.modifiers.contains(KeyModifiers::ALT),
-        })
     }
 
     fn parse_code(text: &str) -> Option<KeyCode> {

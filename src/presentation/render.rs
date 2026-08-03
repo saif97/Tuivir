@@ -8,11 +8,11 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph},
 };
 
-use crate::app::{AppState, FocusedPane};
-use crate::provider::ResourceState;
-use crate::workspace::{
+use crate::application::{AppState, FocusedPane};
+use crate::application::{
     DetailContent, ResourceDetailsView, ResourcePanelView, WorkspacePresentation, WorkspaceView,
 };
+use crate::domain::ResourceState;
 
 pub fn render(state: &AppState, frame: &mut Frame<'_>) {
     let status_height = u16::from(!state.running_commands.is_empty());
@@ -193,12 +193,12 @@ fn render_provider_bar(state: &AppState, frame: &mut Frame<'_>, area: Rect) {
             provider_spans.push(Span::raw("   "));
         }
         if Some(index) == state.active_provider {
+            let label = match provider.target_environment() {
+                Some(target) => format!("[ {} · {target} ]", provider.name()),
+                None => format!("[ {} ]", provider.name()),
+            };
             provider_spans.push(Span::styled(
-                format!(
-                    "[ {} · {} ]",
-                    provider.name(),
-                    provider.target_environment()
-                ),
+                label,
                 Style::default().add_modifier(Modifier::BOLD),
             ));
         } else {

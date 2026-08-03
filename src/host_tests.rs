@@ -11,17 +11,17 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use super::{ShellTerminal, handle_key, open_pending_shell};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use virtui::{
-    app::{App, AppEvent},
-    cli::{InteractiveRunner, ProcessError, ProcessFailure, ProcessSpec},
-    provider::{
-        DetailView, ProviderDiscovery, ProviderId, ProviderRequest, Resource, ResourceCommand,
-        ResourceId, ResourcePanel, ResourcePanelId, ResourceState, TargetEnvironment,
-        WorkspaceSnapshot,
+    application::{
+        App, AppEvent, DetailView, InteractiveShellProcess, ProviderRequest, Resource,
+        ResourceCommand, ResourcePanel, WorkspaceSnapshot,
     },
-    runtime::{ShellTerminal, handle_key, open_pending_shell},
-    ui::render_to_text,
+    domain::{Provider, ProviderId, ResourceId, ResourcePanelId, ResourceState, TargetEnvironment},
+    infrastructure::process::{InteractiveRunner, ProcessError, ProcessFailure, ProcessSpec},
+    infrastructure::provider::ProviderDiscovery,
+    presentation::render_to_text,
 };
 
 /// Everything the host was asked to do, in the order it was asked.
@@ -102,13 +102,15 @@ impl InteractiveRunner for FakeShell {
 }
 
 fn docker_discovery() -> ProviderDiscovery {
-    ProviderDiscovery {
-        id: ProviderId::new("docker"),
-        name: "Docker".to_owned(),
-        target_environment: TargetEnvironment::new("desktop-linux"),
-        version: None,
-        error: None,
-    }
+    ProviderDiscovery::new(
+        Provider::new(
+            ProviderId::new("docker"),
+            "Docker",
+            Some(TargetEnvironment::new("desktop-linux")),
+            None,
+        ),
+        None,
+    )
 }
 
 /// One running container, carrying the Interactive Shell Docker offers inside
@@ -126,7 +128,7 @@ fn running_container() -> WorkspaceSnapshot {
                 state: Some(ResourceState::Running),
                 fields: vec![("Image".to_owned(), "nginx:1.27".to_owned())],
                 available_commands: vec![ResourceCommand::Stop],
-                shell: Some(ProcessSpec::new(
+                shell: Some(InteractiveShellProcess::new(
                     "docker",
                     &["exec", "-it", "container-a", "/bin/sh"],
                 )),
@@ -138,7 +140,7 @@ fn running_container() -> WorkspaceSnapshot {
 /// An application sitting on a running container, with `E` already pressed.
 fn app_awaiting_the_terminal() -> App {
     let mut app = App::new();
-    let requests = app.update(AppEvent::ProviderDiscovered(docker_discovery()));
+    let requests = app.update(docker_discovery().into_event());
     let ProviderRequest::RefreshWorkspace {
         request_id,
         provider_id,

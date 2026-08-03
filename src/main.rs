@@ -17,16 +17,19 @@ use crossterm::{
 use ratatui::DefaultTerminal;
 use tokio::sync::mpsc;
 use virtui::{
-    app::{App, AppEvent},
-    cli::{CliRunner, TokioCliRunner},
-    command::CommandRegistry,
-    config::{Env, FileSystemReader, load},
-    provider::ProviderRequest,
-    runtime::{
-        ProviderRuntime, RefreshTimer, ShellControl, ShellTerminal, handle_key, open_pending_shell,
+    application::{
+        App, AppEvent, Command, CommandRegistry, InteractiveShellOutcome, ProviderRequest,
     },
-    ui,
+    infrastructure::{
+        config::{Env, FileSystemReader, load},
+        process::{CliRunner, InteractiveRunner, ProcessSpec, TokioCliRunner},
+        runtime::{ProviderRuntime, RefreshTimer},
+    },
+    presentation,
 };
+
+#[cfg(test)]
+mod host_tests;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
@@ -45,6 +48,65 @@ async fn main() -> io::Result<()> {
     result
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ShellControl {
+    Continue,
+    Quit,
+}
+
+/// Maps terminal input at the host boundary, then asks the application to
+/// resolve and invoke the resulting logical command.
+fn handle_key(app: &mut App, event: KeyEvent) -> (ShellControl, Vec<ProviderRequest>) {
+    let Some(key) = presentation::key_from_event(event) else {
+        return (ShellControl::Continue, Vec::new());
+    };
+    if app.reserved(key) == Some(Command::Quit) {
+        return (ShellControl::Quit, Vec::new());
+    }
+    match app.resolve_command(key) {
+        Some(Command::Quit) => (ShellControl::Quit, Vec::new()),
+        Some(command) => (ShellControl::Continue, app.invoke(command)),
+        None => (ShellControl::Continue, Vec::new()),
+    }
+}
+
+/// The terminal and input-reader operations ordered by an interactive-shell
+/// handover. This is a host seam: neither application nor infrastructure owns
+/// the user's terminal lifecycle.
+trait ShellTerminal {
+    fn suspend(&mut self) -> io::Result<()>;
+    fn resume(&mut self) -> io::Result<()>;
+    fn discard_keys(&mut self);
+    fn resume_reading(&mut self);
+}
+
+fn open_pending_shell(
+    app: &mut App,
+    terminal: &mut dyn ShellTerminal,
+    runner: &dyn InteractiveRunner,
+) -> io::Result<Vec<ProviderRequest>> {
+    let Some(shell) = app.take_pending_shell() else {
+        return Ok(Vec::new());
+    };
+    terminal.suspend()?;
+    let result = runner.run_interactive(&ProcessSpec::from(&shell.process));
+    let resumed = take_the_terminal_back(terminal);
+    let outcome = result.err().and_then(|error| error.start_failure()).map_or(
+        InteractiveShellOutcome::Exited,
+        InteractiveShellOutcome::StartFailed,
+    );
+    let requests = app.update(AppEvent::ShellClosed { shell, outcome });
+    resumed?;
+    Ok(requests)
+}
+
+fn take_the_terminal_back(terminal: &mut dyn ShellTerminal) -> io::Result<()> {
+    terminal.resume()?;
+    terminal.discard_keys();
+    terminal.resume_reading();
+    Ok(())
+}
+
 async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::Result<()> {
     let cli = Arc::new(TokioCliRunner) as Arc<dyn CliRunner>;
     let runtime = ProviderRuntime::with_builtin_providers(cli);
@@ -52,7 +114,7 @@ async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::R
     let mut app = App::with_registry(registry);
 
     for discovered in runtime.discover().await {
-        let requests = app.update(AppEvent::ProviderDiscovered(discovered));
+        let requests = app.update(discovered.into_event());
         dispatch_all(&runtime, &completion_tx, requests);
     }
 
@@ -61,7 +123,7 @@ async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::R
     let mut refresh_timer = RefreshTimer::new();
 
     let result = loop {
-        if let Err(error) = terminal.draw(|frame| ui::render(app.state(), frame)) {
+        if let Err(error) = terminal.draw(|frame| presentation::render(app.state(), frame)) {
             break Err(error);
         }
 

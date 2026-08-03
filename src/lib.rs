@@ -1,12 +1,4 @@
-pub mod app;
-pub mod cli;
-pub mod command;
-pub mod config;
-pub mod docker;
-pub mod docker_sandbox;
-pub mod incus;
-pub mod keys;
-pub mod provider;
-pub mod runtime;
-pub mod ui;
-pub mod workspace;
+pub mod application;
+pub mod domain;
+pub mod infrastructure;
+pub mod presentation;
