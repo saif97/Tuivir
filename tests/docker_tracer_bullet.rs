@@ -370,14 +370,14 @@ async fn docker_declares_images_after_containers_with_native_stateless_rows() {
     assert_eq!(
         nginx.fields,
         [
-            ("Repository".to_owned(), "nginx".to_owned()),
-            ("Tag".to_owned(), "1.27".to_owned()),
+            ("Repository", "nginx".to_owned()),
+            ("Tag", "1.27".to_owned()),
             (
-                "Identity".to_owned(),
+                "Identity",
                 "sha256:1111111111111111111111111111111111111111111111111111111111111111"
                     .to_owned()
             ),
-            ("Size".to_owned(), "192MB".to_owned()),
+            ("Size", "192MB".to_owned()),
         ]
     );
 }
@@ -422,7 +422,7 @@ async fn images_sharing_a_digest_are_distinct_resources() {
         resource
             .fields
             .iter()
-            .find(|(label, _)| label == "Identity")
+            .find(|(label, _)| *label == "Identity")
             .map(|(_, value)| value.clone())
             .expect("an image reports its Identity")
     };

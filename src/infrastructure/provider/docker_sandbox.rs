@@ -59,13 +59,10 @@ struct SandboxPort {
 ///
 /// A field with nothing behind it renders as a bare label, so a sandbox
 /// mounting no host path leaves the row out rather than showing an empty one.
-fn sandbox_fields(row: &SandboxRow) -> Vec<(String, String)> {
-    let mut fields = vec![
-        ("Agent".to_owned(), row.agent.clone()),
-        ("ID".to_owned(), row.id.clone()),
-    ];
+fn sandbox_fields(row: &SandboxRow) -> Vec<(&'static str, String)> {
+    let mut fields = vec![("Agent", row.agent.clone()), ("ID", row.id.clone())];
     if !row.sbx_workspaces.is_empty() {
-        fields.push(("Workspaces".to_owned(), row.sbx_workspaces.join(", ")));
+        fields.push(("Workspaces", row.sbx_workspaces.join(", ")));
     }
     fields
 }

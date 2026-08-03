@@ -176,7 +176,7 @@ fn running_container() -> WorkspaceSnapshot {
                 name: "api".to_owned(),
                 status: Some("running".to_owned()),
                 state: Some(ResourceState::Running),
-                fields: vec![("Image".to_owned(), "nginx:1.27".to_owned())],
+                fields: vec![("Image", "nginx:1.27".to_owned())],
                 snapshot_details: Vec::new(),
                 available_commands: vec![ResourceCommand::Stop],
                 shell: Some(InteractiveShellProcess::new(

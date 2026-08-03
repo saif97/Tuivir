@@ -60,7 +60,7 @@ pub struct Resource {
     /// The provider-neutral reading of `status` that application policy uses.
     pub state: Option<ResourceState>,
     /// Provider-defined label/value fields for the selected-resource details panel.
-    pub fields: Vec<(String, String)>,
+    pub fields: Vec<(&'static str, String)>,
     /// Detail content already carried by this application-owned snapshot.
     pub snapshot_details: Vec<(DetailViewId, ResourceDetails)>,
     /// Lifecycle Commands currently available for this provider Resource.

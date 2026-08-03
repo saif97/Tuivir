@@ -247,7 +247,7 @@ fn render_workspace_panel(
             area,
         ),
         WorkspacePresentation::Ready(view) => {
-            if view.panels.is_empty() {
+            if view.panels().len() == 0 {
                 frame.render_widget(
                     Paragraph::new("No Resource Panels available").block(pane_block(
                         pane_title(
@@ -268,23 +268,17 @@ fn render_workspace_panel(
             let panel_areas = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints(
-                    view.panels
-                        .iter()
-                        .map(|panel| Constraint::Fill(panel.panel.resources.len().max(1) as u16))
-                        .collect::<Vec<_>>(),
+                    view.panels()
+                        .map(|panel| Constraint::Fill(panel.panel.resources.len().max(1) as u16)),
                 )
                 .split(area);
-            for (index, (panel, area)) in view
-                .panels
-                .iter()
-                .zip(panel_areas.iter().copied())
-                .enumerate()
+            for (index, (panel, area)) in view.panels().zip(panel_areas.iter().copied()).enumerate()
             {
                 let focused =
                     resource_focus && view.focused_resource_panel == Some(&panel.panel.id);
                 render_resource_panel(
                     view.name,
-                    panel,
+                    &panel,
                     resource_hints.get(index).and_then(Option::as_deref),
                     focused,
                     frame,
@@ -436,15 +430,16 @@ fn render_details_panel(
         .and_then(|view| view.selected_resource)
         .map(|resource| {
             let mut lines = vec![Line::styled(
-                resource.name.clone(),
+                resource.name.as_str(),
                 Style::default().add_modifier(Modifier::BOLD),
             )];
-            lines.extend(
-                resource
-                    .fields
-                    .iter()
-                    .map(|(label, value)| Line::from(format!("{label}: {value}"))),
-            );
+            lines.extend(resource.fields.iter().map(|(label, value)| {
+                Line::from(vec![
+                    Span::raw(*label),
+                    Span::raw(": "),
+                    Span::raw(value.as_str()),
+                ])
+            }));
             lines
         })
         .unwrap_or_else(|| {

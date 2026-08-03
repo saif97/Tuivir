@@ -118,9 +118,9 @@ impl ProviderWorkspace for IncusWorkspace {
                         status: Some(row.status),
                         state: Some(state),
                         fields: vec![
-                            ("Type".to_owned(), row.instance_type),
-                            ("Architecture".to_owned(), row.architecture),
-                            ("Location".to_owned(), row.location),
+                            ("Type", row.instance_type),
+                            ("Architecture", row.architecture),
+                            ("Location", row.location),
                         ],
                         snapshot_details: Vec::new(),
                         available_commands,

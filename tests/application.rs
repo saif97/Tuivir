@@ -1779,7 +1779,7 @@ fn container_snapshot(
                     name: (*name).to_owned(),
                     status: Some(status.to_owned()),
                     state: Some(state),
-                    fields: vec![("Image".to_owned(), (*image).to_owned())],
+                    fields: vec![("Image", (*image).to_owned())],
                     snapshot_details: Vec::new(),
                     available_commands: available_commands.clone(),
                     shell: (state == ResourceState::Running).then(|| {
@@ -1814,7 +1814,7 @@ fn incus_snapshot(instances: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
                         } else {
                             ResourceState::Stopped
                         }),
-                        fields: vec![("Type".to_owned(), "container".to_owned())],
+                        fields: vec![("Type", "container".to_owned())],
                         snapshot_details: Vec::new(),
                         available_commands: if running {
                             vec![
@@ -1855,8 +1855,8 @@ fn docker_multi_panel_snapshot() -> WorkspaceSnapshot {
                     status: Some("running".to_owned()),
                     state: Some(ResourceState::Running),
                     fields: vec![
-                        ("Image".to_owned(), "nginx:1.27".to_owned()),
-                        ("Status".to_owned(), "Up 3 hours".to_owned()),
+                        ("Image", "nginx:1.27".to_owned()),
+                        ("Status", "Up 3 hours".to_owned()),
                     ],
                     snapshot_details: Vec::new(),
                     available_commands: vec![
@@ -1880,10 +1880,10 @@ fn docker_multi_panel_snapshot() -> WorkspaceSnapshot {
                     status: None,
                     state: None,
                     fields: vec![
-                        ("Repository".to_owned(), "nginx".to_owned()),
-                        ("Tag".to_owned(), "1.27".to_owned()),
-                        ("Identity".to_owned(), "sha256:shared-id".to_owned()),
-                        ("Size".to_owned(), "192MB".to_owned()),
+                        ("Repository", "nginx".to_owned()),
+                        ("Tag", "1.27".to_owned()),
+                        ("Identity", "sha256:shared-id".to_owned()),
+                        ("Size", "192MB".to_owned()),
                     ],
                     snapshot_details: Vec::new(),
                     available_commands: Vec::new(),
@@ -2159,8 +2159,7 @@ fn every_workspace_and_resource_panel_restores_its_navigation_state() {
     );
     assert_eq!(app.state().focused_pane, FocusedPane::Resources);
     assert_eq!(
-        view.panels
-            .iter()
+        view.panels()
             .map(|panel| (&panel.panel.id, panel.selected_resource, panel.scroll))
             .collect::<Vec<_>>(),
         vec![

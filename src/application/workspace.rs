@@ -471,22 +471,8 @@ impl ProviderWorkspaceState {
             target_environment: self.provider.target_environment(),
             version: self.provider.version(),
             focused_resource_panel: self.focused_resource_panel.as_ref(),
-            panels: snapshot
-                .panels
-                .iter()
-                .map(|panel| {
-                    let navigation = self
-                        .panel_navigation
-                        .iter()
-                        .find(|navigation| navigation.panel_id == panel.id);
-                    ResourcePanelView {
-                        panel,
-                        selected_resource: navigation
-                            .and_then(|navigation| navigation.selected_resource.as_ref()),
-                        scroll: navigation.map_or(0, |navigation| navigation.scroll),
-                    }
-                })
-                .collect(),
+            snapshot,
+            panel_navigation: &self.panel_navigation,
             selected_resource,
             detail_views,
             selected_detail_view,
@@ -587,11 +573,31 @@ pub struct WorkspaceView<'a> {
     pub target_environment: Option<&'a TargetEnvironment>,
     pub version: Option<&'a ProviderVersion>,
     pub focused_resource_panel: Option<&'a ResourcePanelId>,
-    pub panels: Vec<ResourcePanelView<'a>>,
+    snapshot: &'a WorkspaceSnapshot,
+    panel_navigation: &'a [ResourcePanelNavigation],
     pub selected_resource: Option<&'a Resource>,
     pub detail_views: &'a [DetailView],
     pub selected_detail_view: Option<&'a DetailView>,
     pub details: Option<ResourceDetailsView<'a>>,
+}
+
+impl<'a> WorkspaceView<'a> {
+    /// Projects panels lazily so every frame borrows application state without
+    /// allocating an intermediate collection.
+    pub fn panels(&self) -> impl ExactSizeIterator<Item = ResourcePanelView<'a>> + '_ {
+        self.snapshot.panels.iter().map(|panel| {
+            let navigation = self
+                .panel_navigation
+                .iter()
+                .find(|navigation| navigation.panel_id == panel.id);
+            ResourcePanelView {
+                panel,
+                selected_resource: navigation
+                    .and_then(|navigation| navigation.selected_resource.as_ref()),
+                scroll: navigation.map_or(0, |navigation| navigation.scroll),
+            }
+        })
+    }
 }
 
 pub enum WorkspacePresentation<'a> {
@@ -625,6 +631,7 @@ impl<'a> From<&'a ResourceDetailsState> for ResourceDetailsView<'a> {
 }
 
 /// One Resource Panel paired with its private navigation projection.
+#[derive(Clone, Copy)]
 pub struct ResourcePanelView<'a> {
     pub panel: &'a ResourcePanel,
     pub selected_resource: Option<&'a ResourceId>,

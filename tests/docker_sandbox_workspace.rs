@@ -154,7 +154,7 @@ async fn a_sandbox_carries_its_agent_uuid_and_workspaces_as_fields() {
         sandbox
             .fields
             .iter()
-            .map(|(label, value)| (label.as_str(), value.as_str()))
+            .map(|(label, value)| (*label, value.as_str()))
             .collect::<Vec<_>>(),
         [
             ("Agent", "claude"),
@@ -190,7 +190,7 @@ async fn a_sandbox_with_no_workspaces_omits_the_field_entirely() {
         sandbox
             .fields
             .iter()
-            .map(|(label, _)| label.as_str())
+            .map(|(label, _)| *label)
             .collect::<Vec<_>>(),
         ["Agent", "ID"]
     );
