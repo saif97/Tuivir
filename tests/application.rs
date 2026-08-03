@@ -1780,6 +1780,7 @@ fn container_snapshot(
                     status: Some(status.to_owned()),
                     state: Some(state),
                     fields: vec![("Image".to_owned(), (*image).to_owned())],
+                    snapshot_details: Vec::new(),
                     available_commands: available_commands.clone(),
                     shell: (state == ResourceState::Running).then(|| {
                         InteractiveShellProcess::new("docker", &["exec", "-it", *id, "/bin/sh"])
@@ -1814,6 +1815,7 @@ fn incus_snapshot(instances: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
                             ResourceState::Stopped
                         }),
                         fields: vec![("Type".to_owned(), "container".to_owned())],
+                        snapshot_details: Vec::new(),
                         available_commands: if running {
                             vec![
                                 ResourceCommand::Stop,
@@ -1856,6 +1858,7 @@ fn docker_multi_panel_snapshot() -> WorkspaceSnapshot {
                         ("Image".to_owned(), "nginx:1.27".to_owned()),
                         ("Status".to_owned(), "Up 3 hours".to_owned()),
                     ],
+                    snapshot_details: Vec::new(),
                     available_commands: vec![
                         ResourceCommand::Stop,
                         ResourceCommand::Restart,
@@ -1882,6 +1885,7 @@ fn docker_multi_panel_snapshot() -> WorkspaceSnapshot {
                         ("Identity".to_owned(), "sha256:shared-id".to_owned()),
                         ("Size".to_owned(), "192MB".to_owned()),
                     ],
+                    snapshot_details: Vec::new(),
                     available_commands: Vec::new(),
                     shell: None,
                 }],

@@ -16,8 +16,7 @@ use crate::{
 const PROVIDER_ID: &str = "docker-sandbox";
 const PROVIDER_NAME: &str = "Docker Sandbox";
 const SANDBOXES_PANEL_ID: &str = "sandboxes";
-/// The one listing sbx offers. Discovery, refresh, and the Info view all read
-/// it, so they must ask for it identically.
+/// The one Resource listing sbx offers.
 const LIST_SANDBOXES: [&str; 2] = ["ls", "--json"];
 /// The only Detail View Docker Sandbox declares.
 const INFO_VIEW: &str = "info";
@@ -117,7 +116,7 @@ async fn list_sandboxes(cli: &dyn CliRunner) -> Result<SandboxListing, Workspace
 /// answer — and borrowing Docker's names for diagnostics sbx does not have
 /// would promise the user something that does not exist.
 fn sandbox_detail_views() -> Vec<DetailView> {
-    vec![DetailView::new(INFO_VIEW, "Info")]
+    vec![DetailView::from_snapshot(INFO_VIEW, "Info")]
 }
 
 /// Maps an sbx sandbox status onto the shared vocabulary.
@@ -265,13 +264,6 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
                 }
                 Ok(output) => sbx_version(&output.stdout),
             };
-            // Listing is what proves sbx is usable, and it fails for the two
-            // reasons the user can act on: sandboxd is down, or the Docker
-            // login has lapsed.
-            if let Err(error) = cli.run(ProcessSpec::new("sbx", &LIST_SANDBOXES)).await {
-                return Some(discovery_error(listing_message(&error)));
-            }
-
             Some(ProviderDiscovery::new(
                 Provider::new(self.id(), PROVIDER_NAME, None, Some(version)),
                 None,
@@ -291,6 +283,10 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
                 .map(|row| {
                     let state = sandbox_resource_state(&row.status);
                     let fields = sandbox_fields(&row);
+                    let snapshot_details = vec![(
+                        DetailViewId::new(INFO_VIEW),
+                        ResourceDetails::from_lines(sandbox_info(&row)),
+                    )];
                     let shell = sandbox_shell(state, &row.name);
                     Resource {
                         id: ResourceId::new(&row.name),
@@ -298,6 +294,7 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
                         status: Some(row.status),
                         state: Some(state),
                         fields,
+                        snapshot_details,
                         available_commands: sandbox_commands(state),
                         shell,
                     }
@@ -350,7 +347,7 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
 
     fn load_details<'a>(
         &'a self,
-        cli: &'a dyn CliRunner,
+        _cli: &'a dyn CliRunner,
         target: &'a ResourceTarget,
         view_id: &'a DetailViewId,
     ) -> Pin<Box<dyn Future<Output = Result<ResourceDetails, WorkspaceError>> + Send + 'a>> {
@@ -367,18 +364,10 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
                     "Docker Sandbox has no {view_id} view for sandbox {resource_id}"
                 )));
             }
-            let listing = list_sandboxes(cli).await?;
-            let Some(row) = listing
-                .sandboxes
-                .into_iter()
-                .find(|row| row.name == resource_id.0)
-            else {
-                // The sandbox was listed at the last refresh and is gone now.
-                // That is an empty view, not a failure: the panel is about to
-                // drop it anyway.
-                return Ok(ResourceDetails::default());
-            };
-            Ok(ResourceDetails::from_lines(sandbox_info(&row)))
+            // Info is application-owned snapshot content. A request should
+            // never reach infrastructure, but resolving it empty remains the
+            // fail-safe behavior for a stale target.
+            Ok(ResourceDetails::default())
         })
     }
 }

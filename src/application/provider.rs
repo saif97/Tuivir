@@ -61,6 +61,8 @@ pub struct Resource {
     pub state: Option<ResourceState>,
     /// Provider-defined label/value fields for the selected-resource details panel.
     pub fields: Vec<(String, String)>,
+    /// Detail content already carried by this application-owned snapshot.
+    pub snapshot_details: Vec<(DetailViewId, ResourceDetails)>,
     /// Lifecycle Commands currently available for this provider Resource.
     pub available_commands: Vec<ResourceCommand>,
     /// The Interactive Shell this Provider offers inside the Resource now.
@@ -72,6 +74,13 @@ pub struct Resource {
 pub struct DetailView {
     pub id: DetailViewId,
     pub title: String,
+    source: DetailViewSource,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum DetailViewSource {
+    Provider,
+    Snapshot,
 }
 
 impl DetailView {
@@ -79,7 +88,21 @@ impl DetailView {
         Self {
             id: DetailViewId::new(id),
             title: title.into(),
+            source: DetailViewSource::Provider,
         }
+    }
+
+    /// Declares Detail content that the Resource snapshot already carries.
+    pub fn from_snapshot(id: impl Into<String>, title: impl Into<String>) -> Self {
+        Self {
+            id: DetailViewId::new(id),
+            title: title.into(),
+            source: DetailViewSource::Snapshot,
+        }
+    }
+
+    pub(crate) fn loads_from_snapshot(&self) -> bool {
+        self.source == DetailViewSource::Snapshot
     }
 }
 
@@ -130,6 +153,33 @@ impl WorkspaceSnapshot {
             .resources
             .iter()
             .find(|resource| &resource.id == target.resource_id())
+    }
+
+    /// Resolves application-owned Detail content without Provider work.
+    ///
+    /// `None` means the declared view is Provider-backed. A snapshot-backed
+    /// view whose Resource is absent is present but empty.
+    pub fn snapshot_detail(
+        &self,
+        target: &ResourceTarget,
+        view_id: &DetailViewId,
+    ) -> Option<ResourceDetails> {
+        let panel = self.panel_for(target)?;
+        let view = panel.detail_views.iter().find(|view| &view.id == view_id)?;
+        if !view.loads_from_snapshot() {
+            return None;
+        }
+        Some(
+            self.resource(target)
+                .and_then(|resource| {
+                    resource
+                        .snapshot_details
+                        .iter()
+                        .find(|(id, _)| id == view_id)
+                        .map(|(_, details)| details.clone())
+                })
+                .unwrap_or_default(),
+        )
     }
 }
 

@@ -15,6 +15,7 @@ fn resource(id: &str, name: &str) -> Resource {
         status: None,
         state: None,
         fields: Vec::new(),
+        snapshot_details: Vec::new(),
         available_commands: Vec::new(),
         shell: None,
     }

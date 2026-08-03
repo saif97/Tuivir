@@ -149,6 +149,7 @@ impl ProviderWorkspace for DockerWorkspace {
                             ("Image".to_owned(), row.image),
                             ("Status".to_owned(), row.status),
                         ],
+                        snapshot_details: Vec::new(),
                         available_commands,
                         shell,
                     })
@@ -186,6 +187,7 @@ impl ProviderWorkspace for DockerWorkspace {
                             ("Identity".to_owned(), row.id),
                             ("Size".to_owned(), row.size),
                         ],
+                        snapshot_details: Vec::new(),
                         available_commands: Vec::new(),
                         shell: None,
                     })

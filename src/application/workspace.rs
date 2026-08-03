@@ -329,6 +329,23 @@ impl ProviderWorkspaceState {
             return None;
         }
 
+        let snapshot_content = match &self.load_state {
+            WorkspaceLoadState::Ready(snapshot) => {
+                snapshot.snapshot_detail(&detail_target.resource, &detail_target.view_id)
+            }
+            WorkspaceLoadState::Loading | WorkspaceLoadState::Error(_) => None,
+        };
+        if let Some(content) = snapshot_content {
+            self.details = Some(ResourceDetailsState {
+                target: detail_target,
+                resource_name,
+                title: view.title,
+                content: DetailContent::Ready(content),
+                scroll: 0,
+            });
+            return None;
+        }
+
         let load = DetailLoad {
             request_id,
             provider_id: self.provider.id().clone(),

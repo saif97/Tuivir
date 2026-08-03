@@ -122,6 +122,7 @@ impl ProviderWorkspace for IncusWorkspace {
                             ("Architecture".to_owned(), row.architecture),
                             ("Location".to_owned(), row.location),
                         ],
+                        snapshot_details: Vec::new(),
                         available_commands,
                         shell,
                     }
