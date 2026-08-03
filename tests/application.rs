@@ -2195,7 +2195,13 @@ fn every_workspace_and_resource_panel_restores_its_navigation_state() {
     assert_eq!(app.state().focused_pane, FocusedPane::Resources);
     assert_eq!(
         view.panels()
-            .map(|panel| (&panel.panel.id, panel.selected_resource, panel.scroll))
+            .map(|panel| {
+                (
+                    &panel.panel.id,
+                    panel.selected_resource,
+                    panel.selected_index,
+                )
+            })
             .collect::<Vec<_>>(),
         vec![
             (

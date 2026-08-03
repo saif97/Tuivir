@@ -157,7 +157,7 @@ fn moving_resource_selection_updates_only_the_focused_panels_navigation() {
         Some("worker")
     );
     let panels = view.panels().collect::<Vec<_>>();
-    assert_eq!(panels[0].scroll, 1);
+    assert_eq!(panels[0].selected_index, 1);
     assert_eq!(
         panels[1].selected_resource,
         Some(&ResourceId::new("image-a"))

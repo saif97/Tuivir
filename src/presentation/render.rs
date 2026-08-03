@@ -296,7 +296,8 @@ fn render_resource_panel(
 ) {
     let panel = view.panel;
     let viewport_height = area.height.saturating_sub(2) as usize;
-    let visible = visible_resource_range(view.scroll, viewport_height, panel.resources.len());
+    let visible =
+        visible_resource_range(view.selected_index, viewport_height, panel.resources.len());
     // A row names its Resource and, where the Resource has one, says what it is
     // doing. Everything else a Provider reported is in the Details pane, so a
     // row never has to compete for width with it.

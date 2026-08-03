@@ -24,8 +24,8 @@ pub enum WorkspaceLoadState {
 struct ResourcePanelNavigation {
     panel_id: ResourcePanelId,
     selected_resource: Option<ResourceId>,
-    /// The first Resource row on screen.
-    scroll: usize,
+    /// The selected Resource's index in the latest snapshot.
+    selected_index: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -286,7 +286,7 @@ impl ProviderWorkspaceState {
             }) else {
                 navigation.selected_resource =
                     panel.resources.first().map(|resource| resource.id.clone());
-                navigation.scroll = 0;
+                navigation.selected_index = 0;
                 return;
             };
             let next = current
@@ -296,7 +296,7 @@ impl ProviderWorkspaceState {
                 .resources
                 .get(next)
                 .map(|resource| resource.id.clone());
-            navigation.scroll = next;
+            navigation.selected_index = next;
         });
     }
 
@@ -451,7 +451,7 @@ impl ProviderWorkspaceState {
                     ResourcePanelNavigation {
                         panel_id: panel.id.clone(),
                         selected_resource,
-                        scroll: selected_index,
+                        selected_index,
                     }
                 })
                 .collect();
@@ -621,7 +621,7 @@ impl<'a> WorkspaceView<'a> {
                 panel,
                 selected_resource: navigation
                     .and_then(|navigation| navigation.selected_resource.as_ref()),
-                scroll: navigation.map_or(0, |navigation| navigation.scroll),
+                selected_index: navigation.map_or(0, |navigation| navigation.selected_index),
             }
         })
     }
@@ -662,5 +662,5 @@ impl<'a> From<&'a ResourceDetailsState> for ResourceDetailsView<'a> {
 pub struct ResourcePanelView<'a> {
     pub panel: &'a ResourcePanel,
     pub selected_resource: Option<&'a ResourceId>,
-    pub scroll: usize,
+    pub selected_index: usize,
 }
