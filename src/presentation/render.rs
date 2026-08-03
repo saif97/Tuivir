@@ -521,6 +521,8 @@ fn render_detail_content(
         DetailContent::Ready(loaded) => loaded
             .lines
             .iter()
+            .skip(details.scroll as usize)
+            .take(area.height as usize)
             .map(|line| Line::from(line.as_str()))
             .collect(),
         DetailContent::Error(error) => vec![
@@ -534,12 +536,7 @@ fn render_detail_content(
             Line::from(error.message.as_str()),
         ],
     };
-    frame.render_widget(
-        Paragraph::new(lines)
-            .wrap(ratatui::widgets::Wrap { trim: false })
-            .scroll((details.scroll, 0)),
-        area,
-    );
+    frame.render_widget(Paragraph::new(lines), area);
 }
 
 pub fn render_to_text(state: &AppState, width: u16, height: u16) -> String {

@@ -2673,6 +2673,28 @@ fn scrolling_moves_through_a_long_detail_view_and_clamps_at_both_ends() {
     assert!(screen.contains("line-0"), "rendered:\n{screen}");
 }
 
+#[test]
+fn detail_source_lines_clip_at_the_panel_edge_instead_of_wrapping() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
+    let details = detail_request(app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    )));
+    app.update(details_completed(
+        details,
+        Ok(ResourceDetails::from_lines([
+            "visible-prefix--------------------------------SHOULD-BE-CLIPPED",
+            "second-source-line",
+        ])),
+    ));
+
+    let screen = render_to_text(app.state(), 60, 20);
+    assert!(screen.contains("visible-prefix"), "rendered:\n{screen}");
+    assert!(screen.contains("second-source-line"), "rendered:\n{screen}");
+    assert!(!screen.contains("SHOULD"), "rendered:\n{screen}");
+}
+
 /// Every view starts at its own top: a scrolled position belongs to the output
 /// it was scrolled through, not to the panel.
 #[test]
