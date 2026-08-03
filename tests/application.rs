@@ -121,6 +121,12 @@ fn first_available_provider_becomes_the_active_workspace() {
     app.update(docker_discovery().into_event());
 
     assert_eq!(app.state().active_provider, Some(0));
+    assert_eq!(
+        app.state()
+            .active_workspace()
+            .map(|workspace| workspace.id()),
+        Some(&ProviderId::new("docker")),
+    );
 }
 
 #[test]
@@ -1951,6 +1957,23 @@ fn settling_on_a_resource_requests_only_the_visible_detail_view() {
         "unexpected request: {:?}",
         requests[0]
     );
+}
+
+#[test]
+fn a_detail_request_is_current_only_while_its_full_identity_remains_visible() {
+    let mut app = App::new();
+    let request = detail_request(ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    ));
+
+    assert!(app.detail_request_is_current(&request));
+
+    assert!(app.update(fixture_discovery().into_event()).is_empty());
+    app.invoke(Command::NextWorkspace);
+
+    assert!(!app.detail_request_is_current(&request));
 }
 
 /// Rendered at a width a terminal actually has, so a row that only fits on a

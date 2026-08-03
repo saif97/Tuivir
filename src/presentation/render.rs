@@ -28,10 +28,7 @@ pub fn render(state: &AppState, frame: &mut Frame<'_>) {
     render_provider_bar(state, frame, rows[0]);
     render_running_command_status(state, frame, rows[2]);
 
-    let Some(provider) = state
-        .active_provider
-        .and_then(|active_provider| state.providers.get(active_provider))
-    else {
+    let Some(provider) = state.active_workspace() else {
         frame.render_widget(
             Paragraph::new("No providers discovered")
                 .block(Block::default().title(" Workspace ").borders(Borders::ALL)),

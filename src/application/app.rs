@@ -121,6 +121,19 @@ pub struct AppState {
     pub hints: KeyHints,
 }
 
+impl AppState {
+    /// Returns the single Provider Workspace currently visible to the user.
+    pub fn active_workspace(&self) -> Option<&ProviderWorkspaceState> {
+        self.active_provider
+            .and_then(|active| self.providers.get(active))
+    }
+
+    fn active_workspace_mut(&mut self) -> Option<&mut ProviderWorkspaceState> {
+        self.active_provider
+            .and_then(|active| self.providers.get_mut(active))
+    }
+}
+
 /// First effective bindings projected for inline display.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct KeyHints {
@@ -246,6 +259,23 @@ impl App {
         &self.state
     }
 
+    /// Confirms that a debounced Detail View request still describes the
+    /// visible load before the host starts Provider work for it.
+    pub fn detail_request_is_current(&self, request: &ProviderRequest) -> bool {
+        let ProviderRequest::LoadResourceDetails {
+            request_id,
+            provider_id,
+            target,
+            view_id,
+        } = request
+        else {
+            return false;
+        };
+        self.state.active_workspace().is_some_and(|workspace| {
+            workspace.is_loading_detail(*request_id, provider_id, target, view_id)
+        })
+    }
+
     /// Applies one application event and returns any provider work to run.
     ///
     /// This method performs no I/O; the runtime executes returned requests and
@@ -305,6 +335,7 @@ impl App {
             match &self.state.focused_pane {
                 FocusedPane::Providers => CommandScope::ProviderSelector,
                 FocusedPane::Resources => self
+                    .state
                     .active_workspace()
                     .and_then(ProviderWorkspaceState::focused_resource_panel_index)
                     .map_or(CommandScope::ResourceView, CommandScope::ResourcePanel),
@@ -501,7 +532,7 @@ impl App {
     /// the previous one's result unwelcome.
     fn sync_details(&mut self) -> Vec<ProviderRequest> {
         let request_id = ProviderRequestId::new(self.next_request_id);
-        let Some(provider) = self.active_workspace_mut() else {
+        let Some(provider) = self.state.active_workspace_mut() else {
             return Vec::new();
         };
         let Some(load) = provider.start_visible_detail_load(request_id) else {
@@ -627,12 +658,13 @@ impl App {
     }
 
     fn is_active_provider(&self, provider_id: &ProviderId) -> bool {
-        self.active_workspace()
+        self.state
+            .active_workspace()
             .is_some_and(|provider| provider.id() == provider_id)
     }
 
     fn handle_resource_command(&mut self, command: ResourceCommand) -> Vec<ProviderRequest> {
-        let Some(provider) = self.active_workspace() else {
+        let Some(provider) = self.state.active_workspace() else {
             return Vec::new();
         };
         let Some(target) = provider.selected_resource_target() else {
@@ -704,7 +736,7 @@ impl App {
     /// unsupported operation stays unsupported rather than being attempted and
     /// refused.
     fn open_shell(&mut self) {
-        let Some(provider) = self.active_workspace() else {
+        let Some(provider) = self.state.active_workspace() else {
             return;
         };
         let provider_id = provider.id().clone();
@@ -744,6 +776,7 @@ impl App {
         let available_commands = resource.available_commands;
         let offers_a_shell = resource.shell.is_some();
         let panel_count = self
+            .state
             .active_workspace()
             .and_then(ProviderWorkspaceState::resource_panel_count)
             .unwrap_or(0);
@@ -779,23 +812,12 @@ impl App {
     }
 
     fn selected_resource(&self) -> Option<&super::Resource> {
-        self.active_workspace()?.selected_resource()
-    }
-
-    fn active_workspace(&self) -> Option<&ProviderWorkspaceState> {
-        self.state
-            .active_provider
-            .and_then(|active| self.state.providers.get(active))
-    }
-
-    fn active_workspace_mut(&mut self) -> Option<&mut ProviderWorkspaceState> {
-        self.state
-            .active_provider
-            .and_then(|active| self.state.providers.get_mut(active))
+        self.state.active_workspace()?.selected_resource()
     }
 
     fn refresh_active_provider(&mut self) -> Vec<ProviderRequest> {
         let Some(provider_id) = self
+            .state
             .active_workspace()
             .map(|provider| provider.id().clone())
         else {
@@ -812,7 +834,7 @@ impl App {
     }
 
     fn focus_resource_panel(&mut self, index: usize) {
-        let Some(provider) = self.active_workspace_mut() else {
+        let Some(provider) = self.state.active_workspace_mut() else {
             return;
         };
         if provider.focus_resource_panel_at(index) {
@@ -821,7 +843,7 @@ impl App {
     }
 
     fn cycle_focus(&mut self, delta: isize) {
-        let Some(provider) = self.active_workspace() else {
+        let Some(provider) = self.state.active_workspace() else {
             self.state.focused_pane = FocusedPane::Providers;
             return;
         };
@@ -846,7 +868,7 @@ impl App {
     }
 
     fn move_resource_selection(&mut self, delta: isize) {
-        if let Some(provider) = self.active_workspace_mut() {
+        if let Some(provider) = self.state.active_workspace_mut() {
             provider.move_resource_selection(delta);
         }
     }
@@ -858,7 +880,7 @@ impl App {
     /// panel is; clamping to the last line is the strongest promise it can keep
     /// without one, and it is enough that scrolling never runs into blank space.
     fn scroll_details(&mut self, delta: isize) {
-        if let Some(provider) = self.active_workspace_mut() {
+        if let Some(provider) = self.state.active_workspace_mut() {
             provider.scroll_details(delta);
         }
     }
@@ -868,7 +890,7 @@ impl App {
     /// The views are a ring: three tabs are few enough that walking off one end
     /// is a request for the other, not a mistake to clamp.
     fn move_detail_view(&mut self, delta: isize) {
-        if let Some(provider) = self.active_workspace_mut() {
+        if let Some(provider) = self.state.active_workspace_mut() {
             provider.move_detail_view(delta);
         }
     }

@@ -58,6 +58,19 @@ pub struct DetailLoad {
 }
 
 impl DetailLoad {
+    fn matches_request(
+        &self,
+        request_id: ProviderRequestId,
+        provider_id: &ProviderId,
+        target: &ResourceTarget,
+        view_id: &DetailViewId,
+    ) -> bool {
+        self.request_id == request_id
+            && &self.provider_id == provider_id
+            && &self.target.resource == target
+            && &self.target.view_id == view_id
+    }
+
     pub fn into_request_parts(
         self,
     ) -> (ProviderRequestId, ProviderId, ResourceTarget, DetailViewId) {
@@ -141,6 +154,24 @@ impl ProviderWorkspaceState {
 
     pub fn version(&self) -> Option<&ProviderVersion> {
         self.provider.version()
+    }
+
+    /// Checks the private, authoritative Detail load identity without exposing
+    /// a second pending-request state to the host.
+    pub(crate) fn is_loading_detail(
+        &self,
+        request_id: ProviderRequestId,
+        provider_id: &ProviderId,
+        target: &ResourceTarget,
+        view_id: &DetailViewId,
+    ) -> bool {
+        self.details.as_ref().is_some_and(|details| {
+            matches!(
+                &details.content,
+                DetailContent::Loading(load)
+                    if load.matches_request(request_id, provider_id, target, view_id)
+            )
+        })
     }
 
     pub fn focused_resource_panel(&self) -> Option<&ResourcePanelId> {
