@@ -424,9 +424,7 @@ impl ProviderWorkspaceState {
                     ResourcePanelNavigation {
                         panel_id: panel.id.clone(),
                         selected_resource,
-                        scroll: remembered
-                            .map_or(0, |navigation| navigation.scroll)
-                            .min(selected_index),
+                        scroll: selected_index,
                     }
                 })
                 .collect();

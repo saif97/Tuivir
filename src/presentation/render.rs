@@ -5,7 +5,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph},
 };
 
 use crate::application::{AppState, FocusedPane};
@@ -304,11 +304,15 @@ fn render_resource_panel(
     area: Rect,
 ) {
     let panel = view.panel;
+    let viewport_height = area.height.saturating_sub(2) as usize;
+    let visible = visible_resource_range(view.scroll, viewport_height, panel.resources.len());
     // A row names its Resource and, where the Resource has one, says what it is
     // doing. Everything else a Provider reported is in the Details pane, so a
     // row never has to compete for width with it.
     let mut items = panel
         .resources
+        .get(visible)
+        .unwrap_or_default()
         .iter()
         .map(|resource| {
             let marker = if view.selected_resource == Some(&resource.id) {
@@ -316,11 +320,15 @@ fn render_resource_panel(
             } else {
                 " "
             };
-            let mut spans = vec![Span::raw(format!("{marker} {}", resource.name))];
+            let mut spans = vec![
+                Span::raw(marker),
+                Span::raw(" "),
+                Span::raw(resource.name.as_str()),
+            ];
             if let Some(status) = &resource.status {
                 spans.push(Span::raw("  "));
                 spans.push(Span::styled(
-                    status.clone(),
+                    status.as_str(),
                     resource
                         .state
                         .map_or_else(Style::default, resource_state_style),
@@ -336,23 +344,30 @@ fn render_resource_panel(
             panel.title.to_lowercase()
         )));
     }
-    let selected = view.selected_resource.and_then(|selected| {
-        panel
-            .resources
-            .iter()
-            .position(|resource| &resource.id == selected)
-    });
-    // Ratatui owns the viewport height and keeps earlier rows visible until the
-    // cursor leaves it; Workspace state supplies the remembered selection.
-    let mut state = ListState::default().with_selected(selected);
-    frame.render_stateful_widget(
+    frame.render_widget(
         List::new(items).block(pane_block(
             pane_title(resources_hint, &panel.title, focused),
             focused,
         )),
         area,
-        &mut state,
     );
+}
+
+fn visible_resource_range(
+    selected_index: usize,
+    viewport_height: usize,
+    resource_count: usize,
+) -> std::ops::Range<usize> {
+    let visible_count = viewport_height.min(resource_count);
+    if visible_count == 0 {
+        return 0..0;
+    }
+    let selected_index = selected_index.min(resource_count - 1);
+    let start = selected_index
+        .saturating_add(1)
+        .saturating_sub(visible_count)
+        .min(resource_count - visible_count);
+    start..start + visible_count
 }
 
 /// Colours a Resource's status by its Resource State, so a paused or broken
@@ -568,6 +583,13 @@ fn render_to_buffer<T>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resource_viewport_contains_only_rows_ending_at_the_selection() {
+        assert_eq!(visible_resource_range(8, 3, 12), 6..9);
+        assert_eq!(visible_resource_range(1, 3, 12), 0..3);
+        assert_eq!(visible_resource_range(11, 3, 12), 9..12);
+    }
 
     #[test]
     fn focused_panel_titles_are_visually_distinct() {
