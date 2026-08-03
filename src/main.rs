@@ -73,18 +73,13 @@ impl DetailDispatchQueue {
         }
     }
 
-    fn accept(&mut self, now: Instant, requests: Vec<ProviderRequest>) -> Vec<ProviderRequest> {
-        requests
-            .into_iter()
-            .filter_map(|request| {
-                if matches!(request, ProviderRequest::LoadResourceDetails { .. }) {
-                    self.pending = Some((now + self.quiet_period, request));
-                    None
-                } else {
-                    Some(request)
-                }
-            })
-            .collect()
+    fn accept(&mut self, now: Instant, request: ProviderRequest) -> Option<ProviderRequest> {
+        if matches!(request, ProviderRequest::LoadResourceDetails { .. }) {
+            self.pending = Some((now + self.quiet_period, request));
+            None
+        } else {
+            Some(request)
+        }
     }
 
     fn deadline(&self) -> Option<Instant> {
@@ -353,8 +348,11 @@ fn dispatch_all(
     detail_dispatch: &mut DetailDispatchQueue,
     requests: Vec<ProviderRequest>,
 ) {
-    for request in detail_dispatch.accept(Instant::now(), requests) {
-        runtime.dispatch(request, completion_tx.clone());
+    let now = Instant::now();
+    for request in requests {
+        if let Some(request) = detail_dispatch.accept(now, request) {
+            runtime.dispatch(request, completion_tx.clone());
+        }
     }
 }
 

@@ -137,20 +137,21 @@ fn a_navigation_burst_dispatches_only_the_detail_view_where_selection_settles() 
     };
 
     assert_eq!(
-        dispatch.accept(
-            started,
-            vec![detail_request("container-a"), refresh.clone()]
-        ),
-        vec![refresh],
+        dispatch.accept(started, detail_request("container-a")),
+        None
+    );
+    assert_eq!(
+        dispatch.accept(started, refresh.clone()),
+        Some(refresh),
         "refresh work remains immediate"
     );
     assert!(
         dispatch
             .accept(
                 started + Duration::from_millis(20),
-                vec![detail_request("container-b")],
+                detail_request("container-b"),
             )
-            .is_empty()
+            .is_none()
     );
     assert!(
         dispatch
