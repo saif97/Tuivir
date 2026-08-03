@@ -18,6 +18,9 @@ const PROVIDER_NAME: &str = "Incus";
 /// What a user can run to check the Target Environment a refresh could not read.
 const REFRESH_HELP: &str = "Run `incus list` to verify access to the current Target Environment.";
 const INSTANCES_PANEL_ID: &str = "instances";
+const INFO_VIEW_ID: &str = "info";
+const CONFIG_VIEW_ID: &str = "config";
+const CONSOLE_LOG_VIEW_ID: &str = "console-log";
 
 pub struct IncusWorkspace;
 
@@ -214,9 +217,9 @@ fn instance_detail_command<'a>(
     resource_id: &'a str,
 ) -> Option<Vec<&'a str>> {
     match view_id.0.as_str() {
-        "info" => Some(vec!["info", resource_id]),
-        "config" => Some(vec!["config", "show", resource_id]),
-        "console-log" => Some(vec!["console", "--show-log", resource_id]),
+        INFO_VIEW_ID => Some(vec!["info", resource_id]),
+        CONFIG_VIEW_ID => Some(vec!["config", "show", resource_id]),
+        CONSOLE_LOG_VIEW_ID => Some(vec!["console", "--show-log", resource_id]),
         _ => None,
     }
 }
@@ -225,9 +228,9 @@ fn instance_detail_command<'a>(
 /// through them.
 fn instance_detail_views() -> Vec<DetailView> {
     vec![
-        DetailView::new("info", "Info"),
-        DetailView::new("config", "Config"),
-        DetailView::new("console-log", "Console Log"),
+        DetailView::new(INFO_VIEW_ID, "Info"),
+        DetailView::new(CONFIG_VIEW_ID, "Config"),
+        DetailView::new(CONSOLE_LOG_VIEW_ID, "Console Log"),
     ]
 }
 

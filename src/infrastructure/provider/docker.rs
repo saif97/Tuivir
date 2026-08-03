@@ -21,6 +21,9 @@ const IMAGE_REFRESH_HELP: &str =
     "Run `docker image ls` to verify access to the current Target Environment.";
 const CONTAINERS_PANEL_ID: &str = "containers";
 const IMAGES_PANEL_ID: &str = "images";
+const LOGS_VIEW_ID: &str = "logs";
+const STATS_VIEW_ID: &str = "stats";
+const INSPECT_VIEW_ID: &str = "inspect";
 
 pub struct DockerWorkspace;
 
@@ -202,7 +205,7 @@ impl ProviderWorkspace for DockerWorkspace {
                     ResourcePanel {
                         id: ResourcePanelId::new(IMAGES_PANEL_ID),
                         title: "Images".to_owned(),
-                        detail_views: vec![DetailView::new("inspect", "Inspect")],
+                        detail_views: vec![DetailView::new(INSPECT_VIEW_ID, "Inspect")],
                         resources: image_resources,
                     },
                 ],
@@ -267,7 +270,7 @@ impl ProviderWorkspace for DockerWorkspace {
                     "container",
                     container_detail_command(view_id, resource_id.0.as_str()),
                 ),
-                IMAGES_PANEL_ID if view_id.0 == "inspect" => (
+                IMAGES_PANEL_ID if view_id.0 == INSPECT_VIEW_ID => (
                     "image",
                     Some(vec!["image", "inspect", resource_id.0.as_str()]),
                 ),
@@ -308,9 +311,9 @@ fn container_detail_command<'a>(
     resource_id: &'a str,
 ) -> Option<Vec<&'a str>> {
     match view_id.0.as_str() {
-        "logs" => Some(vec!["container", "logs", "--tail", "200", resource_id]),
-        "stats" => Some(vec!["container", "stats", "--no-stream", resource_id]),
-        "inspect" => Some(vec!["container", "inspect", resource_id]),
+        LOGS_VIEW_ID => Some(vec!["container", "logs", "--tail", "200", resource_id]),
+        STATS_VIEW_ID => Some(vec!["container", "stats", "--no-stream", resource_id]),
+        INSPECT_VIEW_ID => Some(vec!["container", "inspect", resource_id]),
         _ => None,
     }
 }
@@ -319,9 +322,9 @@ fn container_detail_command<'a>(
 /// moves through them.
 fn container_detail_views() -> Vec<DetailView> {
     vec![
-        DetailView::new("logs", "Logs"),
-        DetailView::new("stats", "Stats"),
-        DetailView::new("inspect", "Inspect"),
+        DetailView::new(LOGS_VIEW_ID, "Logs"),
+        DetailView::new(STATS_VIEW_ID, "Stats"),
+        DetailView::new(INSPECT_VIEW_ID, "Inspect"),
     ]
 }
 
