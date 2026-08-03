@@ -21,11 +21,12 @@ use virtui::{
     infrastructure::provider::ProviderDiscovery,
 };
 
-/// A [`CliRunner`] that answers a fixed script of commands in order.
+/// A [`CliRunner`] that answers a fixed script of commands.
 ///
-/// It asserts each command matches what the test said would come next, and
-/// panics on any command the script did not expect. That is what lets a test
-/// prove a Provider ran *only* the work it should have.
+/// Different commands may arrive concurrently, while repeated identical
+/// commands still consume their responses in declaration order. It panics on
+/// any command the script did not expect, which lets a test prove a Provider
+/// ran *only* the work it should have.
 pub struct FixtureCli {
     responses: Mutex<VecDeque<(ProcessSpec, Result<ProcessOutput, ProcessError>)>>,
 }
@@ -52,8 +53,12 @@ impl CliRunner for FixtureCli {
         command: ProcessSpec,
     ) -> Pin<Box<dyn Future<Output = Result<ProcessOutput, ProcessError>> + Send + 'a>> {
         Box::pin(async move {
-            let (expected, response) = self.queue().pop_front().expect("unexpected CLI command");
-            assert_eq!(command, expected);
+            let mut queue = self.queue();
+            let position = queue
+                .iter()
+                .position(|(expected, _)| expected == &command)
+                .unwrap_or_else(|| panic!("unexpected CLI command: {command:?}"));
+            let (_, response) = queue.remove(position).expect("matched CLI response");
             response
         })
     }

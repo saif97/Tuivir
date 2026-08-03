@@ -41,10 +41,11 @@ impl ProviderWorkspace for IncusWorkspace {
         cli: &'a dyn CliRunner,
     ) -> Pin<Box<dyn Future<Output = Option<ProviderDiscovery>> + Send + 'a>> {
         Box::pin(async move {
-            let remote = match cli
-                .run(ProcessSpec::new("incus", &["remote", "get-default"]))
-                .await
-            {
+            let (remote, project) = tokio::join!(
+                cli.run(ProcessSpec::new("incus", &["remote", "get-default"])),
+                cli.run(ProcessSpec::new("incus", &["project", "get-current"])),
+            );
+            let remote = match remote {
                 Err(ProcessError::ExecutableNotFound) => return None,
                 Err(ProcessError::SpawnFailed(message)) => {
                     return Some(discovery_error(
@@ -60,10 +61,7 @@ impl ProviderWorkspace for IncusWorkspace {
                 }
                 Ok(output) => output.stdout.trim().to_owned(),
             };
-            let project = match cli
-                .run(ProcessSpec::new("incus", &["project", "get-current"]))
-                .await
-            {
+            let project = match project {
                 Err(ProcessError::ExecutableNotFound) => {
                     return Some(discovery_error(
                         format!("{PROVIDER_NAME} CLI is no longer available"),

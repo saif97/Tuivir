@@ -1,11 +1,13 @@
-use std::sync::Arc;
+use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
+
+use tokio::sync::Barrier;
 
 use virtui::{
     application::{App, InteractiveShellProcess, ResourceCommand},
     domain::{
         DetailViewId, ResourceId, ResourcePanelId, ResourceState, ResourceTarget, TargetEnvironment,
     },
-    infrastructure::process::{ProcessError, ProcessOutput, ProcessSpec},
+    infrastructure::process::{CliRunner, ProcessError, ProcessOutput, ProcessSpec},
     infrastructure::provider::{IncusWorkspace, ProviderWorkspace},
     infrastructure::runtime::ProviderRuntime,
     presentation::render_to_text,
@@ -13,6 +15,54 @@ use virtui::{
 
 mod common;
 use common::{FixtureCli, failure, failure_on_stdout, refresh_completed, success};
+
+struct ConcurrentProbeCli {
+    probes: Arc<Barrier>,
+}
+
+impl CliRunner for ConcurrentProbeCli {
+    fn run<'a>(
+        &'a self,
+        command: ProcessSpec,
+    ) -> Pin<Box<dyn Future<Output = Result<ProcessOutput, ProcessError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.probes.wait().await;
+            let stdout = if command == ProcessSpec::new("incus", &["remote", "get-default"]) {
+                "local\n"
+            } else if command == ProcessSpec::new("incus", &["project", "get-current"]) {
+                "default\n"
+            } else {
+                panic!("unexpected Incus discovery command: {command:?}");
+            };
+            Ok(ProcessOutput {
+                stdout: stdout.to_owned(),
+                stderr: String::new(),
+            })
+        })
+    }
+}
+
+#[tokio::test]
+async fn incus_remote_and_project_probes_run_together() {
+    let probes = Arc::new(Barrier::new(3));
+    let cli = Arc::new(ConcurrentProbeCli {
+        probes: Arc::clone(&probes),
+    });
+    let discovery = tokio::spawn(async move { IncusWorkspace.discover(cli.as_ref()).await });
+
+    tokio::time::timeout(Duration::from_secs(1), probes.wait())
+        .await
+        .expect("both independent Incus probes start together");
+    let discovered = discovery
+        .await
+        .expect("discovery task")
+        .expect("Incus is installed");
+
+    assert_eq!(
+        discovered.provider().target_environment(),
+        Some(&TargetEnvironment::new("local / default")),
+    );
+}
 
 fn target(panel_id: &str, resource_id: &str) -> ResourceTarget {
     ResourceTarget::new(ResourcePanelId::new(panel_id), ResourceId::new(resource_id))
@@ -520,20 +570,32 @@ async fn reachable_incus_without_instances_renders_a_distinct_empty_state() {
 
 #[tokio::test]
 async fn incus_is_omitted_when_its_cli_is_absent() {
-    let cli = FixtureCli::new([(
-        ProcessSpec::new("incus", &["remote", "get-default"]),
-        Err(ProcessError::ExecutableNotFound),
-    )]);
+    let cli = FixtureCli::new([
+        (
+            ProcessSpec::new("incus", &["remote", "get-default"]),
+            Err(ProcessError::ExecutableNotFound),
+        ),
+        (
+            ProcessSpec::new("incus", &["project", "get-current"]),
+            Err(ProcessError::ExecutableNotFound),
+        ),
+    ]);
 
     assert!(IncusWorkspace.discover(&cli).await.is_none());
 }
 
 #[tokio::test]
 async fn installed_but_unreachable_incus_stays_visible_with_provider_specific_error() {
-    let cli = FixtureCli::new([(
-        ProcessSpec::new("incus", &["remote", "get-default"]),
-        failure("Error: Incus configuration is not accessible"),
-    )]);
+    let cli = FixtureCli::new([
+        (
+            ProcessSpec::new("incus", &["remote", "get-default"]),
+            failure("Error: Incus configuration is not accessible"),
+        ),
+        (
+            ProcessSpec::new("incus", &["project", "get-current"]),
+            success("default\n"),
+        ),
+    ]);
     let incus = IncusWorkspace;
 
     let discovered = incus.discover(&cli).await.expect("Incus is installed");
@@ -703,10 +765,16 @@ async fn an_incus_cli_that_cannot_be_started_names_incus_in_the_error() {
 
 #[tokio::test]
 async fn a_silent_discovery_failure_names_the_probe_that_failed() {
-    let cli = FixtureCli::new([(
-        ProcessSpec::new("incus", &["remote", "get-default"]),
-        silent_failure(),
-    )]);
+    let cli = FixtureCli::new([
+        (
+            ProcessSpec::new("incus", &["remote", "get-default"]),
+            silent_failure(),
+        ),
+        (
+            ProcessSpec::new("incus", &["project", "get-current"]),
+            success("default\n"),
+        ),
+    ]);
 
     let discovered = IncusWorkspace
         .discover(&cli)

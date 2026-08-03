@@ -481,6 +481,10 @@ async fn runtime_with_builtin_providers_discovers_installed_docker_sandbox() {
             Err(ProcessError::ExecutableNotFound),
         ),
         (
+            ProcessSpec::new("incus", &["project", "get-current"]),
+            Err(ProcessError::ExecutableNotFound),
+        ),
+        (
             ProcessSpec::new("sbx", &["version"]),
             success("sbx version: v0.37.0 8b65b864b0d49c29f05a55170d6b5eea4c0d11e7\n"),
         ),

@@ -2,11 +2,12 @@ use std::{
     future::Future,
     pin::Pin,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::Color;
-use tokio::sync::{Notify, mpsc};
+use tokio::sync::{Barrier, Notify, mpsc};
 use virtui::{
     application::{
         App, AppEvent, AppState, Command, CommandRegistry, CommandScope, DetailView, FocusedPane,
@@ -131,6 +132,43 @@ struct MissingCli;
 
 struct ExpectedCli {
     commands: Arc<Mutex<Vec<ProcessSpec>>>,
+}
+
+struct ConcurrentDiscoveryCli {
+    first_probes: Arc<Barrier>,
+}
+
+impl CliRunner for ConcurrentDiscoveryCli {
+    fn run<'a>(
+        &'a self,
+        command: ProcessSpec,
+    ) -> Pin<Box<dyn Future<Output = Result<ProcessOutput, ProcessError>> + Send + 'a>> {
+        Box::pin(async move {
+            if command == ProcessSpec::new("docker", &["context", "show"])
+                || command == ProcessSpec::new("incus", &["remote", "get-default"])
+                || command == ProcessSpec::new("sbx", &["version"])
+            {
+                self.first_probes.wait().await;
+            }
+            let stdout = if command == ProcessSpec::new("docker", &["context", "show"]) {
+                "desktop-linux\n"
+            } else if command == ProcessSpec::new("incus", &["remote", "get-default"])
+                || command == ProcessSpec::new("incus", &["project", "get-current"])
+            {
+                "local\n"
+            } else if command == ProcessSpec::new("sbx", &["version"]) {
+                "sbx version: v0.37.0 build\n"
+            } else if command == ProcessSpec::new("sbx", &["ls", "--json"]) {
+                "[]"
+            } else {
+                panic!("unexpected discovery command: {command:?}");
+            };
+            Ok(ProcessOutput {
+                stdout: stdout.to_owned(),
+                stderr: String::new(),
+            })
+        })
+    }
 }
 
 impl CliRunner for ExpectedCli {
@@ -388,6 +426,28 @@ async fn provider_is_omitted_when_docker_cli_is_absent() {
     let screen = render_to_text(app.state(), 100, 24);
     assert!(screen.contains("No providers discovered"));
     assert!(!screen.contains("Docker"));
+}
+
+#[tokio::test]
+async fn provider_discoveries_run_together_and_keep_registration_order() {
+    let first_probes = Arc::new(Barrier::new(4));
+    let runtime = ProviderRuntime::with_builtin_providers(Arc::new(ConcurrentDiscoveryCli {
+        first_probes: Arc::clone(&first_probes),
+    }));
+
+    let discovery = tokio::spawn(async move { runtime.discover().await });
+    tokio::time::timeout(Duration::from_secs(1), first_probes.wait())
+        .await
+        .expect("all Provider discoveries start before any one finishes");
+    let discovered = discovery.await.expect("discovery task");
+
+    assert_eq!(
+        discovered
+            .iter()
+            .map(|discovery| discovery.provider().id().0.as_str())
+            .collect::<Vec<_>>(),
+        ["docker", "incus", "docker-sandbox"],
+    );
 }
 
 #[test]
