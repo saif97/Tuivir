@@ -30,7 +30,7 @@ struct ResourcePanelNavigation {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DetailContent {
-    Loading,
+    Loading(DetailLoad),
     Ready(ResourceDetails),
     Error(WorkspaceError),
 }
@@ -108,7 +108,6 @@ pub struct ProviderWorkspaceState {
     panel_navigation: Vec<ResourcePanelNavigation>,
     selected_detail_view: Option<DetailViewId>,
     details: Option<ResourceDetailsState>,
-    pending_detail: Option<DetailLoad>,
 }
 
 impl ProviderWorkspaceState {
@@ -121,7 +120,6 @@ impl ProviderWorkspaceState {
             panel_navigation: Vec::new(),
             selected_detail_view: None,
             details: None,
-            pending_detail: None,
         }
     }
 
@@ -182,16 +180,14 @@ impl ProviderWorkspaceState {
         self.panel_navigation.clear();
         self.selected_detail_view = None;
         self.details = None;
-        self.pending_detail = None;
     }
 
     /// Refuses the pending detail result after its Provider Workspace is left.
     pub fn invalidate_pending_detail(&mut self) {
-        self.pending_detail = None;
         if self
             .details
             .as_ref()
-            .is_some_and(|details| details.content == DetailContent::Loading)
+            .is_some_and(|details| matches!(details.content, DetailContent::Loading(_)))
         {
             self.details = None;
         }
@@ -325,18 +321,11 @@ impl ProviderWorkspaceState {
             resource: target,
             view_id: view.id.clone(),
         };
-        let pending_for_target = self
-            .pending_detail
-            .as_ref()
-            .is_some_and(|pending| pending.target == detail_target);
-        if !pending_for_target {
-            self.pending_detail = None;
-        }
         let describes_target = self
             .details
             .as_ref()
             .is_some_and(|details| details.target == detail_target);
-        if pending_for_target || describes_target {
+        if describes_target {
             return None;
         }
 
@@ -349,23 +338,21 @@ impl ProviderWorkspaceState {
             target: detail_target,
             resource_name,
             title: view.title,
-            content: DetailContent::Loading,
+            content: DetailContent::Loading(load.clone()),
             scroll: 0,
         });
-        self.pending_detail = Some(load.clone());
         Some(load)
     }
 
     /// Accepts a detail completion only while its full request identity still
     /// describes the visible load.
     pub fn complete_detail_load(&mut self, completion: DetailCompletion) {
-        if self.pending_detail.as_ref() != Some(&completion.load) {
-            return;
-        }
-        self.pending_detail = None;
         let Some(details) = self.details.as_mut() else {
             return;
         };
+        if !matches!(&details.content, DetailContent::Loading(load) if load == &completion.load) {
+            return;
+        }
         details.content = match completion.result {
             Ok(loaded) => DetailContent::Ready(loaded),
             Err(error) => DetailContent::Error(error),
@@ -379,7 +366,7 @@ impl ProviderWorkspaceState {
         };
         let last_line = match &details.content {
             DetailContent::Ready(loaded) => loaded.lines.len().saturating_sub(1),
-            DetailContent::Loading | DetailContent::Error(_) => 0,
+            DetailContent::Loading(_) | DetailContent::Error(_) => 0,
         };
         details.scroll = (details.scroll as usize)
             .saturating_add_signed(delta)

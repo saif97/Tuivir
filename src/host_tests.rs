@@ -9,9 +9,10 @@
 use std::{
     io,
     sync::{Arc, Mutex},
+    time::{Duration, Instant},
 };
 
-use super::{ShellTerminal, handle_key, open_pending_shell};
+use super::{DetailDispatchQueue, ShellTerminal, handle_key, open_pending_shell};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use virtui::{
     application::{
@@ -111,6 +112,55 @@ fn docker_discovery() -> ProviderDiscovery {
         ),
         None,
     )
+}
+
+fn detail_request(resource_id: &str) -> ProviderRequest {
+    ProviderRequest::LoadResourceDetails {
+        request_id: virtui::application::ProviderRequestId::new(1),
+        provider_id: ProviderId::new("docker"),
+        target: virtui::domain::ResourceTarget::new(
+            ResourcePanelId::new("containers"),
+            ResourceId::new(resource_id),
+        ),
+        view_id: virtui::domain::DetailViewId::new("logs"),
+    }
+}
+
+#[test]
+fn a_navigation_burst_dispatches_only_the_detail_view_where_selection_settles() {
+    let quiet_period = Duration::from_millis(75);
+    let started = Instant::now();
+    let mut dispatch = DetailDispatchQueue::new(quiet_period);
+    let refresh = ProviderRequest::RefreshWorkspace {
+        request_id: virtui::application::ProviderRequestId::new(2),
+        provider_id: ProviderId::new("docker"),
+    };
+
+    assert_eq!(
+        dispatch.accept(
+            started,
+            vec![detail_request("container-a"), refresh.clone()]
+        ),
+        vec![refresh],
+        "refresh work remains immediate"
+    );
+    assert!(
+        dispatch
+            .accept(
+                started + Duration::from_millis(20),
+                vec![detail_request("container-b")],
+            )
+            .is_empty()
+    );
+    assert!(
+        dispatch
+            .take_ready(started + Duration::from_millis(94))
+            .is_none()
+    );
+    assert_eq!(
+        dispatch.take_ready(started + Duration::from_millis(95)),
+        Some(detail_request("container-b")),
+    );
 }
 
 /// One running container, carrying the Interactive Shell Docker offers inside
