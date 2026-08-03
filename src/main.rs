@@ -229,10 +229,10 @@ async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::R
                 dispatch_all(&runtime, &completion_tx, &mut detail_dispatch, requests);
             }
             _ = wait_for_detail_dispatch(detail_deadline) => {
-                if let Some(request) = detail_dispatch.take_ready(Instant::now()) {
-                    if app.detail_request_is_current(&request) {
-                        runtime.dispatch(request, completion_tx.clone());
-                    }
+                if let Some(request) = detail_dispatch.take_ready(Instant::now())
+                    && app.detail_request_is_current(&request)
+                {
+                    runtime.dispatch(request, completion_tx.clone());
                 }
             }
         }
