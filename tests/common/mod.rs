@@ -18,8 +18,13 @@ use virtui::{
     application::{
         App, AppEvent, ProviderRequest, ResourceDetails, WorkspaceError, WorkspaceSnapshot,
     },
+    domain::{ResourceId, ResourcePanelId, ResourceTarget},
     infrastructure::provider::ProviderDiscovery,
 };
+
+pub fn resource_target(panel_id: &str, resource_id: &str) -> ResourceTarget {
+    ResourceTarget::new(ResourcePanelId::new(panel_id), ResourceId::new(resource_id))
+}
 
 /// A [`CliRunner`] that answers a fixed script of commands.
 ///

@@ -4,9 +4,7 @@ use tokio::sync::Barrier;
 
 use virtui::{
     application::{App, InteractiveShellProcess, ResourceCommand},
-    domain::{
-        DetailViewId, ResourceId, ResourcePanelId, ResourceState, ResourceTarget, TargetEnvironment,
-    },
+    domain::{DetailViewId, ResourceState, TargetEnvironment},
     infrastructure::process::{CliRunner, ProcessError, ProcessOutput, ProcessSpec},
     infrastructure::provider::{IncusWorkspace, ProviderWorkspace},
     infrastructure::runtime::ProviderRuntime,
@@ -14,7 +12,10 @@ use virtui::{
 };
 
 mod common;
-use common::{FixtureCli, failure, failure_on_stdout, refresh_completed, success};
+use common::{
+    FixtureCli, failure, failure_on_stdout, refresh_completed, resource_target, silent_failure,
+    success,
+};
 
 struct ConcurrentProbeCli {
     probes: Arc<Barrier>,
@@ -64,14 +65,6 @@ async fn incus_remote_and_project_probes_run_together() {
     );
 }
 
-fn target(panel_id: &str, resource_id: &str) -> ResourceTarget {
-    ResourceTarget::new(ResourcePanelId::new(panel_id), ResourceId::new(resource_id))
-}
-
-fn silent_failure() -> Result<ProcessOutput, ProcessError> {
-    common::silent_failure(1)
-}
-
 #[tokio::test]
 async fn incus_start_generates_the_expected_cli_request() {
     let cli = FixtureCli::new([(
@@ -82,7 +75,7 @@ async fn incus_start_generates_the_expected_cli_request() {
     IncusWorkspace
         .execute_command(
             &cli,
-            &target("instances", "instance-a"),
+            &resource_target("instances", "instance-a"),
             ResourceCommand::Start,
             ResourceState::Stopped,
         )
@@ -100,7 +93,7 @@ async fn incus_stop_generates_the_expected_cli_request() {
     IncusWorkspace
         .execute_command(
             &cli,
-            &target("instances", "instance-a"),
+            &resource_target("instances", "instance-a"),
             ResourceCommand::Stop,
             ResourceState::Running,
         )
@@ -118,7 +111,7 @@ async fn incus_restart_generates_the_expected_cli_request() {
     IncusWorkspace
         .execute_command(
             &cli,
-            &target("instances", "instance-a"),
+            &resource_target("instances", "instance-a"),
             ResourceCommand::Restart,
             ResourceState::Running,
         )
@@ -136,7 +129,7 @@ async fn incus_resume_generates_the_expected_cli_request() {
     IncusWorkspace
         .execute_command(
             &cli,
-            &target("instances", "instance-a"),
+            &resource_target("instances", "instance-a"),
             ResourceCommand::Resume,
             ResourceState::Paused,
         )
@@ -154,7 +147,7 @@ async fn deleting_a_stopped_instance_generates_the_expected_cli_request() {
     IncusWorkspace
         .execute_command(
             &cli,
-            &target("instances", "instance-a"),
+            &resource_target("instances", "instance-a"),
             ResourceCommand::Delete,
             ResourceState::Stopped,
         )
@@ -180,7 +173,7 @@ async fn deleting_an_instance_that_is_not_stopped_forces_removal() {
         IncusWorkspace
             .execute_command(
                 &cli,
-                &target("instances", "instance-a"),
+                &resource_target("instances", "instance-a"),
                 ResourceCommand::Delete,
                 state,
             )
@@ -239,7 +232,7 @@ async fn each_detail_view_runs_its_own_incus_command() {
         let details = IncusWorkspace
             .load_details(
                 &cli,
-                &target("instances", "gateway"),
+                &resource_target("instances", "gateway"),
                 &DetailViewId::new(view),
             )
             .await
@@ -259,7 +252,7 @@ async fn an_instance_with_no_console_log_loads_empty_details() {
     let details = IncusWorkspace
         .load_details(
             &cli,
-            &target("instances", "gateway"),
+            &resource_target("instances", "gateway"),
             &DetailViewId::new("console-log"),
         )
         .await
@@ -278,7 +271,7 @@ async fn a_failed_detail_view_reports_what_incus_wrote_to_stderr() {
     let error = IncusWorkspace
         .load_details(
             &cli,
-            &target("instances", "gateway"),
+            &resource_target("instances", "gateway"),
             &DetailViewId::new("info"),
         )
         .await
@@ -299,7 +292,7 @@ async fn info_output_reaches_the_panel_line_for_line() {
     let details = IncusWorkspace
         .load_details(
             &cli,
-            &target("instances", "gateway"),
+            &resource_target("instances", "gateway"),
             &DetailViewId::new("info"),
         )
         .await
@@ -330,7 +323,7 @@ async fn a_detail_view_incus_never_declared_is_refused_without_running_anything(
     let error = IncusWorkspace
         .load_details(
             &cli,
-            &target("instances", "gateway"),
+            &resource_target("instances", "gateway"),
             &DetailViewId::new("stats"),
         )
         .await
@@ -346,13 +339,13 @@ async fn a_detail_view_incus_never_declared_is_refused_without_running_anything(
 async fn a_silent_detail_failure_names_the_view_and_instance() {
     let cli = FixtureCli::new([(
         ProcessSpec::new("incus", &["config", "show", "gateway"]),
-        silent_failure(),
+        silent_failure(1),
     )]);
 
     let error = IncusWorkspace
         .load_details(
             &cli,
-            &target("instances", "gateway"),
+            &resource_target("instances", "gateway"),
             &DetailViewId::new("config"),
         )
         .await
@@ -487,7 +480,7 @@ async fn deleting_a_running_instance_forces_removal_without_a_second_query() {
     IncusWorkspace
         .execute_command(
             &cli,
-            &target("instances", "instance-a"),
+            &resource_target("instances", "instance-a"),
             ResourceCommand::Delete,
             ResourceState::Running,
         )
@@ -661,7 +654,7 @@ async fn failed_instance_refresh_identifies_incus_command_and_target() {
 async fn a_silent_instance_refresh_failure_still_explains_itself() {
     let cli = FixtureCli::new([(
         ProcessSpec::new("incus", &["list", "--format=json"]),
-        silent_failure(),
+        silent_failure(1),
     )]);
 
     let error = IncusWorkspace
@@ -699,13 +692,13 @@ async fn a_failed_instance_refresh_reports_what_incus_printed_on_stdout() {
 async fn a_silent_command_failure_names_the_operation_and_instance() {
     let cli = FixtureCli::new([(
         ProcessSpec::new("incus", &["restart", "instance-a"]),
-        silent_failure(),
+        silent_failure(1),
     )]);
 
     let error = IncusWorkspace
         .execute_command(
             &cli,
-            &target("instances", "instance-a"),
+            &resource_target("instances", "instance-a"),
             ResourceCommand::Restart,
             ResourceState::Running,
         )
@@ -725,7 +718,7 @@ async fn a_failed_command_reports_what_incus_wrote_to_stderr() {
     let error = IncusWorkspace
         .execute_command(
             &cli,
-            &target("instances", "instance-a"),
+            &resource_target("instances", "instance-a"),
             ResourceCommand::Delete,
             ResourceState::Stopped,
         )
@@ -750,7 +743,7 @@ async fn an_incus_cli_that_cannot_be_started_names_incus_in_the_error() {
     let error = IncusWorkspace
         .execute_command(
             &cli,
-            &target("instances", "instance-a"),
+            &resource_target("instances", "instance-a"),
             ResourceCommand::Stop,
             ResourceState::Running,
         )
@@ -768,7 +761,7 @@ async fn a_silent_discovery_failure_names_the_probe_that_failed() {
     let cli = FixtureCli::new([
         (
             ProcessSpec::new("incus", &["remote", "get-default"]),
-            silent_failure(),
+            silent_failure(1),
         ),
         (
             ProcessSpec::new("incus", &["project", "get-current"]),
