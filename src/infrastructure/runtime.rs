@@ -105,12 +105,7 @@ impl ProviderRuntime {
                 request_id,
                 provider_id,
             } => {
-                let Some(workspace) = self
-                    .workspaces
-                    .iter()
-                    .find(|(id, _)| id == &provider_id)
-                    .map(|(_, workspace)| Arc::clone(workspace))
-                else {
+                let Some(workspace) = self.workspace(&provider_id) else {
                     return;
                 };
                 let cli = Arc::clone(&self.cli);
@@ -130,12 +125,7 @@ impl ProviderRuntime {
                 command,
                 state,
             } => {
-                let Some(workspace) = self
-                    .workspaces
-                    .iter()
-                    .find(|(id, _)| id == &provider_id)
-                    .map(|(_, workspace)| Arc::clone(workspace))
-                else {
+                let Some(workspace) = self.workspace(&provider_id) else {
                     return;
                 };
                 let cli = Arc::clone(&self.cli);
