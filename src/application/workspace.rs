@@ -30,18 +30,45 @@ struct ResourcePanelNavigation {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DetailContent {
-    Loading(DetailLoad),
+    Loading,
     Ready(ResourceDetails),
     Error(WorkspaceError),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ResourceDetailsState {
+    request_id: Option<ProviderRequestId>,
+    provider_id: ProviderId,
     target: DetailTarget,
     resource_name: String,
     title: String,
     content: DetailContent,
     scroll: u16,
+}
+
+impl ResourceDetailsState {
+    fn is_loading_request(
+        &self,
+        request_id: ProviderRequestId,
+        provider_id: &ProviderId,
+        target: &ResourceTarget,
+        view_id: &DetailViewId,
+    ) -> bool {
+        self.content == DetailContent::Loading
+            && self.request_id == Some(request_id)
+            && &self.provider_id == provider_id
+            && &self.target.resource == target
+            && &self.target.view_id == view_id
+    }
+
+    fn is_loading(&self, load: &DetailLoad) -> bool {
+        self.is_loading_request(
+            load.request_id,
+            &load.provider_id,
+            &load.target.resource,
+            &load.target.view_id,
+        )
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -58,19 +85,6 @@ pub struct DetailLoad {
 }
 
 impl DetailLoad {
-    fn matches_request(
-        &self,
-        request_id: ProviderRequestId,
-        provider_id: &ProviderId,
-        target: &ResourceTarget,
-        view_id: &DetailViewId,
-    ) -> bool {
-        self.request_id == request_id
-            && &self.provider_id == provider_id
-            && &self.target.resource == target
-            && &self.target.view_id == view_id
-    }
-
     pub fn into_request_parts(
         self,
     ) -> (ProviderRequestId, ProviderId, ResourceTarget, DetailViewId) {
@@ -166,11 +180,7 @@ impl ProviderWorkspaceState {
         view_id: &DetailViewId,
     ) -> bool {
         self.details.as_ref().is_some_and(|details| {
-            matches!(
-                &details.content,
-                DetailContent::Loading(load)
-                    if load.matches_request(request_id, provider_id, target, view_id)
-            )
+            details.is_loading_request(request_id, provider_id, target, view_id)
         })
     }
 
@@ -218,7 +228,7 @@ impl ProviderWorkspaceState {
         if self
             .details
             .as_ref()
-            .is_some_and(|details| matches!(details.content, DetailContent::Loading(_)))
+            .is_some_and(|details| details.content == DetailContent::Loading)
         {
             self.details = None;
         }
@@ -364,6 +374,8 @@ impl ProviderWorkspaceState {
         };
         if let Some(content) = snapshot_content {
             self.details = Some(ResourceDetailsState {
+                request_id: None,
+                provider_id: self.provider.id().clone(),
                 target: detail_target,
                 resource_name,
                 title: view.title,
@@ -373,16 +385,19 @@ impl ProviderWorkspaceState {
             return None;
         }
 
+        let provider_id = self.provider.id().clone();
         let load = DetailLoad {
             request_id,
-            provider_id: self.provider.id().clone(),
+            provider_id: provider_id.clone(),
             target: detail_target.clone(),
         };
         self.details = Some(ResourceDetailsState {
+            request_id: Some(request_id),
+            provider_id,
             target: detail_target,
             resource_name,
             title: view.title,
-            content: DetailContent::Loading(load.clone()),
+            content: DetailContent::Loading,
             scroll: 0,
         });
         Some(load)
@@ -394,9 +409,10 @@ impl ProviderWorkspaceState {
         let Some(details) = self.details.as_mut() else {
             return;
         };
-        if !matches!(&details.content, DetailContent::Loading(load) if load == &completion.load) {
+        if !details.is_loading(&completion.load) {
             return;
         }
+        details.request_id = None;
         details.content = match completion.result {
             Ok(loaded) => DetailContent::Ready(loaded),
             Err(error) => DetailContent::Error(error),
@@ -410,7 +426,7 @@ impl ProviderWorkspaceState {
         };
         let last_line = match &details.content {
             DetailContent::Ready(loaded) => loaded.lines.len().saturating_sub(1),
-            DetailContent::Loading(_) | DetailContent::Error(_) => 0,
+            DetailContent::Loading | DetailContent::Error(_) => 0,
         };
         details.scroll = (details.scroll as usize)
             .saturating_add_signed(delta)

@@ -215,7 +215,7 @@ fn a_detail_result_is_accepted_only_for_the_still_visible_resource_and_view() {
         .details
         .expect("the current detail remains visible");
     assert_eq!(details.resource_name, "worker");
-    assert!(matches!(details.content, DetailContent::Loading(_)));
+    assert_eq!(details.content, &DetailContent::Loading);
 
     workspace.complete_detail_load(current.completion(Ok(ResourceDetails::from_lines(["fresh"]))));
     let WorkspaceLoadState::Ready(snapshot) = workspace.load_state() else {

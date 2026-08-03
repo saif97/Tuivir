@@ -508,7 +508,7 @@ fn render_detail_content(
     area: Rect,
 ) {
     let lines = match details.content {
-        DetailContent::Loading(_) => vec![Line::from(format!("Loading {}…", details.title))],
+        DetailContent::Loading => vec![Line::from(format!("Loading {}…", details.title))],
         DetailContent::Ready(loaded) if loaded.is_empty() => vec![Line::styled(
             format!(
                 "{} returned no {} for {}",
