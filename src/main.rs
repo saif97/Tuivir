@@ -1,11 +1,11 @@
 use std::{
-    io,
+    future, io,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use crossterm::{
@@ -52,6 +52,47 @@ async fn main() -> io::Result<()> {
 enum ShellControl {
     Continue,
     Quit,
+}
+
+const DETAIL_DISPATCH_QUIET_PERIOD: Duration = Duration::from_millis(75);
+
+/// Host-owned dispatch timing for Detail View loads.
+///
+/// Application request identity still decides which completion is valid; this
+/// queue prevents superseded Provider work from starting in the first place.
+struct DetailDispatchQueue {
+    quiet_period: Duration,
+    pending: Option<(Instant, ProviderRequest)>,
+}
+
+impl DetailDispatchQueue {
+    fn new(quiet_period: Duration) -> Self {
+        Self {
+            quiet_period,
+            pending: None,
+        }
+    }
+
+    fn accept(&mut self, now: Instant, request: ProviderRequest) -> Option<ProviderRequest> {
+        if matches!(request, ProviderRequest::LoadResourceDetails { .. }) {
+            self.pending = Some((now + self.quiet_period, request));
+            None
+        } else {
+            Some(request)
+        }
+    }
+
+    fn deadline(&self) -> Option<Instant> {
+        self.pending.as_ref().map(|(deadline, _)| *deadline)
+    }
+
+    fn take_ready(&mut self, now: Instant) -> Option<ProviderRequest> {
+        let (deadline, _) = self.pending.as_ref()?;
+        if now < *deadline {
+            return None;
+        }
+        self.pending.take().map(|(_, request)| request)
+    }
 }
 
 /// Maps terminal input at the host boundary, then asks the application to
@@ -112,10 +153,11 @@ async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::R
     let runtime = ProviderRuntime::with_builtin_providers(cli);
     let (completion_tx, mut completion_rx) = mpsc::unbounded_channel();
     let mut app = App::with_registry(registry);
+    let mut detail_dispatch = DetailDispatchQueue::new(DETAIL_DISPATCH_QUIET_PERIOD);
 
     for discovered in runtime.discover().await {
         let requests = app.update(discovered.into_event());
-        dispatch_all(&runtime, &completion_tx, requests);
+        dispatch_all(&runtime, &completion_tx, &mut detail_dispatch, requests);
     }
 
     let (key_tx, mut key_rx) = mpsc::unbounded_channel();
@@ -127,10 +169,12 @@ async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::R
             break Err(error);
         }
 
+        let detail_deadline = detail_dispatch.deadline();
         tokio::select! {
+            biased;
             Some(key) = key_rx.recv() => {
                 let (control, requests) = handle_key(&mut app, key);
-                dispatch_all(&runtime, &completion_tx, requests);
+                dispatch_all(&runtime, &completion_tx, &mut detail_dispatch, requests);
                 if control == ShellControl::Quit {
                     break Ok(());
                 }
@@ -157,7 +201,12 @@ async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::R
                         open_pending_shell(&mut app, &mut host, &TokioCliRunner)
                     });
                     match handover {
-                        Ok(requests) => dispatch_all(&runtime, &completion_tx, requests),
+                        Ok(requests) => dispatch_all(
+                            &runtime,
+                            &completion_tx,
+                            &mut detail_dispatch,
+                            requests,
+                        ),
                         // The screen never came back, so the modal that would
                         // have carried the shell's own failure will never be
                         // drawn. This exit line is the last place left to say
@@ -173,11 +222,18 @@ async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::R
             }
             Some(event) = completion_rx.recv() => {
                 let requests = app.update(event);
-                dispatch_all(&runtime, &completion_tx, requests);
+                dispatch_all(&runtime, &completion_tx, &mut detail_dispatch, requests);
             }
             _ = refresh_timer.tick() => {
                 let requests = app.update(AppEvent::RefreshTimerElapsed);
-                dispatch_all(&runtime, &completion_tx, requests);
+                dispatch_all(&runtime, &completion_tx, &mut detail_dispatch, requests);
+            }
+            _ = wait_for_detail_dispatch(detail_deadline) => {
+                if let Some(request) = detail_dispatch.take_ready(Instant::now())
+                    && app.detail_request_is_current(&request)
+                {
+                    runtime.dispatch(request, completion_tx.clone());
+                }
             }
         }
     };
@@ -289,10 +345,21 @@ impl InputThread {
 fn dispatch_all(
     runtime: &ProviderRuntime,
     completion_tx: &mpsc::UnboundedSender<AppEvent>,
+    detail_dispatch: &mut DetailDispatchQueue,
     requests: Vec<ProviderRequest>,
 ) {
+    let now = Instant::now();
     for request in requests {
-        runtime.dispatch(request, completion_tx.clone());
+        if let Some(request) = detail_dispatch.accept(now, request) {
+            runtime.dispatch(request, completion_tx.clone());
+        }
+    }
+}
+
+async fn wait_for_detail_dispatch(deadline: Option<Instant>) {
+    match deadline {
+        Some(deadline) => tokio::time::sleep_until(deadline.into()).await,
+        None => future::pending().await,
     }
 }
 

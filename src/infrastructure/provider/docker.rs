@@ -3,7 +3,7 @@ use std::{future::Future, pin::Pin};
 use serde::Deserialize;
 
 use crate::{
-    application::InteractiveShellProcess,
+    application::{InteractiveShellProcess, LifecycleCommandPolicy, lifecycle_commands},
     infrastructure::process::{CliRunner, ProcessError, ProcessSpec},
     infrastructure::provider::{
         DetailView, DetailViewId, Provider, ProviderDiscovery, ProviderId, ProviderWorkspace,
@@ -21,6 +21,9 @@ const IMAGE_REFRESH_HELP: &str =
     "Run `docker image ls` to verify access to the current Target Environment.";
 const CONTAINERS_PANEL_ID: &str = "containers";
 const IMAGES_PANEL_ID: &str = "images";
+const LOGS_VIEW_ID: &str = "logs";
+const STATS_VIEW_ID: &str = "stats";
+const INSPECT_VIEW_ID: &str = "inspect";
 
 pub struct DockerWorkspace;
 
@@ -66,12 +69,11 @@ impl ProviderWorkspace for DockerWorkspace {
 
             match result {
                 Err(ProcessError::ExecutableNotFound) => None,
-                Err(ProcessError::SpawnFailed(message)) => Some(discovery_with_error(format!(
-                    "{PROVIDER_NAME} CLI could not be started: {message}"
+                Err(error) => Some(discovery_with_error(provider_cli_error(
+                    PROVIDER_NAME,
+                    &error,
+                    "Docker could not report its current context",
                 ))),
-                Err(ProcessError::Exited(failure)) => Some(discovery_with_error(
-                    failure.message_or("Docker could not report its current context"),
-                )),
                 Ok(output) => Some(ProviderDiscovery::new(
                     Provider::new(
                         self.id(),
@@ -138,17 +140,16 @@ impl ProviderWorkspace for DockerWorkspace {
                         )
                     })?;
                     let state = docker_resource_state(&row.state);
-                    let available_commands = docker_commands(state);
+                    let available_commands =
+                        lifecycle_commands(state, LifecycleCommandPolicy::RestartAndResume);
                     let shell = container_shell(state, &row.id);
                     Ok(Resource {
                         id: ResourceId::new(row.id),
                         name: row.names,
                         status: Some(row.state),
                         state: Some(state),
-                        fields: vec![
-                            ("Image".to_owned(), row.image),
-                            ("Status".to_owned(), row.status),
-                        ],
+                        fields: vec![("Image", row.image), ("Status", row.status)],
+                        snapshot_details: Vec::new(),
                         available_commands,
                         shell,
                     })
@@ -181,12 +182,13 @@ impl ProviderWorkspace for DockerWorkspace {
                         status: None,
                         state: None,
                         fields: vec![
-                            ("Repository".to_owned(), row.repository),
-                            ("Tag".to_owned(), row.tag),
-                            ("Identity".to_owned(), row.id),
-                            ("Size".to_owned(), row.size),
+                            ("Repository", row.repository),
+                            ("Tag", row.tag),
+                            ("Identity", row.id),
+                            ("Size", row.size),
                         ],
-                        available_commands: Vec::new(),
+                        snapshot_details: Vec::new(),
+                        available_commands: &[],
                         shell: None,
                     })
                 })
@@ -203,7 +205,7 @@ impl ProviderWorkspace for DockerWorkspace {
                     ResourcePanel {
                         id: ResourcePanelId::new(IMAGES_PANEL_ID),
                         title: "Images".to_owned(),
-                        detail_views: vec![DetailView::new("inspect", "Inspect")],
+                        detail_views: vec![DetailView::new(INSPECT_VIEW_ID, "Inspect")],
                         resources: image_resources,
                     },
                 ],
@@ -268,7 +270,7 @@ impl ProviderWorkspace for DockerWorkspace {
                     "container",
                     container_detail_command(view_id, resource_id.0.as_str()),
                 ),
-                IMAGES_PANEL_ID if view_id.0 == "inspect" => (
+                IMAGES_PANEL_ID if view_id.0 == INSPECT_VIEW_ID => (
                     "image",
                     Some(vec!["image", "inspect", resource_id.0.as_str()]),
                 ),
@@ -309,9 +311,9 @@ fn container_detail_command<'a>(
     resource_id: &'a str,
 ) -> Option<Vec<&'a str>> {
     match view_id.0.as_str() {
-        "logs" => Some(vec!["container", "logs", "--tail", "200", resource_id]),
-        "stats" => Some(vec!["container", "stats", "--no-stream", resource_id]),
-        "inspect" => Some(vec!["container", "inspect", resource_id]),
+        LOGS_VIEW_ID => Some(vec!["container", "logs", "--tail", "200", resource_id]),
+        STATS_VIEW_ID => Some(vec!["container", "stats", "--no-stream", resource_id]),
+        INSPECT_VIEW_ID => Some(vec!["container", "inspect", resource_id]),
         _ => None,
     }
 }
@@ -320,9 +322,9 @@ fn container_detail_command<'a>(
 /// moves through them.
 fn container_detail_views() -> Vec<DetailView> {
     vec![
-        DetailView::new("logs", "Logs"),
-        DetailView::new("stats", "Stats"),
-        DetailView::new("inspect", "Inspect"),
+        DetailView::new(LOGS_VIEW_ID, "Logs"),
+        DetailView::new(STATS_VIEW_ID, "Stats"),
+        DetailView::new(INSPECT_VIEW_ID, "Inspect"),
     ]
 }
 
@@ -332,32 +334,18 @@ fn container_detail_views() -> Vec<DetailView> {
 /// `removing`, `exited`, and `dead`; anything else is deliberately left
 /// `Unknown` rather than assumed to be stopped.
 fn docker_resource_state(state: &str) -> ResourceState {
-    match state.to_ascii_lowercase().as_str() {
-        "running" => ResourceState::Running,
-        "exited" | "created" => ResourceState::Stopped,
-        "paused" => ResourceState::Paused,
-        "restarting" | "removing" => ResourceState::Transitioning,
-        "dead" => ResourceState::Broken,
-        _ => ResourceState::Unknown,
-    }
-}
-
-fn docker_commands(state: ResourceState) -> Vec<ResourceCommand> {
-    match state {
-        ResourceState::Running => vec![
-            ResourceCommand::Stop,
-            ResourceCommand::Restart,
-            ResourceCommand::Delete,
-        ],
-        ResourceState::Stopped => vec![ResourceCommand::Start, ResourceCommand::Delete],
-        // A paused container resumes rather than starts: `docker container
-        // start` fails against it, and `unpause` fails against everything else.
-        ResourceState::Paused => vec![ResourceCommand::Resume, ResourceCommand::Delete],
-        // A transitioning, dead, or unrecognised container has no lifecycle
-        // Command that reliably applies. Deletion always does.
-        ResourceState::Transitioning | ResourceState::Broken | ResourceState::Unknown => {
-            vec![ResourceCommand::Delete]
-        }
+    if state.eq_ignore_ascii_case("running") {
+        ResourceState::Running
+    } else if state.eq_ignore_ascii_case("exited") || state.eq_ignore_ascii_case("created") {
+        ResourceState::Stopped
+    } else if state.eq_ignore_ascii_case("paused") {
+        ResourceState::Paused
+    } else if state.eq_ignore_ascii_case("restarting") || state.eq_ignore_ascii_case("removing") {
+        ResourceState::Transitioning
+    } else if state.eq_ignore_ascii_case("dead") {
+        ResourceState::Broken
+    } else {
+        ResourceState::Unknown
     }
 }
 

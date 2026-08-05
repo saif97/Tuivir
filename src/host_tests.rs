@@ -9,9 +9,10 @@
 use std::{
     io,
     sync::{Arc, Mutex},
+    time::{Duration, Instant},
 };
 
-use super::{ShellTerminal, handle_key, open_pending_shell};
+use super::{DetailDispatchQueue, ShellTerminal, handle_key, open_pending_shell};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use virtui::{
     application::{
@@ -113,6 +114,56 @@ fn docker_discovery() -> ProviderDiscovery {
     )
 }
 
+fn detail_request(resource_id: &str) -> ProviderRequest {
+    ProviderRequest::LoadResourceDetails {
+        request_id: virtui::application::ProviderRequestId::new(1),
+        provider_id: ProviderId::new("docker"),
+        target: virtui::domain::ResourceTarget::new(
+            ResourcePanelId::new("containers"),
+            ResourceId::new(resource_id),
+        ),
+        view_id: virtui::domain::DetailViewId::new("logs"),
+    }
+}
+
+#[test]
+fn a_navigation_burst_dispatches_only_the_detail_view_where_selection_settles() {
+    let quiet_period = Duration::from_millis(75);
+    let started = Instant::now();
+    let mut dispatch = DetailDispatchQueue::new(quiet_period);
+    let refresh = ProviderRequest::RefreshWorkspace {
+        request_id: virtui::application::ProviderRequestId::new(2),
+        provider_id: ProviderId::new("docker"),
+    };
+
+    assert_eq!(
+        dispatch.accept(started, detail_request("container-a")),
+        None
+    );
+    assert_eq!(
+        dispatch.accept(started, refresh.clone()),
+        Some(refresh),
+        "refresh work remains immediate"
+    );
+    assert!(
+        dispatch
+            .accept(
+                started + Duration::from_millis(20),
+                detail_request("container-b"),
+            )
+            .is_none()
+    );
+    assert!(
+        dispatch
+            .take_ready(started + Duration::from_millis(94))
+            .is_none()
+    );
+    assert_eq!(
+        dispatch.take_ready(started + Duration::from_millis(95)),
+        Some(detail_request("container-b")),
+    );
+}
+
 /// One running container, carrying the Interactive Shell Docker offers inside
 /// it.
 fn running_container() -> WorkspaceSnapshot {
@@ -126,8 +177,9 @@ fn running_container() -> WorkspaceSnapshot {
                 name: "api".to_owned(),
                 status: Some("running".to_owned()),
                 state: Some(ResourceState::Running),
-                fields: vec![("Image".to_owned(), "nginx:1.27".to_owned())],
-                available_commands: vec![ResourceCommand::Stop],
+                fields: vec![("Image", "nginx:1.27".to_owned())],
+                snapshot_details: Vec::new(),
+                available_commands: &[ResourceCommand::Stop],
                 shell: Some(InteractiveShellProcess::new(
                     "docker",
                     &["exec", "-it", "container-a", "/bin/sh"],

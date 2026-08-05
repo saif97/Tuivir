@@ -73,13 +73,25 @@ impl ProviderRuntime {
     /// Discovers installed providers in registration order through their
     /// provider-specific CLI logic.
     pub async fn discover(&self) -> Vec<ProviderDiscovery> {
-        let mut discovered = Vec::new();
-        for (_, workspace) in &self.workspaces {
-            if let Some(provider) = workspace.discover(self.cli.as_ref()).await {
-                discovered.push(provider);
+        let mut discoveries = tokio::task::JoinSet::new();
+        for (index, (_, workspace)) in self.workspaces.iter().enumerate() {
+            let workspace = Arc::clone(workspace);
+            let cli = Arc::clone(&self.cli);
+            discoveries.spawn(async move { (index, workspace.discover(cli.as_ref()).await) });
+        }
+
+        let mut discovered = Vec::with_capacity(self.workspaces.len());
+        while let Some(result) = discoveries.join_next().await {
+            let (index, discovery) = result.expect("Provider discovery task panicked");
+            if let Some(discovery) = discovery {
+                discovered.push((index, discovery));
             }
         }
+        discovered.sort_unstable_by_key(|(index, _)| *index);
         discovered
+            .into_iter()
+            .map(|(_, discovery)| discovery)
+            .collect()
     }
 
     /// Starts a request in the background and sends its result back as an event.
@@ -93,12 +105,7 @@ impl ProviderRuntime {
                 request_id,
                 provider_id,
             } => {
-                let Some(workspace) = self
-                    .workspaces
-                    .iter()
-                    .find(|(id, _)| id == &provider_id)
-                    .map(|(_, workspace)| Arc::clone(workspace))
-                else {
+                let Some(workspace) = self.workspace(&provider_id) else {
                     return;
                 };
                 let cli = Arc::clone(&self.cli);
@@ -118,12 +125,7 @@ impl ProviderRuntime {
                 command,
                 state,
             } => {
-                let Some(workspace) = self
-                    .workspaces
-                    .iter()
-                    .find(|(id, _)| id == &provider_id)
-                    .map(|(_, workspace)| Arc::clone(workspace))
-                else {
+                let Some(workspace) = self.workspace(&provider_id) else {
                     return;
                 };
                 let cli = Arc::clone(&self.cli);

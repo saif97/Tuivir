@@ -9,7 +9,7 @@ An installed system that owns and operates resources, such as Docker, Incus, or 
 _Avoid_: Backend, runtime, engine
 
 **Provider Discovery**:
-Infrastructure evidence that a Provider is installed, together with an actionable availability failure when it was found but cannot currently be reached. Discovery wraps a Provider; it is not a second copy of Provider metadata. An absent Provider CLI produces no discovery.
+Infrastructure evidence that a Provider is installed, together with an actionable availability failure when the discovery probes themselves find it installed but unavailable. A Provider may deliberately defer Target Environment reachability to Workspace refresh when installation and version can be established without contacting it. Discovery wraps a Provider; it is not a second copy of Provider metadata. An absent Provider CLI produces no discovery.
 _Avoid_: Provider state, provider model
 
 **Provider Version**:
@@ -57,7 +57,7 @@ An ordered association between one or more key combinations and a Command. The f
 _Avoid_: Shortcut, hotkey
 
 **Detail View**:
-One provider-native way of inspecting a selected Resource, declared by the Provider Workspace that offers it and named in that Provider's own words — Docker's Logs, Stats, and Inspect; Incus's Info, Config, and Console Log. Only the view on screen is ever loaded, and a result that arrives for a Resource or view the user has left is refused rather than shown.
+One provider-native way of inspecting a selected Resource, declared by the Provider Workspace that offers it and named in that Provider's own words — Docker's Logs, Stats, and Inspect; Incus's Info, Config, and Console Log. Only the provider-backed view on screen is ever loaded; snapshot-backed content is resolved from the current Workspace Snapshot without Provider work. A result that arrives for a Resource or view the user has left is refused rather than shown.
 _Avoid_: Tab, pane, inspector, log view
 
 **Resource Shell Session**:

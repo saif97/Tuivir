@@ -5,7 +5,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph},
 };
 
 use crate::application::{AppState, FocusedPane};
@@ -28,10 +28,7 @@ pub fn render(state: &AppState, frame: &mut Frame<'_>) {
     render_provider_bar(state, frame, rows[0]);
     render_running_command_status(state, frame, rows[2]);
 
-    let Some(provider) = state
-        .active_provider
-        .and_then(|active_provider| state.providers.get(active_provider))
-    else {
+    let Some(provider) = state.active_workspace() else {
         frame.render_widget(
             Paragraph::new("No providers discovered")
                 .block(Block::default().title(" Workspace ").borders(Borders::ALL)),
@@ -247,7 +244,7 @@ fn render_workspace_panel(
             area,
         ),
         WorkspacePresentation::Ready(view) => {
-            if view.panels.is_empty() {
+            if view.panels().len() == 0 {
                 frame.render_widget(
                     Paragraph::new("No Resource Panels available").block(pane_block(
                         pane_title(
@@ -268,23 +265,17 @@ fn render_workspace_panel(
             let panel_areas = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints(
-                    view.panels
-                        .iter()
-                        .map(|panel| Constraint::Fill(panel.panel.resources.len().max(1) as u16))
-                        .collect::<Vec<_>>(),
+                    view.panels()
+                        .map(|panel| Constraint::Fill(panel.panel.resources.len().max(1) as u16)),
                 )
                 .split(area);
-            for (index, (panel, area)) in view
-                .panels
-                .iter()
-                .zip(panel_areas.iter().copied())
-                .enumerate()
+            for (index, (panel, area)) in view.panels().zip(panel_areas.iter().copied()).enumerate()
             {
                 let focused =
                     resource_focus && view.focused_resource_panel == Some(&panel.panel.id);
                 render_resource_panel(
                     view.name,
-                    panel,
+                    &panel,
                     resource_hints.get(index).and_then(Option::as_deref),
                     focused,
                     frame,
@@ -304,11 +295,16 @@ fn render_resource_panel(
     area: Rect,
 ) {
     let panel = view.panel;
+    let viewport_height = area.height.saturating_sub(2) as usize;
+    let visible =
+        visible_resource_range(view.selected_index, viewport_height, panel.resources.len());
     // A row names its Resource and, where the Resource has one, says what it is
     // doing. Everything else a Provider reported is in the Details pane, so a
     // row never has to compete for width with it.
     let mut items = panel
         .resources
+        .get(visible)
+        .unwrap_or_default()
         .iter()
         .map(|resource| {
             let marker = if view.selected_resource == Some(&resource.id) {
@@ -316,11 +312,15 @@ fn render_resource_panel(
             } else {
                 " "
             };
-            let mut spans = vec![Span::raw(format!("{marker} {}", resource.name))];
+            let mut spans = vec![
+                Span::raw(marker),
+                Span::raw(" "),
+                Span::raw(resource.name.as_str()),
+            ];
             if let Some(status) = &resource.status {
                 spans.push(Span::raw("  "));
                 spans.push(Span::styled(
-                    status.clone(),
+                    status.as_str(),
                     resource
                         .state
                         .map_or_else(Style::default, resource_state_style),
@@ -336,23 +336,30 @@ fn render_resource_panel(
             panel.title.to_lowercase()
         )));
     }
-    let selected = view.selected_resource.and_then(|selected| {
-        panel
-            .resources
-            .iter()
-            .position(|resource| &resource.id == selected)
-    });
-    // Ratatui owns the viewport height and keeps earlier rows visible until the
-    // cursor leaves it; Workspace state supplies the remembered selection.
-    let mut state = ListState::default().with_selected(selected);
-    frame.render_stateful_widget(
+    frame.render_widget(
         List::new(items).block(pane_block(
             pane_title(resources_hint, &panel.title, focused),
             focused,
         )),
         area,
-        &mut state,
     );
+}
+
+fn visible_resource_range(
+    selected_index: usize,
+    viewport_height: usize,
+    resource_count: usize,
+) -> std::ops::Range<usize> {
+    let visible_count = viewport_height.min(resource_count);
+    if visible_count == 0 {
+        return 0..0;
+    }
+    let selected_index = selected_index.min(resource_count - 1);
+    let start = selected_index
+        .saturating_add(1)
+        .saturating_sub(visible_count)
+        .min(resource_count - visible_count);
+    start..start + visible_count
 }
 
 /// Colours a Resource's status by its Resource State, so a paused or broken
@@ -421,15 +428,16 @@ fn render_details_panel(
         .and_then(|view| view.selected_resource)
         .map(|resource| {
             let mut lines = vec![Line::styled(
-                resource.name.clone(),
+                resource.name.as_str(),
                 Style::default().add_modifier(Modifier::BOLD),
             )];
-            lines.extend(
-                resource
-                    .fields
-                    .iter()
-                    .map(|(label, value)| Line::from(format!("{label}: {value}"))),
-            );
+            lines.extend(resource.fields.iter().map(|(label, value)| {
+                Line::from(vec![
+                    Span::raw(*label),
+                    Span::raw(": "),
+                    Span::raw(value.as_str()),
+                ])
+            }));
             lines
         })
         .unwrap_or_else(|| {
@@ -511,6 +519,8 @@ fn render_detail_content(
         DetailContent::Ready(loaded) => loaded
             .lines
             .iter()
+            .skip(details.scroll as usize)
+            .take(area.height as usize)
             .map(|line| Line::from(line.as_str()))
             .collect(),
         DetailContent::Error(error) => vec![
@@ -524,12 +534,7 @@ fn render_detail_content(
             Line::from(error.message.as_str()),
         ],
     };
-    frame.render_widget(
-        Paragraph::new(lines)
-            .wrap(ratatui::widgets::Wrap { trim: false })
-            .scroll((details.scroll, 0)),
-        area,
-    );
+    frame.render_widget(Paragraph::new(lines), area);
 }
 
 pub fn render_to_text(state: &AppState, width: u16, height: u16) -> String {
@@ -568,6 +573,13 @@ fn render_to_buffer<T>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resource_viewport_contains_only_rows_ending_at_the_selection() {
+        assert_eq!(visible_resource_range(8, 3, 12), 6..9);
+        assert_eq!(visible_resource_range(1, 3, 12), 0..3);
+        assert_eq!(visible_resource_range(11, 3, 12), 9..12);
+    }
 
     #[test]
     fn focused_panel_titles_are_visually_distinct() {

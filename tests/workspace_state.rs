@@ -15,7 +15,8 @@ fn resource(id: &str, name: &str) -> Resource {
         status: None,
         state: None,
         fields: Vec::new(),
-        available_commands: Vec::new(),
+        snapshot_details: Vec::new(),
+        available_commands: &[],
         shell: None,
     }
 }
@@ -86,9 +87,12 @@ fn reconciling_the_first_snapshot_projects_one_coherent_workspace_view() {
         view.focused_resource_panel,
         Some(&ResourcePanelId::new("containers"))
     );
-    assert_eq!(view.panels.len(), 2);
+    assert_eq!(view.panels().len(), 2);
     assert_eq!(
-        view.panels[0].selected_resource,
+        view.panels()
+            .next()
+            .expect("Containers projection")
+            .selected_resource,
         Some(&ResourceId::new("container-a"))
     );
     assert_eq!(
@@ -152,9 +156,10 @@ fn moving_resource_selection_updates_only_the_focused_panels_navigation() {
             .map(|resource| resource.name.as_str()),
         Some("worker")
     );
-    assert_eq!(view.panels[0].scroll, 1);
+    let panels = view.panels().collect::<Vec<_>>();
+    assert_eq!(panels[0].selected_index, 1);
     assert_eq!(
-        view.panels[1].selected_resource,
+        panels[1].selected_resource,
         Some(&ResourceId::new("image-a"))
     );
 }

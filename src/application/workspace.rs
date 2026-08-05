@@ -24,8 +24,8 @@ pub enum WorkspaceLoadState {
 struct ResourcePanelNavigation {
     panel_id: ResourcePanelId,
     selected_resource: Option<ResourceId>,
-    /// The first Resource row on screen.
-    scroll: usize,
+    /// The selected Resource's index in the latest snapshot.
+    selected_index: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -37,11 +37,38 @@ pub enum DetailContent {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ResourceDetailsState {
+    request_id: Option<ProviderRequestId>,
+    provider_id: ProviderId,
     target: DetailTarget,
     resource_name: String,
     title: String,
     content: DetailContent,
     scroll: u16,
+}
+
+impl ResourceDetailsState {
+    fn is_loading_request(
+        &self,
+        request_id: ProviderRequestId,
+        provider_id: &ProviderId,
+        target: &ResourceTarget,
+        view_id: &DetailViewId,
+    ) -> bool {
+        self.content == DetailContent::Loading
+            && self.request_id == Some(request_id)
+            && &self.provider_id == provider_id
+            && &self.target.resource == target
+            && &self.target.view_id == view_id
+    }
+
+    fn is_loading(&self, load: &DetailLoad) -> bool {
+        self.is_loading_request(
+            load.request_id,
+            &load.provider_id,
+            &load.target.resource,
+            &load.target.view_id,
+        )
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -108,7 +135,6 @@ pub struct ProviderWorkspaceState {
     panel_navigation: Vec<ResourcePanelNavigation>,
     selected_detail_view: Option<DetailViewId>,
     details: Option<ResourceDetailsState>,
-    pending_detail: Option<DetailLoad>,
 }
 
 impl ProviderWorkspaceState {
@@ -121,7 +147,6 @@ impl ProviderWorkspaceState {
             panel_navigation: Vec::new(),
             selected_detail_view: None,
             details: None,
-            pending_detail: None,
         }
     }
 
@@ -143,6 +168,20 @@ impl ProviderWorkspaceState {
 
     pub fn version(&self) -> Option<&ProviderVersion> {
         self.provider.version()
+    }
+
+    /// Checks the private, authoritative Detail load identity without exposing
+    /// a second pending-request state to the host.
+    pub(crate) fn is_loading_detail(
+        &self,
+        request_id: ProviderRequestId,
+        provider_id: &ProviderId,
+        target: &ResourceTarget,
+        view_id: &DetailViewId,
+    ) -> bool {
+        self.details.as_ref().is_some_and(|details| {
+            details.is_loading_request(request_id, provider_id, target, view_id)
+        })
     }
 
     pub fn focused_resource_panel(&self) -> Option<&ResourcePanelId> {
@@ -182,12 +221,10 @@ impl ProviderWorkspaceState {
         self.panel_navigation.clear();
         self.selected_detail_view = None;
         self.details = None;
-        self.pending_detail = None;
     }
 
     /// Refuses the pending detail result after its Provider Workspace is left.
     pub fn invalidate_pending_detail(&mut self) {
-        self.pending_detail = None;
         if self
             .details
             .as_ref()
@@ -207,18 +244,14 @@ impl ProviderWorkspaceState {
             let Some(panel) = snapshot.panel(panel_id) else {
                 return false;
             };
-            let offered = panel
-                .detail_views
-                .iter()
-                .map(|view| view.id.clone())
-                .collect::<Vec<_>>();
             workspace.focused_resource_panel = Some(panel_id.clone());
             let still_offered = workspace
                 .selected_detail_view
                 .as_ref()
-                .is_some_and(|selected| offered.contains(selected));
+                .is_some_and(|selected| panel.detail_views.iter().any(|view| &view.id == selected));
             if !still_offered {
-                workspace.selected_detail_view = offered.into_iter().next();
+                workspace.selected_detail_view =
+                    panel.detail_views.first().map(|view| view.id.clone());
             }
             true
         })
@@ -263,7 +296,7 @@ impl ProviderWorkspaceState {
             }) else {
                 navigation.selected_resource =
                     panel.resources.first().map(|resource| resource.id.clone());
-                navigation.scroll = 0;
+                navigation.selected_index = 0;
                 return;
             };
             let next = current
@@ -273,7 +306,7 @@ impl ProviderWorkspaceState {
                 .resources
                 .get(next)
                 .map(|resource| resource.id.clone());
-            navigation.scroll = next;
+            navigation.selected_index = next;
         });
     }
 
@@ -325,47 +358,61 @@ impl ProviderWorkspaceState {
             resource: target,
             view_id: view.id.clone(),
         };
-        let pending_for_target = self
-            .pending_detail
-            .as_ref()
-            .is_some_and(|pending| pending.target == detail_target);
-        if !pending_for_target {
-            self.pending_detail = None;
-        }
         let describes_target = self
             .details
             .as_ref()
             .is_some_and(|details| details.target == detail_target);
-        if pending_for_target || describes_target {
+        if describes_target {
             return None;
         }
 
+        let snapshot_content = match &self.load_state {
+            WorkspaceLoadState::Ready(snapshot) => {
+                snapshot.snapshot_detail(&detail_target.resource, &detail_target.view_id)
+            }
+            WorkspaceLoadState::Loading | WorkspaceLoadState::Error(_) => None,
+        };
+        if let Some(content) = snapshot_content {
+            self.details = Some(ResourceDetailsState {
+                request_id: None,
+                provider_id: self.provider.id().clone(),
+                target: detail_target,
+                resource_name,
+                title: view.title,
+                content: DetailContent::Ready(content),
+                scroll: 0,
+            });
+            return None;
+        }
+
+        let provider_id = self.provider.id().clone();
         let load = DetailLoad {
             request_id,
-            provider_id: self.provider.id().clone(),
+            provider_id: provider_id.clone(),
             target: detail_target.clone(),
         };
         self.details = Some(ResourceDetailsState {
+            request_id: Some(request_id),
+            provider_id,
             target: detail_target,
             resource_name,
             title: view.title,
             content: DetailContent::Loading,
             scroll: 0,
         });
-        self.pending_detail = Some(load.clone());
         Some(load)
     }
 
     /// Accepts a detail completion only while its full request identity still
     /// describes the visible load.
     pub fn complete_detail_load(&mut self, completion: DetailCompletion) {
-        if self.pending_detail.as_ref() != Some(&completion.load) {
-            return;
-        }
-        self.pending_detail = None;
         let Some(details) = self.details.as_mut() else {
             return;
         };
+        if !details.is_loading(&completion.load) {
+            return;
+        }
+        details.request_id = None;
         details.content = match completion.result {
             Ok(loaded) => DetailContent::Ready(loaded),
             Err(error) => DetailContent::Error(error),
@@ -420,9 +467,7 @@ impl ProviderWorkspaceState {
                     ResourcePanelNavigation {
                         panel_id: panel.id.clone(),
                         selected_resource,
-                        scroll: remembered
-                            .map_or(0, |navigation| navigation.scroll)
-                            .min(selected_index),
+                        selected_index,
                     }
                 })
                 .collect();
@@ -469,22 +514,8 @@ impl ProviderWorkspaceState {
             target_environment: self.provider.target_environment(),
             version: self.provider.version(),
             focused_resource_panel: self.focused_resource_panel.as_ref(),
-            panels: snapshot
-                .panels
-                .iter()
-                .map(|panel| {
-                    let navigation = self
-                        .panel_navigation
-                        .iter()
-                        .find(|navigation| navigation.panel_id == panel.id);
-                    ResourcePanelView {
-                        panel,
-                        selected_resource: navigation
-                            .and_then(|navigation| navigation.selected_resource.as_ref()),
-                        scroll: navigation.map_or(0, |navigation| navigation.scroll),
-                    }
-                })
-                .collect(),
+            snapshot,
+            panel_navigation: &self.panel_navigation,
             selected_resource,
             detail_views,
             selected_detail_view,
@@ -585,11 +616,31 @@ pub struct WorkspaceView<'a> {
     pub target_environment: Option<&'a TargetEnvironment>,
     pub version: Option<&'a ProviderVersion>,
     pub focused_resource_panel: Option<&'a ResourcePanelId>,
-    pub panels: Vec<ResourcePanelView<'a>>,
+    snapshot: &'a WorkspaceSnapshot,
+    panel_navigation: &'a [ResourcePanelNavigation],
     pub selected_resource: Option<&'a Resource>,
     pub detail_views: &'a [DetailView],
     pub selected_detail_view: Option<&'a DetailView>,
     pub details: Option<ResourceDetailsView<'a>>,
+}
+
+impl<'a> WorkspaceView<'a> {
+    /// Projects panels lazily so every frame borrows application state without
+    /// allocating an intermediate collection.
+    pub fn panels(&self) -> impl ExactSizeIterator<Item = ResourcePanelView<'a>> + '_ {
+        self.snapshot.panels.iter().map(|panel| {
+            let navigation = self
+                .panel_navigation
+                .iter()
+                .find(|navigation| navigation.panel_id == panel.id);
+            ResourcePanelView {
+                panel,
+                selected_resource: navigation
+                    .and_then(|navigation| navigation.selected_resource.as_ref()),
+                selected_index: navigation.map_or(0, |navigation| navigation.selected_index),
+            }
+        })
+    }
 }
 
 pub enum WorkspacePresentation<'a> {
@@ -623,8 +674,9 @@ impl<'a> From<&'a ResourceDetailsState> for ResourceDetailsView<'a> {
 }
 
 /// One Resource Panel paired with its private navigation projection.
+#[derive(Clone, Copy)]
 pub struct ResourcePanelView<'a> {
     pub panel: &'a ResourcePanel,
     pub selected_resource: Option<&'a ResourceId>,
-    pub scroll: usize,
+    pub selected_index: usize,
 }

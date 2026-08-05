@@ -2,17 +2,18 @@ use std::{
     future::Future,
     pin::Pin,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::Color;
-use tokio::sync::{Notify, mpsc};
+use tokio::sync::{Barrier, Notify, mpsc};
 use virtui::{
     application::{
         App, AppEvent, AppState, Command, CommandRegistry, CommandScope, DetailView, FocusedPane,
-        InteractiveShellOutcome, InteractiveShellProcess, ProviderRequest, Resource,
-        ResourceCommand, ResourceDetails, ResourcePanel, WorkspaceError, WorkspaceLoadState,
-        WorkspaceSnapshot,
+        InteractiveShellOutcome, InteractiveShellProcess, LifecycleCommandPolicy, ProviderRequest,
+        Resource, ResourceCommand, ResourceDetails, ResourcePanel, WorkspaceError,
+        WorkspaceLoadState, WorkspaceSnapshot, lifecycle_commands,
     },
     domain::{
         DetailViewId, Provider, ProviderId, ResourceId, ResourcePanelId, ResourceState,
@@ -120,6 +121,43 @@ fn first_available_provider_becomes_the_active_workspace() {
     app.update(docker_discovery().into_event());
 
     assert_eq!(app.state().active_provider, Some(0));
+    assert_eq!(
+        app.state()
+            .active_workspace()
+            .map(|workspace| workspace.id()),
+        Some(&ProviderId::new("docker")),
+    );
+}
+
+#[test]
+fn lifecycle_commands_share_one_policy_with_only_real_provider_differences() {
+    assert_eq!(
+        lifecycle_commands(
+            ResourceState::Running,
+            LifecycleCommandPolicy::RestartAndResume,
+        ),
+        [
+            ResourceCommand::Stop,
+            ResourceCommand::Restart,
+            ResourceCommand::Delete,
+        ]
+    );
+    assert_eq!(
+        lifecycle_commands(ResourceState::Running, LifecycleCommandPolicy::StartStop),
+        [ResourceCommand::Stop, ResourceCommand::Delete]
+    );
+    assert_eq!(
+        lifecycle_commands(ResourceState::Paused, LifecycleCommandPolicy::StartStop),
+        [ResourceCommand::Delete],
+        "a Provider without pause/resume support must not inherit Resume",
+    );
+    assert_eq!(
+        lifecycle_commands(
+            ResourceState::Unknown,
+            LifecycleCommandPolicy::RestartAndResume,
+        ),
+        [ResourceCommand::Delete]
+    );
 }
 
 struct DelayedCli {
@@ -131,6 +169,43 @@ struct MissingCli;
 
 struct ExpectedCli {
     commands: Arc<Mutex<Vec<ProcessSpec>>>,
+}
+
+struct ConcurrentDiscoveryCli {
+    first_probes: Arc<Barrier>,
+}
+
+impl CliRunner for ConcurrentDiscoveryCli {
+    fn run<'a>(
+        &'a self,
+        command: ProcessSpec,
+    ) -> Pin<Box<dyn Future<Output = Result<ProcessOutput, ProcessError>> + Send + 'a>> {
+        Box::pin(async move {
+            if command == ProcessSpec::new("docker", &["context", "show"])
+                || command == ProcessSpec::new("incus", &["remote", "get-default"])
+                || command == ProcessSpec::new("sbx", &["version"])
+            {
+                self.first_probes.wait().await;
+            }
+            let stdout = if command == ProcessSpec::new("docker", &["context", "show"]) {
+                "desktop-linux\n"
+            } else if command == ProcessSpec::new("incus", &["remote", "get-default"])
+                || command == ProcessSpec::new("incus", &["project", "get-current"])
+            {
+                "local\n"
+            } else if command == ProcessSpec::new("sbx", &["version"]) {
+                "sbx version: v0.37.0 build\n"
+            } else if command == ProcessSpec::new("sbx", &["ls", "--json"]) {
+                "[]"
+            } else {
+                panic!("unexpected discovery command: {command:?}");
+            };
+            Ok(ProcessOutput {
+                stdout: stdout.to_owned(),
+                stderr: String::new(),
+            })
+        })
+    }
 }
 
 impl CliRunner for ExpectedCli {
@@ -388,6 +463,28 @@ async fn provider_is_omitted_when_docker_cli_is_absent() {
     let screen = render_to_text(app.state(), 100, 24);
     assert!(screen.contains("No providers discovered"));
     assert!(!screen.contains("Docker"));
+}
+
+#[tokio::test]
+async fn provider_discoveries_run_together_and_keep_registration_order() {
+    let first_probes = Arc::new(Barrier::new(4));
+    let runtime = ProviderRuntime::with_builtin_providers(Arc::new(ConcurrentDiscoveryCli {
+        first_probes: Arc::clone(&first_probes),
+    }));
+
+    let discovery = tokio::spawn(async move { runtime.discover().await });
+    tokio::time::timeout(Duration::from_secs(1), first_probes.wait())
+        .await
+        .expect("all Provider discoveries start before any one finishes");
+    let discovered = discovery.await.expect("discovery task");
+
+    assert_eq!(
+        discovered
+            .iter()
+            .map(|discovery| discovery.provider().id().0.as_str())
+            .collect::<Vec<_>>(),
+        ["docker", "incus", "docker-sandbox"],
+    );
 }
 
 #[test]
@@ -1682,27 +1779,15 @@ fn container_snapshot(
     containers: &[(&str, &str, &str)],
     state: ResourceState,
 ) -> WorkspaceSnapshot {
-    let (status, available_commands) = match state {
-        ResourceState::Running => (
-            "running",
-            vec![
-                ResourceCommand::Stop,
-                ResourceCommand::Restart,
-                ResourceCommand::Delete,
-            ],
-        ),
-        ResourceState::Stopped => (
-            "exited",
-            vec![ResourceCommand::Start, ResourceCommand::Delete],
-        ),
-        ResourceState::Paused => (
-            "paused",
-            vec![ResourceCommand::Resume, ResourceCommand::Delete],
-        ),
-        ResourceState::Transitioning => ("restarting", vec![ResourceCommand::Delete]),
-        ResourceState::Broken => ("dead", vec![ResourceCommand::Delete]),
-        ResourceState::Unknown => ("teleporting", vec![ResourceCommand::Delete]),
+    let status = match state {
+        ResourceState::Running => "running",
+        ResourceState::Stopped => "exited",
+        ResourceState::Paused => "paused",
+        ResourceState::Transitioning => "restarting",
+        ResourceState::Broken => "dead",
+        ResourceState::Unknown => "teleporting",
     };
+    let available_commands = lifecycle_commands(state, LifecycleCommandPolicy::RestartAndResume);
     WorkspaceSnapshot {
         panels: vec![ResourcePanel {
             id: ResourcePanelId::new("containers"),
@@ -1719,8 +1804,9 @@ fn container_snapshot(
                     name: (*name).to_owned(),
                     status: Some(status.to_owned()),
                     state: Some(state),
-                    fields: vec![("Image".to_owned(), (*image).to_owned())],
-                    available_commands: available_commands.clone(),
+                    fields: vec![("Image", (*image).to_owned())],
+                    snapshot_details: Vec::new(),
+                    available_commands,
                     shell: (state == ResourceState::Running).then(|| {
                         InteractiveShellProcess::new("docker", &["exec", "-it", *id, "/bin/sh"])
                     }),
@@ -1753,16 +1839,16 @@ fn incus_snapshot(instances: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
                         } else {
                             ResourceState::Stopped
                         }),
-                        fields: vec![("Type".to_owned(), "container".to_owned())],
-                        available_commands: if running {
-                            vec![
-                                ResourceCommand::Stop,
-                                ResourceCommand::Restart,
-                                ResourceCommand::Delete,
-                            ]
-                        } else {
-                            vec![ResourceCommand::Start, ResourceCommand::Delete]
-                        },
+                        fields: vec![("Type", "container".to_owned())],
+                        snapshot_details: Vec::new(),
+                        available_commands: lifecycle_commands(
+                            if running {
+                                ResourceState::Running
+                            } else {
+                                ResourceState::Stopped
+                            },
+                            LifecycleCommandPolicy::RestartAndResume,
+                        ),
                         shell: running.then(|| {
                             InteractiveShellProcess::new(
                                 "incus",
@@ -1793,10 +1879,11 @@ fn docker_multi_panel_snapshot() -> WorkspaceSnapshot {
                     status: Some("running".to_owned()),
                     state: Some(ResourceState::Running),
                     fields: vec![
-                        ("Image".to_owned(), "nginx:1.27".to_owned()),
-                        ("Status".to_owned(), "Up 3 hours".to_owned()),
+                        ("Image", "nginx:1.27".to_owned()),
+                        ("Status", "Up 3 hours".to_owned()),
                     ],
-                    available_commands: vec![
+                    snapshot_details: Vec::new(),
+                    available_commands: &[
                         ResourceCommand::Stop,
                         ResourceCommand::Restart,
                         ResourceCommand::Delete,
@@ -1817,12 +1904,13 @@ fn docker_multi_panel_snapshot() -> WorkspaceSnapshot {
                     status: None,
                     state: None,
                     fields: vec![
-                        ("Repository".to_owned(), "nginx".to_owned()),
-                        ("Tag".to_owned(), "1.27".to_owned()),
-                        ("Identity".to_owned(), "sha256:shared-id".to_owned()),
-                        ("Size".to_owned(), "192MB".to_owned()),
+                        ("Repository", "nginx".to_owned()),
+                        ("Tag", "1.27".to_owned()),
+                        ("Identity", "sha256:shared-id".to_owned()),
+                        ("Size", "192MB".to_owned()),
                     ],
-                    available_commands: Vec::new(),
+                    snapshot_details: Vec::new(),
+                    available_commands: &[],
                     shell: None,
                 }],
             },
@@ -1880,6 +1968,23 @@ fn settling_on_a_resource_requests_only_the_visible_detail_view() {
         "unexpected request: {:?}",
         requests[0]
     );
+}
+
+#[test]
+fn a_detail_request_is_current_only_while_its_full_identity_remains_visible() {
+    let mut app = App::new();
+    let request = detail_request(ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    ));
+
+    assert!(app.detail_request_is_current(&request));
+
+    assert!(app.update(fixture_discovery().into_event()).is_empty());
+    app.invoke(Command::NextWorkspace);
+
+    assert!(!app.detail_request_is_current(&request));
 }
 
 /// Rendered at a width a terminal actually has, so a row that only fits on a
@@ -2095,9 +2200,14 @@ fn every_workspace_and_resource_panel_restores_its_navigation_state() {
     );
     assert_eq!(app.state().focused_pane, FocusedPane::Resources);
     assert_eq!(
-        view.panels
-            .iter()
-            .map(|panel| (&panel.panel.id, panel.selected_resource, panel.scroll))
+        view.panels()
+            .map(|panel| {
+                (
+                    &panel.panel.id,
+                    panel.selected_resource,
+                    panel.selected_index,
+                )
+            })
             .collect::<Vec<_>>(),
         vec![
             (
@@ -2608,6 +2718,28 @@ fn scrolling_moves_through_a_long_detail_view_and_clamps_at_both_ends() {
     }
     let screen = render_to_text(app.state(), 100, 24);
     assert!(screen.contains("line-0"), "rendered:\n{screen}");
+}
+
+#[test]
+fn detail_source_lines_clip_at_the_panel_edge_instead_of_wrapping() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
+    let details = detail_request(app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    )));
+    app.update(details_completed(
+        details,
+        Ok(ResourceDetails::from_lines([
+            "visible-prefix--------------------------------SHOULD-BE-CLIPPED",
+            "second-source-line",
+        ])),
+    ));
+
+    let screen = render_to_text(app.state(), 60, 20);
+    assert!(screen.contains("visible-prefix"), "rendered:\n{screen}");
+    assert!(screen.contains("second-source-line"), "rendered:\n{screen}");
+    assert!(!screen.contains("SHOULD"), "rendered:\n{screen}");
 }
 
 /// Every view starts at its own top: a scrolled position belongs to the output

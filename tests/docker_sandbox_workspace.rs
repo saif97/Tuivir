@@ -15,26 +15,16 @@ use virtui::{
 };
 
 mod common;
-use common::{FixtureCli, failure, refresh_completed, success};
-
-fn target(panel_id: &str, resource_id: &str) -> ResourceTarget {
-    ResourceTarget::new(ResourcePanelId::new(panel_id), ResourceId::new(resource_id))
-}
+use common::{FixtureCli, failure, refresh_completed, resource_target, success};
 
 /// `sbx version` describes the installed Provider; it does not identify which
 /// Target Environment its daemon currently operates.
 #[tokio::test]
 async fn docker_sandbox_keeps_provider_version_separate_from_its_target_environment() {
-    let cli = FixtureCli::new([
-        (
-            ProcessSpec::new("sbx", &["version"]),
-            success("sbx version: v0.37.0 8b65b864b0d49c29f05a55170d6b5eea4c0d11e7\n"),
-        ),
-        (
-            ProcessSpec::new("sbx", &["ls", "--json"]),
-            success(include_str!("fixtures/docker-sandbox/sandboxes.json")),
-        ),
-    ]);
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("sbx", &["version"]),
+        success("sbx version: v0.37.0 8b65b864b0d49c29f05a55170d6b5eea4c0d11e7\n"),
+    )]);
 
     let discovered = DockerSandboxWorkspace
         .discover(&cli)
@@ -160,7 +150,7 @@ async fn a_sandbox_carries_its_agent_uuid_and_workspaces_as_fields() {
         sandbox
             .fields
             .iter()
-            .map(|(label, value)| (label.as_str(), value.as_str()))
+            .map(|(label, value)| (*label, value.as_str()))
             .collect::<Vec<_>>(),
         [
             ("Agent", "claude"),
@@ -196,7 +186,7 @@ async fn a_sandbox_with_no_workspaces_omits_the_field_entirely() {
         sandbox
             .fields
             .iter()
-            .map(|(label, _)| label.as_str())
+            .map(|(label, _)| *label)
             .collect::<Vec<_>>(),
         ["Agent", "ID"]
     );
@@ -216,7 +206,7 @@ async fn starting_a_sandbox_generates_the_expected_cli_request() {
     DockerSandboxWorkspace
         .execute_command(
             &cli,
-            &target("sandboxes", "shell-dotfiles"),
+            &resource_target("sandboxes", "shell-dotfiles"),
             ResourceCommand::Start,
             ResourceState::Stopped,
         )
@@ -234,7 +224,7 @@ async fn stopping_a_sandbox_generates_the_expected_cli_request() {
     DockerSandboxWorkspace
         .execute_command(
             &cli,
-            &target("sandboxes", "claude-virtui"),
+            &resource_target("sandboxes", "claude-virtui"),
             ResourceCommand::Stop,
             ResourceState::Running,
         )
@@ -264,7 +254,7 @@ async fn deleting_a_sandbox_always_forces_regardless_of_state() {
         DockerSandboxWorkspace
             .execute_command(
                 &cli,
-                &target("sandboxes", "claude-virtui"),
+                &resource_target("sandboxes", "claude-virtui"),
                 ResourceCommand::Delete,
                 state,
             )
@@ -284,7 +274,7 @@ async fn a_command_sbx_cannot_perform_is_refused_without_running_anything() {
         let error = DockerSandboxWorkspace
             .execute_command(
                 &cli,
-                &target("sandboxes", "claude-virtui"),
+                &resource_target("sandboxes", "claude-virtui"),
                 command,
                 ResourceState::Running,
             )
@@ -369,7 +359,7 @@ async fn command_availability_follows_the_last_refreshed_state() {
         snapshot
             .targets()
             .map(|(_, resource)| resource)
-            .map(|resource| (resource.name.as_str(), resource.available_commands.clone()))
+            .map(|resource| (resource.name.as_str(), resource.available_commands.to_vec()))
             .collect::<Vec<_>>(),
         [
             (
@@ -403,10 +393,6 @@ async fn discovered_docker_sandbox_omits_an_unselected_environment() {
             ProcessSpec::new("sbx", &["ls", "--json"]),
             success(include_str!("fixtures/docker-sandbox/sandboxes.json")),
         ),
-        (
-            ProcessSpec::new("sbx", &["ls", "--json"]),
-            success(include_str!("fixtures/docker-sandbox/sandboxes.json")),
-        ),
     ]);
     let sandboxes = DockerSandboxWorkspace;
 
@@ -420,9 +406,13 @@ async fn discovered_docker_sandbox_omits_an_unselected_environment() {
         .into_iter()
         .next()
         .expect("discovery requests the first workspace refresh");
-    app.update(refresh_completed(request, sandboxes.refresh(&cli).await));
+    let detail_requests = app.update(refresh_completed(request, sandboxes.refresh(&cli).await));
 
     let screen = render_to_text(app.state(), 100, 24);
+    assert!(
+        detail_requests.is_empty(),
+        "snapshot-backed Info starts no Provider request: {detail_requests:?}"
+    );
     assert!(screen.contains("Docker Sandbox"), "{screen}");
     assert!(screen.contains("[ Docker Sandbox ]"), "{screen}");
     assert!(!screen.contains("Docker Sandbox ·"), "{screen}");
@@ -432,6 +422,8 @@ async fn discovered_docker_sandbox_omits_an_unselected_environment() {
     assert!(screen.contains("shell-dotfiles"), "{screen}");
     assert!(screen.contains("stopped"), "{screen}");
     assert!(screen.contains("Agent: claude"), "{screen}");
+    assert!(screen.contains("Ports:"), "{screen}");
+    assert!(screen.contains("127.0.0.1:32768 -> 9418/tcp"), "{screen}");
 }
 
 /// A user who has never created a sandbox sees an empty workspace, which must
@@ -478,6 +470,10 @@ async fn runtime_with_builtin_providers_discovers_installed_docker_sandbox() {
         ),
         (
             ProcessSpec::new("incus", &["remote", "get-default"]),
+            Err(ProcessError::ExecutableNotFound),
+        ),
+        (
+            ProcessSpec::new("incus", &["project", "get-current"]),
             Err(ProcessError::ExecutableNotFound),
         ),
         (
@@ -624,7 +620,7 @@ async fn a_failed_command_reports_what_sbx_wrote_to_stderr() {
     let error = DockerSandboxWorkspace
         .execute_command(
             &cli,
-            &target("sandboxes", "claude-virtui"),
+            &resource_target("sandboxes", "claude-virtui"),
             ResourceCommand::Stop,
             ResourceState::Running,
         )
@@ -650,7 +646,7 @@ async fn a_silent_command_failure_names_the_provider_command_and_sandbox() {
     let error = DockerSandboxWorkspace
         .execute_command(
             &cli,
-            &target("sandboxes", "claude-virtui"),
+            &resource_target("sandboxes", "claude-virtui"),
             ResourceCommand::Delete,
             ResourceState::Running,
         )
@@ -698,14 +694,16 @@ async fn the_info_view_describes_the_selected_sandbox() {
         success(include_str!("fixtures/docker-sandbox/sandboxes.json")),
     )]);
 
-    let details = DockerSandboxWorkspace
-        .load_details(
-            &cli,
-            &target("sandboxes", "claude-virtui"),
+    let snapshot = DockerSandboxWorkspace
+        .refresh(&cli)
+        .await
+        .expect("the fixture lists sandboxes");
+    let details = snapshot
+        .snapshot_detail(
+            &resource_target("sandboxes", "claude-virtui"),
             &DetailViewId::new("info"),
         )
-        .await
-        .expect("the fixture lists claude-virtui");
+        .expect("Info is snapshot-backed");
 
     assert_eq!(
         details.lines,
@@ -731,14 +729,16 @@ async fn the_info_view_omits_ports_a_sandbox_does_not_publish() {
         success(include_str!("fixtures/docker-sandbox/sandboxes.json")),
     )]);
 
-    let details = DockerSandboxWorkspace
-        .load_details(
-            &cli,
-            &target("sandboxes", "shell-dotfiles"),
+    let snapshot = DockerSandboxWorkspace
+        .refresh(&cli)
+        .await
+        .expect("the fixture lists sandboxes");
+    let details = snapshot
+        .snapshot_detail(
+            &resource_target("sandboxes", "shell-dotfiles"),
             &DetailViewId::new("info"),
         )
-        .await
-        .expect("the fixture lists shell-dotfiles");
+        .expect("Info is snapshot-backed");
 
     assert_eq!(
         details.lines,
@@ -753,8 +753,8 @@ async fn the_info_view_omits_ports_a_sandbox_does_not_publish() {
     );
 }
 
-/// A sandbox deleted between the last refresh and opening its Info view is an
-/// empty view, not a failure: the panel is about to drop it anyway.
+/// A target absent from the current snapshot is an empty view, not a Provider
+/// failure.
 #[tokio::test]
 async fn the_info_view_of_a_vanished_sandbox_is_empty_rather_than_broken() {
     let cli = FixtureCli::new([(
@@ -762,14 +762,16 @@ async fn the_info_view_of_a_vanished_sandbox_is_empty_rather_than_broken() {
         success(include_str!("fixtures/docker-sandbox/sandboxes.json")),
     )]);
 
-    let details = DockerSandboxWorkspace
-        .load_details(
-            &cli,
-            &target("sandboxes", "deleted-since-the-last-refresh"),
+    let snapshot = DockerSandboxWorkspace
+        .refresh(&cli)
+        .await
+        .expect("the fixture lists sandboxes");
+    let details = snapshot
+        .snapshot_detail(
+            &resource_target("sandboxes", "deleted-since-the-last-refresh"),
             &DetailViewId::new("info"),
         )
-        .await
-        .expect("a sandbox that is gone is not a provider failure");
+        .expect("Info is snapshot-backed even when its target is absent");
 
     assert!(details.is_empty());
 }
@@ -783,7 +785,7 @@ async fn a_view_docker_sandbox_never_declared_is_refused_without_running_anythin
     let error = DockerSandboxWorkspace
         .load_details(
             &cli,
-            &target("sandboxes", "claude-virtui"),
+            &resource_target("sandboxes", "claude-virtui"),
             &DetailViewId::new("logs"),
         )
         .await
@@ -792,28 +794,6 @@ async fn a_view_docker_sandbox_never_declared_is_refused_without_running_anythin
     assert_eq!(
         error.message,
         "Docker Sandbox has no logs view for sandbox claude-virtui"
-    );
-}
-
-#[tokio::test]
-async fn a_failed_info_view_reports_what_sbx_wrote_to_stderr() {
-    let cli = FixtureCli::new([(
-        ProcessSpec::new("sbx", &["ls", "--json"]),
-        failure("Error: sandboxd is not running"),
-    )]);
-
-    let error = DockerSandboxWorkspace
-        .load_details(
-            &cli,
-            &target("sandboxes", "claude-virtui"),
-            &DetailViewId::new("info"),
-        )
-        .await
-        .expect_err("a non-zero exit is never loaded details");
-
-    assert_eq!(
-        error.message,
-        "Error: sandboxd is not running. Run `sbx ls` to verify access to the current Target Environment."
     );
 }
 
@@ -919,7 +899,7 @@ async fn malformed_sandbox_output_is_reported_rather_than_read_as_empty() {
 /// Provider the user can act on, so it stays on screen instead of vanishing
 /// the way an uninstalled one does.
 #[tokio::test]
-async fn installed_docker_sandbox_that_cannot_list_stays_visible_with_an_actionable_error() {
+async fn initial_refresh_reports_an_installed_docker_sandbox_that_cannot_list() {
     let cli = FixtureCli::new([
         (
             ProcessSpec::new("sbx", &["version"]),
@@ -931,19 +911,22 @@ async fn installed_docker_sandbox_that_cannot_list_stays_visible_with_an_actiona
         ),
     ]);
 
-    let discovered = DockerSandboxWorkspace
+    let workspace = DockerSandboxWorkspace;
+    let discovered = workspace
         .discover(&cli)
         .await
         .expect("an installed sbx is never omitted");
 
     assert_eq!(discovered.provider().name(), "Docker Sandbox");
     assert_eq!(discovered.provider().target_environment(), None);
+    assert_eq!(discovered.error(), None);
+    let error = workspace
+        .refresh(&cli)
+        .await
+        .expect_err("the initial refresh owns reachability");
     assert_eq!(
-        discovered
-            .error()
-            .expect("an unusable provider explains itself")
-            .message,
-        "Error: not signed in to Docker. Run `sbx ls` to verify sandboxd is running and you are signed in to Docker."
+        error.message,
+        "Error: not signed in to Docker. Run `sbx ls` to verify access to the current Target Environment."
     );
 }
 

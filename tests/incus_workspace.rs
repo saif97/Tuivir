@@ -1,25 +1,68 @@
-use std::sync::Arc;
+use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
+
+use tokio::sync::Barrier;
 
 use virtui::{
     application::{App, InteractiveShellProcess, ResourceCommand},
-    domain::{
-        DetailViewId, ResourceId, ResourcePanelId, ResourceState, ResourceTarget, TargetEnvironment,
-    },
-    infrastructure::process::{ProcessError, ProcessOutput, ProcessSpec},
+    domain::{DetailViewId, ResourceState, TargetEnvironment},
+    infrastructure::process::{CliRunner, ProcessError, ProcessOutput, ProcessSpec},
     infrastructure::provider::{IncusWorkspace, ProviderWorkspace},
     infrastructure::runtime::ProviderRuntime,
     presentation::render_to_text,
 };
 
 mod common;
-use common::{FixtureCli, failure, failure_on_stdout, refresh_completed, success};
+use common::{
+    FixtureCli, failure, failure_on_stdout, refresh_completed, resource_target, silent_failure,
+    success,
+};
 
-fn target(panel_id: &str, resource_id: &str) -> ResourceTarget {
-    ResourceTarget::new(ResourcePanelId::new(panel_id), ResourceId::new(resource_id))
+struct ConcurrentProbeCli {
+    probes: Arc<Barrier>,
 }
 
-fn silent_failure() -> Result<ProcessOutput, ProcessError> {
-    common::silent_failure(1)
+impl CliRunner for ConcurrentProbeCli {
+    fn run<'a>(
+        &'a self,
+        command: ProcessSpec,
+    ) -> Pin<Box<dyn Future<Output = Result<ProcessOutput, ProcessError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.probes.wait().await;
+            let stdout = if command == ProcessSpec::new("incus", &["remote", "get-default"]) {
+                "local\n"
+            } else if command == ProcessSpec::new("incus", &["project", "get-current"]) {
+                "default\n"
+            } else {
+                panic!("unexpected Incus discovery command: {command:?}");
+            };
+            Ok(ProcessOutput {
+                stdout: stdout.to_owned(),
+                stderr: String::new(),
+            })
+        })
+    }
+}
+
+#[tokio::test]
+async fn incus_remote_and_project_probes_run_together() {
+    let probes = Arc::new(Barrier::new(3));
+    let cli = Arc::new(ConcurrentProbeCli {
+        probes: Arc::clone(&probes),
+    });
+    let discovery = tokio::spawn(async move { IncusWorkspace.discover(cli.as_ref()).await });
+
+    tokio::time::timeout(Duration::from_secs(1), probes.wait())
+        .await
+        .expect("both independent Incus probes start together");
+    let discovered = discovery
+        .await
+        .expect("discovery task")
+        .expect("Incus is installed");
+
+    assert_eq!(
+        discovered.provider().target_environment(),
+        Some(&TargetEnvironment::new("local / default")),
+    );
 }
 
 #[tokio::test]
@@ -32,7 +75,7 @@ async fn incus_start_generates_the_expected_cli_request() {
     IncusWorkspace
         .execute_command(
             &cli,
-            &target("instances", "instance-a"),
+            &resource_target("instances", "instance-a"),
             ResourceCommand::Start,
             ResourceState::Stopped,
         )
@@ -50,7 +93,7 @@ async fn incus_stop_generates_the_expected_cli_request() {
     IncusWorkspace
         .execute_command(
             &cli,
-            &target("instances", "instance-a"),
+            &resource_target("instances", "instance-a"),
             ResourceCommand::Stop,
             ResourceState::Running,
         )
@@ -68,7 +111,7 @@ async fn incus_restart_generates_the_expected_cli_request() {
     IncusWorkspace
         .execute_command(
             &cli,
-            &target("instances", "instance-a"),
+            &resource_target("instances", "instance-a"),
             ResourceCommand::Restart,
             ResourceState::Running,
         )
@@ -86,7 +129,7 @@ async fn incus_resume_generates_the_expected_cli_request() {
     IncusWorkspace
         .execute_command(
             &cli,
-            &target("instances", "instance-a"),
+            &resource_target("instances", "instance-a"),
             ResourceCommand::Resume,
             ResourceState::Paused,
         )
@@ -104,7 +147,7 @@ async fn deleting_a_stopped_instance_generates_the_expected_cli_request() {
     IncusWorkspace
         .execute_command(
             &cli,
-            &target("instances", "instance-a"),
+            &resource_target("instances", "instance-a"),
             ResourceCommand::Delete,
             ResourceState::Stopped,
         )
@@ -130,7 +173,7 @@ async fn deleting_an_instance_that_is_not_stopped_forces_removal() {
         IncusWorkspace
             .execute_command(
                 &cli,
-                &target("instances", "instance-a"),
+                &resource_target("instances", "instance-a"),
                 ResourceCommand::Delete,
                 state,
             )
@@ -189,7 +232,7 @@ async fn each_detail_view_runs_its_own_incus_command() {
         let details = IncusWorkspace
             .load_details(
                 &cli,
-                &target("instances", "gateway"),
+                &resource_target("instances", "gateway"),
                 &DetailViewId::new(view),
             )
             .await
@@ -209,7 +252,7 @@ async fn an_instance_with_no_console_log_loads_empty_details() {
     let details = IncusWorkspace
         .load_details(
             &cli,
-            &target("instances", "gateway"),
+            &resource_target("instances", "gateway"),
             &DetailViewId::new("console-log"),
         )
         .await
@@ -228,7 +271,7 @@ async fn a_failed_detail_view_reports_what_incus_wrote_to_stderr() {
     let error = IncusWorkspace
         .load_details(
             &cli,
-            &target("instances", "gateway"),
+            &resource_target("instances", "gateway"),
             &DetailViewId::new("info"),
         )
         .await
@@ -249,7 +292,7 @@ async fn info_output_reaches_the_panel_line_for_line() {
     let details = IncusWorkspace
         .load_details(
             &cli,
-            &target("instances", "gateway"),
+            &resource_target("instances", "gateway"),
             &DetailViewId::new("info"),
         )
         .await
@@ -280,7 +323,7 @@ async fn a_detail_view_incus_never_declared_is_refused_without_running_anything(
     let error = IncusWorkspace
         .load_details(
             &cli,
-            &target("instances", "gateway"),
+            &resource_target("instances", "gateway"),
             &DetailViewId::new("stats"),
         )
         .await
@@ -296,13 +339,13 @@ async fn a_detail_view_incus_never_declared_is_refused_without_running_anything(
 async fn a_silent_detail_failure_names_the_view_and_instance() {
     let cli = FixtureCli::new([(
         ProcessSpec::new("incus", &["config", "show", "gateway"]),
-        silent_failure(),
+        silent_failure(1),
     )]);
 
     let error = IncusWorkspace
         .load_details(
             &cli,
-            &target("instances", "gateway"),
+            &resource_target("instances", "gateway"),
             &DetailViewId::new("config"),
         )
         .await
@@ -437,7 +480,7 @@ async fn deleting_a_running_instance_forces_removal_without_a_second_query() {
     IncusWorkspace
         .execute_command(
             &cli,
-            &target("instances", "instance-a"),
+            &resource_target("instances", "instance-a"),
             ResourceCommand::Delete,
             ResourceState::Running,
         )
@@ -520,20 +563,32 @@ async fn reachable_incus_without_instances_renders_a_distinct_empty_state() {
 
 #[tokio::test]
 async fn incus_is_omitted_when_its_cli_is_absent() {
-    let cli = FixtureCli::new([(
-        ProcessSpec::new("incus", &["remote", "get-default"]),
-        Err(ProcessError::ExecutableNotFound),
-    )]);
+    let cli = FixtureCli::new([
+        (
+            ProcessSpec::new("incus", &["remote", "get-default"]),
+            Err(ProcessError::ExecutableNotFound),
+        ),
+        (
+            ProcessSpec::new("incus", &["project", "get-current"]),
+            Err(ProcessError::ExecutableNotFound),
+        ),
+    ]);
 
     assert!(IncusWorkspace.discover(&cli).await.is_none());
 }
 
 #[tokio::test]
 async fn installed_but_unreachable_incus_stays_visible_with_provider_specific_error() {
-    let cli = FixtureCli::new([(
-        ProcessSpec::new("incus", &["remote", "get-default"]),
-        failure("Error: Incus configuration is not accessible"),
-    )]);
+    let cli = FixtureCli::new([
+        (
+            ProcessSpec::new("incus", &["remote", "get-default"]),
+            failure("Error: Incus configuration is not accessible"),
+        ),
+        (
+            ProcessSpec::new("incus", &["project", "get-current"]),
+            success("default\n"),
+        ),
+    ]);
     let incus = IncusWorkspace;
 
     let discovered = incus.discover(&cli).await.expect("Incus is installed");
@@ -599,7 +654,7 @@ async fn failed_instance_refresh_identifies_incus_command_and_target() {
 async fn a_silent_instance_refresh_failure_still_explains_itself() {
     let cli = FixtureCli::new([(
         ProcessSpec::new("incus", &["list", "--format=json"]),
-        silent_failure(),
+        silent_failure(1),
     )]);
 
     let error = IncusWorkspace
@@ -637,13 +692,13 @@ async fn a_failed_instance_refresh_reports_what_incus_printed_on_stdout() {
 async fn a_silent_command_failure_names_the_operation_and_instance() {
     let cli = FixtureCli::new([(
         ProcessSpec::new("incus", &["restart", "instance-a"]),
-        silent_failure(),
+        silent_failure(1),
     )]);
 
     let error = IncusWorkspace
         .execute_command(
             &cli,
-            &target("instances", "instance-a"),
+            &resource_target("instances", "instance-a"),
             ResourceCommand::Restart,
             ResourceState::Running,
         )
@@ -663,7 +718,7 @@ async fn a_failed_command_reports_what_incus_wrote_to_stderr() {
     let error = IncusWorkspace
         .execute_command(
             &cli,
-            &target("instances", "instance-a"),
+            &resource_target("instances", "instance-a"),
             ResourceCommand::Delete,
             ResourceState::Stopped,
         )
@@ -688,7 +743,7 @@ async fn an_incus_cli_that_cannot_be_started_names_incus_in_the_error() {
     let error = IncusWorkspace
         .execute_command(
             &cli,
-            &target("instances", "instance-a"),
+            &resource_target("instances", "instance-a"),
             ResourceCommand::Stop,
             ResourceState::Running,
         )
@@ -703,10 +758,16 @@ async fn an_incus_cli_that_cannot_be_started_names_incus_in_the_error() {
 
 #[tokio::test]
 async fn a_silent_discovery_failure_names_the_probe_that_failed() {
-    let cli = FixtureCli::new([(
-        ProcessSpec::new("incus", &["remote", "get-default"]),
-        silent_failure(),
-    )]);
+    let cli = FixtureCli::new([
+        (
+            ProcessSpec::new("incus", &["remote", "get-default"]),
+            silent_failure(1),
+        ),
+        (
+            ProcessSpec::new("incus", &["project", "get-current"]),
+            success("default\n"),
+        ),
+    ]);
 
     let discovered = IncusWorkspace
         .discover(&cli)

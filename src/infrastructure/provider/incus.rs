@@ -3,7 +3,7 @@ use std::{future::Future, pin::Pin};
 use serde::Deserialize;
 
 use crate::{
-    application::InteractiveShellProcess,
+    application::{InteractiveShellProcess, LifecycleCommandPolicy, lifecycle_commands},
     infrastructure::process::{CliRunner, ProcessError, ProcessSpec},
     infrastructure::provider::{
         DetailView, DetailViewId, Provider, ProviderDiscovery, ProviderId, ProviderWorkspace,
@@ -18,6 +18,9 @@ const PROVIDER_NAME: &str = "Incus";
 /// What a user can run to check the Target Environment a refresh could not read.
 const REFRESH_HELP: &str = "Run `incus list` to verify access to the current Target Environment.";
 const INSTANCES_PANEL_ID: &str = "instances";
+const INFO_VIEW_ID: &str = "info";
+const CONFIG_VIEW_ID: &str = "config";
+const CONSOLE_LOG_VIEW_ID: &str = "console-log";
 
 pub struct IncusWorkspace;
 
@@ -41,44 +44,32 @@ impl ProviderWorkspace for IncusWorkspace {
         cli: &'a dyn CliRunner,
     ) -> Pin<Box<dyn Future<Output = Option<ProviderDiscovery>> + Send + 'a>> {
         Box::pin(async move {
-            let remote = match cli
-                .run(ProcessSpec::new("incus", &["remote", "get-default"]))
-                .await
-            {
+            let (remote, project) = tokio::join!(
+                cli.run(ProcessSpec::new("incus", &["remote", "get-default"])),
+                cli.run(ProcessSpec::new("incus", &["project", "get-current"])),
+            );
+            let remote = match remote {
                 Err(ProcessError::ExecutableNotFound) => return None,
-                Err(ProcessError::SpawnFailed(message)) => {
+                Err(error) => {
                     return Some(discovery_error(
-                        format!("{PROVIDER_NAME} CLI could not be started: {message}"),
-                        "incus remote get-default",
-                    ));
-                }
-                Err(ProcessError::Exited(failure)) => {
-                    return Some(discovery_error(
-                        failure.message_or("Incus could not report its default remote"),
+                        provider_cli_error(
+                            PROVIDER_NAME,
+                            &error,
+                            "Incus could not report its default remote",
+                        ),
                         "incus remote get-default",
                     ));
                 }
                 Ok(output) => output.stdout.trim().to_owned(),
             };
-            let project = match cli
-                .run(ProcessSpec::new("incus", &["project", "get-current"]))
-                .await
-            {
-                Err(ProcessError::ExecutableNotFound) => {
+            let project = match project {
+                Err(error) => {
                     return Some(discovery_error(
-                        format!("{PROVIDER_NAME} CLI is no longer available"),
-                        "incus project get-current",
-                    ));
-                }
-                Err(ProcessError::SpawnFailed(message)) => {
-                    return Some(discovery_error(
-                        format!("{PROVIDER_NAME} CLI could not be started: {message}"),
-                        "incus project get-current",
-                    ));
-                }
-                Err(ProcessError::Exited(failure)) => {
-                    return Some(discovery_error(
-                        failure.message_or("Incus could not report the current project"),
+                        provider_cli_error(
+                            PROVIDER_NAME,
+                            &error,
+                            "Incus could not report the current project",
+                        ),
                         "incus project get-current",
                     ));
                 }
@@ -112,7 +103,8 @@ impl ProviderWorkspace for IncusWorkspace {
                 .into_iter()
                 .map(|row| {
                     let state = incus_resource_state(&row.status);
-                    let available_commands = incus_commands(state);
+                    let available_commands =
+                        lifecycle_commands(state, LifecycleCommandPolicy::RestartAndResume);
                     let shell = instance_shell(state, &row.name);
                     Resource {
                         id: ResourceId::new(&row.name),
@@ -120,10 +112,11 @@ impl ProviderWorkspace for IncusWorkspace {
                         status: Some(row.status),
                         state: Some(state),
                         fields: vec![
-                            ("Type".to_owned(), row.instance_type),
-                            ("Architecture".to_owned(), row.architecture),
-                            ("Location".to_owned(), row.location),
+                            ("Type", row.instance_type),
+                            ("Architecture", row.architecture),
+                            ("Location", row.location),
                         ],
+                        snapshot_details: Vec::new(),
                         available_commands,
                         shell,
                     }
@@ -224,9 +217,9 @@ fn instance_detail_command<'a>(
     resource_id: &'a str,
 ) -> Option<Vec<&'a str>> {
     match view_id.0.as_str() {
-        "info" => Some(vec!["info", resource_id]),
-        "config" => Some(vec!["config", "show", resource_id]),
-        "console-log" => Some(vec!["console", "--show-log", resource_id]),
+        INFO_VIEW_ID => Some(vec!["info", resource_id]),
+        CONFIG_VIEW_ID => Some(vec!["config", "show", resource_id]),
+        CONSOLE_LOG_VIEW_ID => Some(vec!["console", "--show-log", resource_id]),
         _ => None,
     }
 }
@@ -235,9 +228,9 @@ fn instance_detail_command<'a>(
 /// through them.
 fn instance_detail_views() -> Vec<DetailView> {
     vec![
-        DetailView::new("info", "Info"),
-        DetailView::new("config", "Config"),
-        DetailView::new("console-log", "Console Log"),
+        DetailView::new(INFO_VIEW_ID, "Info"),
+        DetailView::new(CONFIG_VIEW_ID, "Config"),
+        DetailView::new(CONSOLE_LOG_VIEW_ID, "Console Log"),
     ]
 }
 
@@ -247,32 +240,21 @@ fn instance_detail_views() -> Vec<DetailView> {
 /// alongside the transitional ones an operation passes through; anything else
 /// is deliberately left `Unknown` rather than assumed to be stopped.
 fn incus_resource_state(status: &str) -> ResourceState {
-    match status.to_ascii_lowercase().as_str() {
-        "running" => ResourceState::Running,
-        "stopped" => ResourceState::Stopped,
-        "frozen" => ResourceState::Paused,
-        "starting" | "stopping" | "freezing" | "thawing" => ResourceState::Transitioning,
-        "error" => ResourceState::Broken,
-        _ => ResourceState::Unknown,
-    }
-}
-
-fn incus_commands(state: ResourceState) -> Vec<ResourceCommand> {
-    match state {
-        ResourceState::Running => vec![
-            ResourceCommand::Stop,
-            ResourceCommand::Restart,
-            ResourceCommand::Delete,
-        ],
-        ResourceState::Stopped => vec![ResourceCommand::Start, ResourceCommand::Delete],
-        // A frozen instance resumes rather than starts: `incus start` fails
-        // against it, and `incus unfreeze` fails against everything else.
-        ResourceState::Paused => vec![ResourceCommand::Resume, ResourceCommand::Delete],
-        // A transitioning, errored, or unrecognised instance has no lifecycle
-        // Command that reliably applies. Deletion always does.
-        ResourceState::Transitioning | ResourceState::Broken | ResourceState::Unknown => {
-            vec![ResourceCommand::Delete]
-        }
+    if status.eq_ignore_ascii_case("running") {
+        ResourceState::Running
+    } else if status.eq_ignore_ascii_case("stopped") {
+        ResourceState::Stopped
+    } else if status.eq_ignore_ascii_case("frozen") {
+        ResourceState::Paused
+    } else if ["starting", "stopping", "freezing", "thawing"]
+        .iter()
+        .any(|transition| status.eq_ignore_ascii_case(transition))
+    {
+        ResourceState::Transitioning
+    } else if status.eq_ignore_ascii_case("error") {
+        ResourceState::Broken
+    } else {
+        ResourceState::Unknown
     }
 }
 
