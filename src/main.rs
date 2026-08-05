@@ -10,7 +10,7 @@ use std::{
 
 use crossterm::{
     cursor::MoveTo,
-    event::{self, Event, KeyEvent},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEvent},
     execute,
     terminal::{Clear, ClearType, EnterAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -43,7 +43,12 @@ async fn main() -> io::Result<()> {
         }
     };
     let mut terminal = ratatui::init();
+    if let Err(error) = execute!(io::stdout(), EnableMouseCapture) {
+        ratatui::restore();
+        return Err(error);
+    }
     let result = run(&mut terminal, registry).await;
+    let _ = execute!(io::stdout(), DisableMouseCapture);
     ratatui::restore();
     result
 }
@@ -111,6 +116,56 @@ fn handle_key(app: &mut App, event: KeyEvent) -> (ShellControl, Vec<ProviderRequ
     }
 }
 
+fn handle_mouse(
+    app: &mut App,
+    event: crossterm::event::MouseEvent,
+    geometry: &presentation::InteractionGeometry,
+) -> Vec<ProviderRequest> {
+    let Some(input) = presentation::mouse_from_event(event) else {
+        return Vec::new();
+    };
+    match input.action {
+        presentation::MouseAction::Press => match geometry.hit(input.column, input.row) {
+            Some(presentation::InteractionTarget::Provider(index)) => app.select_provider_at(index),
+            Some(presentation::InteractionTarget::Resource { panel, resource }) => {
+                app.select_resource_at(panel, resource);
+                Vec::new()
+            }
+            Some(presentation::InteractionTarget::ResourcePanel(panel)) => {
+                app.focus_resource_panel_at(panel);
+                Vec::new()
+            }
+            Some(presentation::InteractionTarget::ProviderSelector) => {
+                app.focus_providers();
+                Vec::new()
+            }
+            Some(presentation::InteractionTarget::DetailView(_))
+            | Some(presentation::InteractionTarget::Details) => {
+                app.focus_details();
+                Vec::new()
+            }
+            None => Vec::new(),
+        },
+        presentation::MouseAction::ScrollUp | presentation::MouseAction::ScrollDown => {
+            if matches!(
+                geometry.hit(input.column, input.row),
+                Some(
+                    presentation::InteractionTarget::Details
+                        | presentation::InteractionTarget::DetailView(_)
+                )
+            ) {
+                app.invoke(if input.action == presentation::MouseAction::ScrollUp {
+                    Command::ScrollDetailsUp
+                } else {
+                    Command::ScrollDetailsDown
+                })
+            } else {
+                Vec::new()
+            }
+        }
+    }
+}
+
 /// The terminal and input-reader operations ordered by an interactive-shell
 /// handover. This is a host seam: neither application nor infrastructure owns
 /// the user's terminal lifecycle.
@@ -165,15 +220,23 @@ async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::R
     let mut refresh_timer = RefreshTimer::new();
 
     let result = loop {
-        if let Err(error) = terminal.draw(|frame| presentation::render(app.state(), frame)) {
+        let mut geometry = presentation::InteractionGeometry::default();
+        if let Err(error) = terminal.draw(|frame| {
+            geometry = presentation::interaction_geometry(app.state(), frame.area());
+            presentation::render(app.state(), frame)
+        }) {
             break Err(error);
         }
 
         let detail_deadline = detail_dispatch.deadline();
         tokio::select! {
             biased;
-            Some(key) = key_rx.recv() => {
-                let (control, requests) = handle_key(&mut app, key);
+            Some(event) = key_rx.recv() => {
+                let (control, requests) = match event {
+                    Event::Key(key) => handle_key(&mut app, key),
+                    Event::Mouse(mouse) => (ShellControl::Continue, handle_mouse(&mut app, mouse, &geometry)),
+                    _ => (ShellControl::Continue, Vec::new()),
+                };
                 dispatch_all(&runtime, &completion_tx, &mut detail_dispatch, requests);
                 if control == ShellControl::Quit {
                     break Ok(());
@@ -248,7 +311,7 @@ struct Host<'a> {
     input: &'a mut InputThread,
     /// The keys the reader has already published, which the discard step empties
     /// before anything is allowed to read again.
-    keys: &'a mut mpsc::UnboundedReceiver<KeyEvent>,
+    keys: &'a mut mpsc::UnboundedReceiver<Event>,
 }
 
 impl ShellTerminal for Host<'_> {
@@ -308,13 +371,13 @@ impl ShellTerminal for Host<'_> {
 /// It is stoppable because an Interactive Shell needs the keystrokes more than
 /// Virtui does, and restartable because Virtui needs them back afterwards.
 struct InputThread {
-    keys: mpsc::UnboundedSender<KeyEvent>,
+    keys: mpsc::UnboundedSender<Event>,
     stop: Arc<AtomicBool>,
     handle: Option<thread::JoinHandle<()>>,
 }
 
 impl InputThread {
-    fn start(keys: mpsc::UnboundedSender<KeyEvent>) -> Self {
+    fn start(keys: mpsc::UnboundedSender<Event>) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let handle = spawn_input_thread(keys.clone(), Arc::clone(&stop));
         Self {
@@ -364,15 +427,15 @@ async fn wait_for_detail_dispatch(deadline: Option<Instant>) {
 }
 
 fn spawn_input_thread(
-    keys: mpsc::UnboundedSender<KeyEvent>,
+    keys: mpsc::UnboundedSender<Event>,
     stop: Arc<AtomicBool>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         while !stop.load(Ordering::Relaxed) {
             match event::poll(Duration::from_millis(100)) {
                 Ok(true) => match event::read() {
-                    Ok(Event::Key(key)) => {
-                        if keys.send(key).is_err() {
+                    Ok(event @ (Event::Key(_) | Event::Mouse(_))) => {
+                        if keys.send(event).is_err() {
                             break;
                         }
                     }

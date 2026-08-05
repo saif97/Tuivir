@@ -310,6 +310,34 @@ impl ProviderWorkspaceState {
         });
     }
 
+    /// Selects a Resource by its current Provider order without changing any
+    /// other panel's remembered selection or scroll position.
+    pub fn select_resource_at(&mut self, index: usize) {
+        self.invalidate_detail_when_target_changes(|workspace| {
+            let WorkspaceLoadState::Ready(snapshot) = &workspace.load_state else {
+                return;
+            };
+            let Some(panel_id) = workspace.focused_resource_panel.as_ref() else {
+                return;
+            };
+            let Some(panel) = snapshot.panel(panel_id) else {
+                return;
+            };
+            let Some(resource) = panel.resources.get(index) else {
+                return;
+            };
+            let Some(navigation) = workspace
+                .panel_navigation
+                .iter_mut()
+                .find(|navigation| &navigation.panel_id == panel_id)
+            else {
+                return;
+            };
+            navigation.selected_resource = Some(resource.id.clone());
+            navigation.selected_index = index;
+        });
+    }
+
     /// Moves through the focused panel's Detail Views as a ring.
     pub fn move_detail_view(&mut self, delta: isize) {
         self.invalidate_detail_when_target_changes(|workspace| {

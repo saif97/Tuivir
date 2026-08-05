@@ -14,7 +14,198 @@ use crate::application::{
 };
 use crate::domain::ResourceState;
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct InteractionGeometry {
+    pub provider_tabs: Vec<(Rect, usize)>,
+    pub provider_selector: Option<Rect>,
+    pub resource_panels: Vec<(Rect, usize)>,
+    pub resource_rows: Vec<Vec<(usize, Rect)>>,
+    pub detail_view_tabs: Vec<(Rect, usize)>,
+    pub resources: Option<Rect>,
+    pub details: Option<Rect>,
+}
+
+impl InteractionGeometry {
+    pub fn hit(&self, column: u16, row: u16) -> Option<InteractionTarget> {
+        let point = ratatui::layout::Position::new(column, row);
+        if let Some((_, index)) = self
+            .provider_tabs
+            .iter()
+            .find(|(area, _)| area.contains(point))
+        {
+            return Some(InteractionTarget::Provider(*index));
+        }
+        for (panel_index, rows) in self.resource_rows.iter().enumerate() {
+            if let Some((resource_index, _)) = rows.iter().find(|(_, area)| area.contains(point)) {
+                return Some(InteractionTarget::Resource {
+                    panel: panel_index,
+                    resource: *resource_index,
+                });
+            }
+        }
+        if let Some((_, index)) = self
+            .resource_panels
+            .iter()
+            .find(|(area, _)| area.contains(point))
+        {
+            return Some(InteractionTarget::ResourcePanel(*index));
+        }
+        if let Some((_, index)) = self
+            .detail_view_tabs
+            .iter()
+            .find(|(area, _)| area.contains(point))
+        {
+            return Some(InteractionTarget::DetailView(*index));
+        }
+        if self
+            .provider_selector
+            .is_some_and(|area| area.contains(point))
+        {
+            return Some(InteractionTarget::ProviderSelector);
+        }
+        self.details
+            .filter(|area| area.contains(point))
+            .map(|_| InteractionTarget::Details)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InteractionTarget {
+    Provider(usize),
+    ProviderSelector,
+    ResourcePanel(usize),
+    Resource { panel: usize, resource: usize },
+    DetailView(usize),
+    Details,
+}
+
+pub fn interaction_geometry(state: &AppState, area: Rect) -> InteractionGeometry {
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(1),
+            Constraint::Length(u16::from(!state.running_commands.is_empty())),
+        ])
+        .split(area);
+    let mut geometry = InteractionGeometry::default();
+    let mut x = rows[0].x;
+    let selector_width = provider_label_width(state) + 2;
+    geometry.provider_selector = Some(Rect::new(x, rows[0].y, selector_width, 1));
+    x += selector_width;
+    for (index, provider) in state.providers.iter().enumerate() {
+        if index > 0 {
+            x += 3;
+        }
+        let width = provider.name().chars().count() as u16
+            + if Some(index) == state.active_provider {
+                4
+            } else {
+                0
+            };
+        geometry
+            .provider_tabs
+            .push((Rect::new(x, rows[0].y, width, 1), index));
+        x = x.saturating_add(width);
+    }
+    let Some(provider) = state.active_workspace() else {
+        return geometry;
+    };
+    let columns = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(48), Constraint::Percentage(52)])
+        .split(rows[1]);
+    geometry.details = Some(columns[1]);
+    geometry.resources = Some(columns[0]);
+    if let crate::application::WorkspacePresentation::Ready(view) = provider.presentation() {
+        let panel_areas = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(
+                view.panels()
+                    .map(|panel| Constraint::Fill(panel.panel.resources.len().max(1) as u16)),
+            )
+            .split(columns[0]);
+        for (panel, panel_area) in view.panels().zip(panel_areas.iter().copied()) {
+            let panel_index = geometry.resource_panels.len();
+            geometry.resource_panels.push((panel_area, panel_index));
+            let viewport_height = panel_area.height.saturating_sub(2) as usize;
+            let visible = visible_resource_range(
+                panel.selected_index,
+                viewport_height,
+                panel.panel.resources.len(),
+            );
+            let inner = Rect::new(
+                panel_area.x + 1,
+                panel_area.y + 1,
+                panel_area.width.saturating_sub(2),
+                panel_area.height.saturating_sub(2),
+            );
+            geometry.resource_rows.push(
+                (visible.start..visible.end)
+                    .map(|index| {
+                        (
+                            index,
+                            Rect::new(
+                                inner.x,
+                                inner.y.saturating_add((index - visible.start) as u16),
+                                inner.width,
+                                1,
+                            ),
+                        )
+                    })
+                    .collect(),
+            );
+        }
+        let details = columns[1];
+        let block = pane_block(pane_title(None, "Details", false), false);
+        let inner = block.inner(details);
+        let summary_len = view
+            .selected_resource
+            .map_or(1, |resource| 1 + resource.fields.len()) as u16;
+        let detail_rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(summary_len),
+                Constraint::Length(u16::from(!view.detail_views.is_empty()) * 2),
+                Constraint::Min(0),
+            ])
+            .split(inner);
+        if !view.detail_views.is_empty() {
+            let mut tab_x = detail_rows[1].x;
+            for (index, detail) in view.detail_views.iter().enumerate() {
+                if index > 0 {
+                    tab_x += 2;
+                }
+                let width = detail.title.chars().count() as u16
+                    + if view
+                        .selected_detail_view
+                        .is_some_and(|selected| selected.id == detail.id)
+                    {
+                        4
+                    } else {
+                        0
+                    };
+                geometry
+                    .detail_view_tabs
+                    .push((Rect::new(tab_x, detail_rows[1].y + 1, width, 1), index));
+                tab_x = tab_x.saturating_add(width);
+            }
+        }
+    }
+    geometry
+}
+
+fn provider_label_width(state: &AppState) -> u16 {
+    let hint = state
+        .hints
+        .focus_providers
+        .as_deref()
+        .map_or(0, |hint| hint.chars().count() + 3);
+    ("▶ ".chars().count() + hint + "Providers".chars().count()) as u16
+}
+
 pub fn render(state: &AppState, frame: &mut Frame<'_>) {
+    let geometry = interaction_geometry(state, frame.area());
     let status_height = u16::from(!state.running_commands.is_empty());
     let rows = Layout::default()
         .direction(Direction::Vertical)
@@ -37,10 +228,12 @@ pub fn render(state: &AppState, frame: &mut Frame<'_>) {
         return;
     };
 
-    let columns = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(48), Constraint::Percentage(52)])
-        .split(rows[1]);
+    let columns = [
+        geometry
+            .resources
+            .expect("workspace geometry has resources"),
+        geometry.details.expect("workspace geometry has details"),
+    ];
     let presentation = provider.presentation();
     let workspace_view = match &presentation {
         WorkspacePresentation::Ready(view) => Some(view),
@@ -590,5 +783,15 @@ mod tests {
                 .add_modifier(Modifier::BOLD)
         );
         assert_eq!(panel_title_style(false), Style::default());
+    }
+
+    #[test]
+    fn geometry_handles_empty_workspace_without_panics() {
+        let geometry = interaction_geometry(&AppState::default(), Rect::new(0, 0, 80, 24));
+        assert_eq!(
+            geometry.hit(0, 0),
+            Some(InteractionTarget::ProviderSelector)
+        );
+        assert_eq!(geometry.hit(79, 23), None);
     }
 }

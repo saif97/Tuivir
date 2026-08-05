@@ -364,6 +364,56 @@ impl App {
         requests
     }
 
+    /// Activates a Provider Workspace by its rendered selector position.
+    pub fn select_provider_at(&mut self, index: usize) -> Vec<ProviderRequest> {
+        if index >= self.state.providers.len() {
+            return Vec::new();
+        }
+        self.state.focused_pane = FocusedPane::Providers;
+        if self.state.active_provider == Some(index) {
+            return Vec::new();
+        }
+        let previous = self
+            .state
+            .active_provider
+            .map(|active| self.state.providers[active].id().clone());
+        if let Some(previous) = previous {
+            self.state
+                .providers
+                .iter_mut()
+                .find(|provider| provider.id() == &previous)
+                .expect("active Provider exists")
+                .invalidate_pending_detail();
+            self.pending_refreshes
+                .retain(|_, provider_id| provider_id != &previous);
+        }
+        self.state.active_provider = Some(index);
+        self.refresh_active_provider()
+    }
+
+    /// Focuses a Resource Panel and selects the Resource under a mouse click.
+    pub fn select_resource_at(&mut self, panel_index: usize, resource_index: usize) {
+        let Some(provider) = self.state.active_workspace_mut() else {
+            return;
+        };
+        if provider.focus_resource_panel_at(panel_index) {
+            provider.select_resource_at(resource_index);
+            self.state.focused_pane = FocusedPane::Resources;
+        }
+    }
+
+    pub fn focus_details(&mut self) {
+        self.state.focused_pane = FocusedPane::Details;
+    }
+
+    pub fn focus_providers(&mut self) {
+        self.state.focused_pane = FocusedPane::Providers;
+    }
+
+    pub fn focus_resource_panel_at(&mut self, index: usize) {
+        self.focus_resource_panel(index);
+    }
+
     fn dispatch(&mut self, command: Command) -> Vec<ProviderRequest> {
         match command {
             Command::Quit => Vec::new(),
