@@ -414,6 +414,19 @@ impl App {
         self.focus_resource_panel(index);
     }
 
+    pub fn select_detail_view_at(&mut self, index: usize) {
+        if let Some(provider) = self.state.active_workspace_mut() {
+            provider.select_detail_view_at(index);
+            self.state.focused_pane = FocusedPane::Details;
+        }
+    }
+
+    pub fn scroll_resource_panel_at(&mut self, panel: usize, delta: isize) {
+        if let Some(provider) = self.state.active_workspace_mut() {
+            provider.move_resource_selection_at(panel, delta);
+        }
+    }
+
     fn dispatch(&mut self, command: Command) -> Vec<ProviderRequest> {
         match command {
             Command::Quit => Vec::new(),

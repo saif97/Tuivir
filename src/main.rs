@@ -139,8 +139,11 @@ fn handle_mouse(
                 app.focus_providers();
                 Vec::new()
             }
-            Some(presentation::InteractionTarget::DetailView(_))
-            | Some(presentation::InteractionTarget::Details) => {
+            Some(presentation::InteractionTarget::DetailView(index)) => {
+                app.select_detail_view_at(index);
+                Vec::new()
+            }
+            Some(presentation::InteractionTarget::Details) => {
                 app.focus_details();
                 Vec::new()
             }
@@ -159,6 +162,23 @@ fn handle_mouse(
                 } else {
                     Command::ScrollDetailsDown
                 })
+            } else if let Some(target) = geometry.hit(input.column, input.row) {
+                let panel = match target {
+                    presentation::InteractionTarget::ResourcePanel(panel)
+                    | presentation::InteractionTarget::Resource { panel, .. } => Some(panel),
+                    _ => None,
+                };
+                if let Some(panel) = panel {
+                    app.scroll_resource_panel_at(
+                        panel,
+                        if input.action == presentation::MouseAction::ScrollUp {
+                            -1
+                        } else {
+                            1
+                        },
+                    );
+                }
+                Vec::new()
             } else {
                 Vec::new()
             }

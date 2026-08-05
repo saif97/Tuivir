@@ -97,12 +97,14 @@ pub fn interaction_geometry(state: &AppState, area: Rect) -> InteractionGeometry
         if index > 0 {
             x += 3;
         }
-        let width = provider.name().chars().count() as u16
-            + if Some(index) == state.active_provider {
-                4
-            } else {
-                0
-            };
+        let width = if Some(index) == state.active_provider {
+            let target_width = provider
+                .target_environment()
+                .map_or(0, |target| target.to_string().chars().count() + 3);
+            provider.name().chars().count() as u16 + 4 + target_width as u16
+        } else {
+            provider.name().chars().count() as u16
+        };
         geometry
             .provider_tabs
             .push((Rect::new(x, rows[0].y, width, 1), index));

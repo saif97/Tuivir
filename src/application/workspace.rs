@@ -370,6 +370,38 @@ impl ProviderWorkspaceState {
         });
     }
 
+    pub fn select_detail_view_at(&mut self, index: usize) {
+        self.invalidate_detail_when_target_changes(|workspace| {
+            let WorkspaceLoadState::Ready(snapshot) = &workspace.load_state else {
+                return;
+            };
+            let Some(panel_id) = workspace.focused_resource_panel.as_ref() else {
+                return;
+            };
+            let Some(panel) = snapshot.panel(panel_id) else {
+                return;
+            };
+            workspace.selected_detail_view =
+                panel.detail_views.get(index).map(|view| view.id.clone());
+        });
+    }
+
+    pub fn move_resource_selection_at(&mut self, panel_index: usize, delta: isize) {
+        let Some(panel_id) = (match &self.load_state {
+            WorkspaceLoadState::Ready(snapshot) => snapshot
+                .panels
+                .get(panel_index)
+                .map(|panel| panel.id.clone()),
+            WorkspaceLoadState::Loading | WorkspaceLoadState::Error(_) => None,
+        }) else {
+            return;
+        };
+        let previous = self.focused_resource_panel.clone();
+        self.focused_resource_panel = Some(panel_id);
+        self.move_resource_selection(delta);
+        self.focused_resource_panel = previous;
+    }
+
     /// Starts a load only when the visible Resource and Detail View are not
     /// already loaded or pending. The application supplies the request ID and
     /// dispatches the returned work.
