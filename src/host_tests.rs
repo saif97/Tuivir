@@ -12,8 +12,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use super::{DetailDispatchQueue, ShellTerminal, handle_key, open_pending_shell};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use super::{DetailDispatchQueue, ShellTerminal, handle_key, handle_mouse, open_pending_shell};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::layout::Rect;
 use virtui::{
     application::{
         App, AppEvent, DetailView, InteractiveShellProcess, ProviderRequest, Resource,
@@ -22,7 +23,7 @@ use virtui::{
     domain::{Provider, ProviderId, ResourceId, ResourcePanelId, ResourceState, TargetEnvironment},
     infrastructure::process::{InteractiveRunner, ProcessError, ProcessFailure, ProcessSpec},
     infrastructure::provider::ProviderDiscovery,
-    presentation::render_to_text,
+    presentation::{InteractionGeometry, InteractionTarget, render_to_text},
 };
 
 /// Everything the host was asked to do, in the order it was asked.
@@ -428,4 +429,51 @@ fn a_loop_with_no_shell_waiting_leaves_the_terminal_alone() {
 
     assert!(handover.steps().is_empty());
     assert!(requests.is_empty());
+}
+
+#[test]
+fn mouse_hit_testing_routes_each_interactive_region_without_a_terminal() {
+    let geometry = InteractionGeometry {
+        provider_tabs: vec![(Rect::new(2, 0, 8, 1), 1)],
+        provider_selector: Some(Rect::new(0, 0, 2, 1)),
+        resource_panels: vec![(Rect::new(0, 1, 10, 5), 0)],
+        resource_rows: vec![vec![(3, Rect::new(1, 2, 8, 1))]],
+        detail_view_tabs: vec![(Rect::new(12, 2, 8, 1), 0)],
+        resources: Some(Rect::new(0, 1, 10, 5)),
+        details: Some(Rect::new(10, 1, 20, 5)),
+    };
+    assert_eq!(geometry.hit(3, 0), Some(InteractionTarget::Provider(1)));
+    assert_eq!(
+        geometry.hit(2, 2),
+        Some(InteractionTarget::Resource {
+            panel: 0,
+            resource: 3
+        })
+    );
+    assert_eq!(geometry.hit(13, 2), Some(InteractionTarget::DetailView(0)));
+    assert_eq!(geometry.hit(29, 5), Some(InteractionTarget::Details));
+    assert_eq!(geometry.hit(79, 23), None);
+}
+
+#[test]
+fn mouse_detail_click_focuses_details_without_live_terminal() {
+    let mut app = App::new();
+    let geometry = InteractionGeometry {
+        detail_view_tabs: vec![(Rect::new(0, 0, 8, 1), 0)],
+        ..InteractionGeometry::default()
+    };
+    handle_mouse(
+        &mut app,
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 1,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        },
+        &geometry,
+    );
+    assert_eq!(
+        app.state().focused_pane,
+        virtui::application::FocusedPane::Details
+    );
 }

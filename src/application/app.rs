@@ -415,9 +415,9 @@ impl App {
     }
 
     pub fn select_detail_view_at(&mut self, index: usize) {
+        self.state.focused_pane = FocusedPane::Details;
         if let Some(provider) = self.state.active_workspace_mut() {
             provider.select_detail_view_at(index);
-            self.state.focused_pane = FocusedPane::Details;
         }
     }
 

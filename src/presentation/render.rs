@@ -208,6 +208,14 @@ fn provider_label_width(state: &AppState) -> u16 {
 
 pub fn render(state: &AppState, frame: &mut Frame<'_>) {
     let geometry = interaction_geometry(state, frame.area());
+    render_with_geometry(state, frame, &geometry);
+}
+
+pub fn render_with_geometry(
+    state: &AppState,
+    frame: &mut Frame<'_>,
+    geometry: &InteractionGeometry,
+) {
     let status_height = u16::from(!state.running_commands.is_empty());
     let rows = Layout::default()
         .direction(Direction::Vertical)

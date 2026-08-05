@@ -243,7 +243,7 @@ async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::R
         let mut geometry = presentation::InteractionGeometry::default();
         if let Err(error) = terminal.draw(|frame| {
             geometry = presentation::interaction_geometry(app.state(), frame.area());
-            presentation::render(app.state(), frame)
+            presentation::render_with_geometry(app.state(), frame, &geometry)
         }) {
             break Err(error);
         }
