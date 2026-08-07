@@ -415,6 +415,14 @@ impl App {
                 self.state.pane_boundary = self.state.pane_boundary.grabbed_at(column);
                 Vec::new()
             }
+            Command::SetPaneBoundary(share) => {
+                self.state.pane_boundary = self.state.pane_boundary.dragged_to(share);
+                Vec::new()
+            }
+            Command::ReleasePaneBoundary => {
+                self.state.pane_boundary = self.state.pane_boundary.released();
+                Vec::new()
+            }
             Command::FocusProviders => {
                 self.state.focused_pane = FocusedPane::Providers;
                 Vec::new()

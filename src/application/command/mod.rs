@@ -87,6 +87,11 @@ pub enum Command {
     /// That column is kept so the boundary stays where it is when it is
     /// grabbed. A boundary that moved to sit under the pointer would jump.
     GrabPaneBoundary(u16),
+    /// Puts a held Pane Boundary at the share of the width the pointer has
+    /// dragged it to. It is refused unless the boundary is held.
+    SetPaneBoundary(u16),
+    /// Lets go of the Pane Boundary.
+    ReleasePaneBoundary,
     /// Focuses a Resource Panel and selects one Resource inside it.
     SelectResource {
         panel: usize,

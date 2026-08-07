@@ -3348,3 +3348,34 @@ fn the_pane_boundary_stops_at_the_edges_of_its_range() {
         "the Resource Panels keep a quarter of the width"
     );
 }
+
+/// A drag is only the Pane Boundary's while the pointer holds it. Every other
+/// drag on the screen reaches the application the same way and must not move
+/// the Panes.
+#[test]
+fn the_pane_boundary_moves_only_while_the_pointer_holds_it() {
+    let mut app = App::new();
+    let start = app.state().pane_boundary.resources_percent();
+
+    app.invoke(Command::SetPaneBoundary(60));
+
+    assert_eq!(
+        app.state().pane_boundary.resources_percent(),
+        start,
+        "a boundary nobody grabbed ignores the pointer"
+    );
+
+    app.invoke(Command::GrabPaneBoundary(0));
+    app.invoke(Command::SetPaneBoundary(60));
+
+    assert_eq!(app.state().pane_boundary.resources_percent(), 60);
+
+    app.invoke(Command::ReleasePaneBoundary);
+    app.invoke(Command::SetPaneBoundary(30));
+
+    assert_eq!(
+        app.state().pane_boundary.resources_percent(),
+        60,
+        "letting go stops the boundary following the pointer"
+    );
+}

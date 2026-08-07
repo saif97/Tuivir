@@ -55,6 +55,21 @@ impl PaneBoundary {
         }
     }
 
+    /// Follows the pointer, but only while the pointer is holding on.
+    ///
+    /// A drag that started somewhere else — the user selecting Details text —
+    /// reaches here as well, and an unheld boundary is what refuses it.
+    pub fn dragged_to(self, resources_percent: u16) -> Self {
+        match self.grab {
+            Some(_) => self.with_share(resources_percent),
+            None => self,
+        }
+    }
+
+    pub fn released(self) -> Self {
+        Self { grab: None, ..self }
+    }
+
     fn with_share(self, resources_percent: u16) -> Self {
         Self {
             resources_percent: resources_percent.clamp(MINIMUM_PERCENT, MAXIMUM_PERCENT),

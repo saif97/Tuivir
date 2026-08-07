@@ -596,25 +596,25 @@ fn mouse_routing_resolves_each_region_without_a_terminal() {
     };
 
     assert_eq!(
-        resolve_mouse(&layout, press(3, 0)),
+        resolve_mouse(&layout, press(3, 0), None),
         Some(Command::ActivateProviderWorkspace(1))
     );
     assert_eq!(
-        resolve_mouse(&layout, press(2, 2)),
+        resolve_mouse(&layout, press(2, 2), None),
         Some(Command::SelectResource {
             panel: 0,
             resource: 3
         })
     );
     assert_eq!(
-        resolve_mouse(&layout, press(13, 2)),
+        resolve_mouse(&layout, press(13, 2), None),
         Some(Command::ActivateDetailView(0))
     );
     assert_eq!(
-        resolve_mouse(&layout, press(29, 5)),
+        resolve_mouse(&layout, press(29, 5), None),
         Some(Command::FocusDetails)
     );
-    assert_eq!(resolve_mouse(&layout, press(79, 23)), None);
+    assert_eq!(resolve_mouse(&layout, press(79, 23), None), None);
 }
 
 fn press(column: u16, row: u16) -> virtui::presentation::MouseInput {
