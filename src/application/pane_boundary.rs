@@ -17,8 +17,14 @@ impl Default for PaneBoundary {
 }
 
 impl PaneBoundary {
+    /// Holds the share inside the range both Panes stay usable in.
+    ///
+    /// Clamping here rather than at each caller makes the range a property of
+    /// the boundary itself, so no way of moving it can leave the range.
     pub fn new(resources_percent: u16) -> Self {
-        Self { resources_percent }
+        Self {
+            resources_percent: resources_percent.clamp(MINIMUM_PERCENT, MAXIMUM_PERCENT),
+        }
     }
 
     pub fn resources_percent(self) -> u16 {
@@ -39,3 +45,11 @@ impl PaneBoundary {
 /// Twenty presses cross the whole width, which is few enough to reach the size
 /// the user wants and many enough to stop where they meant to.
 const STEP: u16 = 5;
+
+/// The narrowest share either Pane may be left with.
+///
+/// A share rather than a column count, so the rule holds without consulting a
+/// terminal width that changes. On an eighty-column terminal a quarter is
+/// twenty columns, which still holds a Resource name inside its borders.
+const MINIMUM_PERCENT: u16 = 25;
+const MAXIMUM_PERCENT: u16 = 100 - MINIMUM_PERCENT;

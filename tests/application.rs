@@ -3321,3 +3321,30 @@ fn moving_the_pane_boundary_steps_it_by_five_points_each_way() {
         "moving left gives the Details Pane more of the width"
     );
 }
+
+/// Neither Pane may be squeezed out of usefulness, however long the user holds
+/// the key down.
+#[test]
+fn the_pane_boundary_stops_at_the_edges_of_its_range() {
+    let mut app = App::new();
+
+    for _ in 0..20 {
+        app.invoke(Command::MovePaneBoundaryRight);
+    }
+
+    assert_eq!(
+        app.state().pane_boundary.resources_percent(),
+        75,
+        "the Details Pane keeps a quarter of the width"
+    );
+
+    for _ in 0..20 {
+        app.invoke(Command::MovePaneBoundaryLeft);
+    }
+
+    assert_eq!(
+        app.state().pane_boundary.resources_percent(),
+        25,
+        "the Resource Panels keep a quarter of the width"
+    );
+}
