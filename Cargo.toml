@@ -2,6 +2,10 @@
 name = "virtui"
 version = "0.1.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/saif97/virtui"
+description = "A terminal environment for inspecting and operating resources managed by local virtualization and container providers."
+publish = false
 
 [dependencies]
 crossterm = "0.29.0"

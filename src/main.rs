@@ -33,6 +33,11 @@ mod host_tests;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("--version") {
+        println!("{}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
     // Configuration is loaded and validated before raw mode so a bad file
     // exits with a readable diagnostic instead of scrambling the terminal.
     let registry = match load(&Env::from_environment(), &FileSystemReader) {

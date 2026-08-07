@@ -29,8 +29,37 @@ fn run(config: &Path) -> Output {
         .expect("Virtui to run")
 }
 
+fn run_version() -> Output {
+    Command::new(env!("CARGO_BIN_EXE_virtui"))
+        .arg("--version")
+        .env("VIRTUI_CONFIG_FILE", "/nonexistent/virtui/config.toml")
+        .output()
+        .expect("Virtui to run")
+}
+
 fn stderr(output: &Output) -> String {
     String::from_utf8(output.stderr.clone()).expect("stderr to be text")
+}
+
+#[test]
+fn version_prints_the_package_version_before_startup() {
+    let output = run_version();
+
+    assert!(
+        output.status.success(),
+        "Virtui --version must exit successfully, got {:?}",
+        output.status
+    );
+    assert_eq!(
+        output.stdout,
+        format!("{}\n", env!("CARGO_PKG_VERSION")).as_bytes(),
+        "--version must print only the package version"
+    );
+    assert!(
+        output.stderr.is_empty(),
+        "--version must not emit diagnostics, got: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 /// A rejected configuration must leave the terminal untouched and say why.
