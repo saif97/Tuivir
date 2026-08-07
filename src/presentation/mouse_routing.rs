@@ -41,6 +41,12 @@ fn press(layout: &ScreenLayout, input: MouseInput) -> Option<Command> {
     }
 
     let panes = layout.panes.as_ref()?;
+    // Before the Panes: the boundary's own columns are the last column of the
+    // Resource Panels and the first of the Details Pane, so a boundary tested
+    // afterwards would never be reached.
+    if panes.pane_boundary.contains(point) {
+        return Some(Command::GrabPaneBoundary(point.x - panes.pane_boundary.x));
+    }
     for (panel, rows) in panes.resource_rows.iter().enumerate() {
         if let Some((resource, _)) = rows.iter().find(|(_, area)| area.contains(point)) {
             return Some(Command::SelectResource {
@@ -118,6 +124,53 @@ mod tests {
 
         assert_eq!(resolve(&layout, press(0, 0)), Some(Command::FocusProviders));
         assert_eq!(resolve(&layout, press(79, 23)), None);
+    }
+
+    /// A Provider Workspace with no snapshot yet. It draws both Panes and the
+    /// Pane Boundary between them, which is all this needs to point at.
+    fn active_workspace() -> AppState {
+        use crate::application::ProviderWorkspaceState;
+        use crate::domain::{Provider, ProviderId};
+
+        AppState {
+            providers: vec![ProviderWorkspaceState::new(
+                Provider::new(ProviderId::new("docker"), "Docker", None, None),
+                None,
+            )],
+            active_provider: Some(0),
+            ..AppState::default()
+        }
+    }
+
+    /// The Pane Boundary is tested before the Panes it separates. Its right
+    /// column is the Details Pane's first column, so a boundary tested second
+    /// could never be grabbed there at all.
+    #[test]
+    fn a_press_on_the_pane_boundary_grabs_it_rather_than_the_pane_behind_it() {
+        let state = active_workspace();
+        let layout = ScreenLayout::measure(&state, Rect::new(0, 0, 80, 24));
+        let boundary = layout
+            .panes
+            .as_ref()
+            .expect("a Provider Workspace is active")
+            .pane_boundary;
+        let row = boundary.y + 2;
+
+        assert_eq!(
+            resolve(&layout, press(boundary.x, row)),
+            Some(Command::GrabPaneBoundary(0)),
+            "the grab remembers which of the two columns was pressed"
+        );
+        assert_eq!(
+            resolve(&layout, press(boundary.x + 1, row)),
+            Some(Command::GrabPaneBoundary(1)),
+            "the Details Pane starts on this column, and the boundary wins it"
+        );
+        assert_eq!(
+            resolve(&layout, press(boundary.x + 2, row)),
+            Some(Command::FocusDetails),
+            "one column further in is the Details Pane again"
+        );
     }
 
     #[test]

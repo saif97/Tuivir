@@ -77,10 +77,16 @@ pub enum Command {
     Resource(ResourceCommand),
     /// Activates a Provider Workspace by its position in the provider bar.
     ///
-    /// This and the four Commands below carry a position the user pointed at,
+    /// This and the five Commands below carry a position the user pointed at,
     /// so they are invoked by the mouse rather than bound to a Keybinding.
     /// They are not registered, and so never appear in help or configuration.
     ActivateProviderWorkspace(usize),
+    /// Takes hold of the Pane Boundary, carrying which of its two columns the
+    /// user pressed.
+    ///
+    /// That column is kept so the boundary stays where it is when it is
+    /// grabbed. A boundary that moved to sit under the pointer would jump.
+    GrabPaneBoundary(u16),
     /// Focuses a Resource Panel and selects one Resource inside it.
     SelectResource {
         panel: usize,

@@ -8,6 +8,9 @@
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PaneBoundary {
     resources_percent: u16,
+    /// Which of the boundary's two columns the pointer took hold of, while it
+    /// is held. `None` means the pointer is not dragging it.
+    grab: Option<u16>,
 }
 
 impl Default for PaneBoundary {
@@ -24,6 +27,7 @@ impl PaneBoundary {
     pub fn new(resources_percent: u16) -> Self {
         Self {
             resources_percent: resources_percent.clamp(MINIMUM_PERCENT, MAXIMUM_PERCENT),
+            grab: None,
         }
     }
 
@@ -31,12 +35,31 @@ impl PaneBoundary {
         self.resources_percent
     }
 
+    /// Which of the boundary's two columns the pointer is holding.
+    pub fn grab(self) -> Option<u16> {
+        self.grab
+    }
+
     pub fn moved_left(self) -> Self {
-        Self::new(self.resources_percent.saturating_sub(STEP))
+        self.with_share(self.resources_percent.saturating_sub(STEP))
     }
 
     pub fn moved_right(self) -> Self {
-        Self::new(self.resources_percent.saturating_add(STEP))
+        self.with_share(self.resources_percent.saturating_add(STEP))
+    }
+
+    pub fn grabbed_at(self, column: u16) -> Self {
+        Self {
+            grab: Some(column),
+            ..self
+        }
+    }
+
+    fn with_share(self, resources_percent: u16) -> Self {
+        Self {
+            resources_percent: resources_percent.clamp(MINIMUM_PERCENT, MAXIMUM_PERCENT),
+            ..self
+        }
     }
 }
 

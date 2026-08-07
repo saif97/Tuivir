@@ -411,6 +411,10 @@ impl App {
                 self.state.pane_boundary = self.state.pane_boundary.moved_right();
                 Vec::new()
             }
+            Command::GrabPaneBoundary(column) => {
+                self.state.pane_boundary = self.state.pane_boundary.grabbed_at(column);
+                Vec::new()
+            }
             Command::FocusProviders => {
                 self.state.focused_pane = FocusedPane::Providers;
                 Vec::new()
