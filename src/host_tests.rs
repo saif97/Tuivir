@@ -12,9 +12,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use super::{DetailDispatchQueue, ShellTerminal, handle_key, open_pending_shell};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use super::{DetailDispatchQueue, ShellTerminal, handle_key, handle_mouse, open_pending_shell};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::layout::Rect;
 use virtui::{
+    application::Command,
     application::{
         App, AppEvent, DetailView, InteractiveShellProcess, ProviderRequest, Resource,
         ResourceCommand, ResourcePanel, WorkspaceSnapshot,
@@ -22,7 +24,7 @@ use virtui::{
     domain::{Provider, ProviderId, ResourceId, ResourcePanelId, ResourceState, TargetEnvironment},
     infrastructure::process::{InteractiveRunner, ProcessError, ProcessFailure, ProcessSpec},
     infrastructure::provider::ProviderDiscovery,
-    presentation::render_to_text,
+    presentation::{ScreenLayout, WorkspacePanes, render_to_text, resolve_mouse},
 };
 
 /// Everything the host was asked to do, in the order it was asked.
@@ -214,6 +216,149 @@ fn app_awaiting_the_terminal() -> App {
         "a running container asks for the terminal"
     );
     app
+}
+
+/// The same Workspace with a second container, so a click can land on a
+/// Resource that is not already selected.
+fn two_containers() -> WorkspaceSnapshot {
+    let mut snapshot = running_container();
+    let first = snapshot.panels[0].resources[0].clone();
+    snapshot.panels[0].resources.push(Resource {
+        id: ResourceId::new("container-b"),
+        name: "worker".to_owned(),
+        ..first
+    });
+    snapshot
+}
+
+/// An application sitting on a loaded Docker Workspace, with nothing pending.
+fn app_on_a_loaded_workspace() -> App {
+    app_on_workspace(running_container())
+}
+
+fn app_on_workspace(snapshot: WorkspaceSnapshot) -> App {
+    let mut app = App::new();
+    let requests = app.update(docker_discovery().into_event());
+    let ProviderRequest::RefreshWorkspace {
+        request_id,
+        provider_id,
+    } = requests.into_iter().next().expect("an initial refresh")
+    else {
+        panic!("discovery refreshes the Active Workspace");
+    };
+    app.update(AppEvent::RefreshCompleted {
+        request_id,
+        provider_id,
+        result: Ok(snapshot),
+    });
+    app
+}
+
+fn click(app: &mut App, layout: &ScreenLayout, column: u16, row: u16) -> Vec<ProviderRequest> {
+    handle_mouse(
+        app,
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        },
+        Some(layout),
+    )
+}
+
+/// A clicked Resource must load like a keyboard-selected one. Selecting without
+/// loading is the failure this guards: the Detail View would look activated and
+/// stay empty until an unrelated refresh happened along.
+#[test]
+fn clicking_a_resource_row_selects_it_and_asks_for_its_details() {
+    let mut app = app_on_workspace(two_containers());
+    let layout = ScreenLayout::measure(app.state(), Rect::new(0, 0, 80, 24));
+    let panes = layout.panes.as_ref().expect("a Workspace is active");
+    let (_, row) = panes.resource_rows[0][1];
+
+    let requests = click(&mut app, &layout, row.x, row.y);
+
+    assert_eq!(
+        app.state().focused_pane,
+        virtui::application::FocusedPane::Resources,
+        "clicking a Resource focuses the Panel holding it"
+    );
+    assert!(
+        requests
+            .iter()
+            .any(|request| matches!(request, ProviderRequest::LoadResourceDetails { .. })),
+        "the click asks for the Detail View, got {requests:?}"
+    );
+}
+
+#[test]
+fn clicking_a_provider_workspace_makes_it_active() {
+    let mut app = app_on_a_loaded_workspace();
+    let layout = ScreenLayout::measure(app.state(), Rect::new(0, 0, 80, 24));
+    let workspace = layout.provider_workspaces[0];
+
+    click(&mut app, &layout, workspace.x, workspace.y);
+
+    assert_eq!(app.state().active_provider, Some(0));
+    assert_eq!(
+        app.state().focused_pane,
+        virtui::application::FocusedPane::Providers
+    );
+}
+
+/// Pointing is not focusing: the wheel moves what is under the pointer and
+/// leaves the keyboard exactly where the user left it.
+#[test]
+fn the_wheel_scrolls_without_moving_keyboard_focus() {
+    let mut app = app_on_a_loaded_workspace();
+    handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE),
+    );
+    let focus_before = app.state().focused_pane;
+    let layout = ScreenLayout::measure(app.state(), Rect::new(0, 0, 80, 24));
+    let panel = layout
+        .panes
+        .as_ref()
+        .expect("a Workspace is active")
+        .resource_panels[0];
+
+    handle_mouse(
+        &mut app,
+        MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: panel.x + 1,
+            row: panel.y + 1,
+            modifiers: KeyModifiers::NONE,
+        },
+        Some(&layout),
+    );
+
+    assert_eq!(
+        app.state().focused_pane,
+        focus_before,
+        "the wheel never changes which Pane the keyboard drives"
+    );
+}
+
+/// A modal owns the screen, so a click meant for it must not reach the
+/// Provider Workspaces drawn underneath.
+#[test]
+fn a_click_on_an_open_overlay_changes_nothing_beneath_it() {
+    let mut app = app_on_a_loaded_workspace();
+    handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+    );
+    let layout = ScreenLayout::measure(app.state(), Rect::new(0, 0, 80, 24));
+    assert!(layout.overlay.is_some(), "the help overlay is open");
+    let focus_before = app.state().focused_pane;
+    let workspace = layout.provider_workspaces[0];
+
+    click(&mut app, &layout, workspace.x, workspace.y);
+
+    assert_eq!(app.state().focused_pane, focus_before);
 }
 
 /// The whole point of the handover: Virtui is off the screen before the
@@ -428,4 +573,87 @@ fn a_loop_with_no_shell_waiting_leaves_the_terminal_alone() {
 
     assert!(handover.steps().is_empty());
     assert!(requests.is_empty());
+}
+
+/// Every region resolves to the Command it means, with no terminal involved.
+#[test]
+fn mouse_routing_resolves_each_region_without_a_terminal() {
+    let layout = ScreenLayout {
+        provider_bar: Rect::new(0, 0, 80, 1),
+        workspace: Rect::new(0, 1, 80, 22),
+        status: Rect::new(0, 23, 80, 0),
+        provider_selector: Rect::new(0, 0, 2, 1),
+        provider_workspaces: vec![Rect::new(10, 0, 6, 1), Rect::new(2, 0, 8, 1)],
+        panes: Some(WorkspacePanes {
+            resources: Rect::new(0, 1, 10, 5),
+            resource_panels: vec![Rect::new(0, 1, 10, 5)],
+            resource_rows: vec![vec![(3, Rect::new(1, 2, 8, 1))]],
+            details: Rect::new(10, 1, 20, 5),
+            detail_views: vec![Rect::new(12, 2, 8, 1)],
+        }),
+        overlay: None,
+    };
+
+    assert_eq!(
+        resolve_mouse(&layout, press(3, 0)),
+        Some(Command::ActivateProviderWorkspace(1))
+    );
+    assert_eq!(
+        resolve_mouse(&layout, press(2, 2)),
+        Some(Command::SelectResource {
+            panel: 0,
+            resource: 3
+        })
+    );
+    assert_eq!(
+        resolve_mouse(&layout, press(13, 2)),
+        Some(Command::ActivateDetailView(0))
+    );
+    assert_eq!(
+        resolve_mouse(&layout, press(29, 5)),
+        Some(Command::FocusDetails)
+    );
+    assert_eq!(resolve_mouse(&layout, press(79, 23)), None);
+}
+
+fn press(column: u16, row: u16) -> virtui::presentation::MouseInput {
+    virtui::presentation::MouseInput {
+        action: virtui::presentation::MouseAction::Press,
+        column,
+        row,
+    }
+}
+
+#[test]
+fn mouse_detail_click_focuses_details_without_live_terminal() {
+    let mut app = App::new();
+    let layout = ScreenLayout {
+        provider_bar: Rect::new(0, 0, 80, 0),
+        workspace: Rect::new(0, 1, 80, 22),
+        status: Rect::new(0, 23, 80, 0),
+        provider_selector: Rect::new(0, 0, 0, 0),
+        provider_workspaces: Vec::new(),
+        panes: Some(WorkspacePanes {
+            resources: Rect::new(0, 1, 0, 0),
+            resource_panels: Vec::new(),
+            resource_rows: Vec::new(),
+            details: Rect::new(0, 1, 0, 0),
+            detail_views: vec![Rect::new(0, 0, 8, 1)],
+        }),
+        overlay: None,
+    };
+    handle_mouse(
+        &mut app,
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 1,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        },
+        Some(&layout),
+    );
+    assert_eq!(
+        app.state().focused_pane,
+        virtui::application::FocusedPane::Details
+    );
 }

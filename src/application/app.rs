@@ -364,6 +364,32 @@ impl App {
         requests
     }
 
+    /// Makes one Provider Workspace active.
+    ///
+    /// The Workspace being left keeps its navigation, but its in-flight detail
+    /// work is abandoned: a result for a Workspace the user has left is refused
+    /// rather than shown.
+    fn activate_provider(&mut self, index: usize) -> Vec<ProviderRequest> {
+        if self.state.active_provider == Some(index) {
+            return Vec::new();
+        }
+        if let Some(active) = self.state.active_provider {
+            let previous = self.state.providers[active].id().clone();
+            self.state.providers[active].invalidate_pending_detail();
+            self.pending_refreshes
+                .retain(|_, provider_id| provider_id != &previous);
+        }
+        self.state.active_provider = Some(index);
+        self.refresh_active_provider()
+    }
+
+    fn scroll_resource_panel(&mut self, panel: usize, delta: isize) -> Vec<ProviderRequest> {
+        if let Some(workspace) = self.state.active_workspace_mut() {
+            workspace.move_resource_selection_at(panel, delta);
+        }
+        Vec::new()
+    }
+
     fn dispatch(&mut self, command: Command) -> Vec<ProviderRequest> {
         match command {
             Command::Quit => Vec::new(),
@@ -430,6 +456,33 @@ impl App {
                 Vec::new()
             }
             Command::Resource(command) => self.handle_resource_command(command),
+            Command::ActivateProviderWorkspace(index) => {
+                if index >= self.state.providers.len() {
+                    return Vec::new();
+                }
+                self.state.focused_pane = FocusedPane::Providers;
+                self.activate_provider(index)
+            }
+            Command::SelectResource { panel, resource } => {
+                if let Some(workspace) = self.state.active_workspace_mut()
+                    && workspace.focus_resource_panel_at(panel)
+                {
+                    workspace.select_resource_at(resource);
+                    self.state.focused_pane = FocusedPane::Resources;
+                }
+                Vec::new()
+            }
+            Command::ActivateDetailView(index) => {
+                self.state.focused_pane = FocusedPane::Details;
+                if let Some(workspace) = self.state.active_workspace_mut() {
+                    workspace.select_detail_view_at(index);
+                }
+                Vec::new()
+            }
+            // The wheel scrolls what is under the pointer, so it never touches
+            // the focused Pane.
+            Command::ScrollResourcePanelUp(panel) => self.scroll_resource_panel(panel, -1),
+            Command::ScrollResourcePanelDown(panel) => self.scroll_resource_panel(panel, 1),
         }
     }
 
@@ -903,12 +956,7 @@ impl App {
         let Some(active_provider) = self.state.active_provider else {
             return Vec::new();
         };
-        let previous_provider = self.state.providers[active_provider].id().clone();
-        self.state.providers[active_provider].invalidate_pending_detail();
-        self.pending_refreshes
-            .retain(|_, provider_id| provider_id != &previous_provider);
-        self.state.active_provider =
-            Some((active_provider as isize + delta).rem_euclid(provider_count as isize) as usize);
-        self.refresh_active_provider()
+        let next = (active_provider as isize + delta).rem_euclid(provider_count as isize) as usize;
+        self.activate_provider(next)
     }
 }

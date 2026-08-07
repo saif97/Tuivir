@@ -71,6 +71,22 @@ pub enum Command {
     /// Cancels or returns from the open modal.
     Cancel,
     Resource(ResourceCommand),
+    /// Activates a Provider Workspace by its position in the provider bar.
+    ///
+    /// This and the four Commands below carry a position the user pointed at,
+    /// so they are invoked by the mouse rather than bound to a Keybinding.
+    /// They are not registered, and so never appear in help or configuration.
+    ActivateProviderWorkspace(usize),
+    /// Focuses a Resource Panel and selects one Resource inside it.
+    SelectResource {
+        panel: usize,
+        resource: usize,
+    },
+    /// Activates one Detail View by its position in the Details Pane.
+    ActivateDetailView(usize),
+    /// Moves the selection inside one Resource Panel, leaving focus alone.
+    ScrollResourcePanelUp(usize),
+    ScrollResourcePanelDown(usize),
 }
 
 /// The structural part of the interface in which a Command may be invoked.

@@ -14,33 +14,34 @@ use crate::application::{
 };
 use crate::domain::ResourceState;
 
+use super::screen_layout::{
+    DETAIL_VIEW_GAP, PROVIDER_LABEL_GAP, PROVIDER_WORKSPACE_GAP, ScreenLayout, command_error_area,
+    confirmation_area, detail_view_label, gap, help_overlay_area, provider_selector_label,
+    provider_workspace_label,
+};
+
 pub fn render(state: &AppState, frame: &mut Frame<'_>) {
-    let status_height = u16::from(!state.running_commands.is_empty());
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Min(1),
-            Constraint::Length(status_height),
-        ])
-        .split(frame.area());
+    render_with_layout(state, frame, &ScreenLayout::measure(state, frame.area()));
+}
 
-    render_provider_bar(state, frame, rows[0]);
-    render_running_command_status(state, frame, rows[2]);
+/// Draws the screen into the regions already measured for it.
+///
+/// The host measures once per frame and keeps that layout for mouse routing, so
+/// what the user clicks is what they see.
+pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &ScreenLayout) {
+    render_provider_bar(state, frame, layout.provider_bar);
+    render_running_command_status(state, frame, layout.status);
 
-    let Some(provider) = state.active_workspace() else {
+    let (Some(provider), Some(panes)) = (state.active_workspace(), layout.panes.as_ref()) else {
         frame.render_widget(
             Paragraph::new("No providers discovered")
                 .block(Block::default().title(" Workspace ").borders(Borders::ALL)),
-            rows[1],
+            layout.workspace,
         );
         return;
     };
 
-    let columns = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(48), Constraint::Percentage(52)])
-        .split(rows[1]);
+    let columns = [panes.resources, panes.details];
     let presentation = provider.presentation();
     let workspace_view = match &presentation {
         WorkspacePresentation::Ready(view) => Some(view),
@@ -62,8 +63,8 @@ pub fn render(state: &AppState, frame: &mut Frame<'_>) {
         columns[1],
     );
 
-    if let Some(help) = &state.help_overlay {
-        let area = centered_rect(42, (help.entries.len() as u16 + 2).max(4), frame.area());
+    if let (Some(help), Some(area)) = (&state.help_overlay, help_overlay_area(state, frame.area()))
+    {
         let lines = help
             .entries
             .iter()
@@ -80,14 +81,10 @@ pub fn render(state: &AppState, frame: &mut Frame<'_>) {
         );
     }
 
-    if let Some(error) = &state.command_error {
-        // Narrow terminals wrap the message instead of clipping it: an error
-        // that cannot name its Provider, Resource, and Command is not an
-        // identifying one.
-        let message_width = error.chars().count() as u16;
-        let width = (message_width + 4).min(frame.area().width);
-        let wrapped_lines = message_width.div_ceil(width.saturating_sub(2).max(1));
-        let area = centered_rect(width, wrapped_lines + 3, frame.area());
+    if let (Some(error), Some(area)) = (
+        &state.command_error,
+        command_error_area(state, frame.area()),
+    ) {
         frame.render_widget(Clear, area);
         frame.render_widget(
             Paragraph::new(vec![
@@ -104,8 +101,9 @@ pub fn render(state: &AppState, frame: &mut Frame<'_>) {
         );
     }
 
-    if let Some(confirmation) = &state.confirmation {
-        let area = centered_rect(64, 5, frame.area());
+    if let (Some(confirmation), Some(area)) =
+        (&state.confirmation, confirmation_area(state, frame.area()))
+    {
         frame.render_widget(Clear, area);
         let mut lines = vec![Line::from(format!(
             "Delete {} resource {} ({})?",
@@ -127,15 +125,6 @@ pub fn render(state: &AppState, frame: &mut Frame<'_>) {
             ),
             area,
         );
-    }
-}
-
-fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
-    Rect {
-        x: area.x + area.width.saturating_sub(width) / 2,
-        y: area.y + area.height.saturating_sub(height) / 2,
-        width: width.min(area.width),
-        height: height.min(area.height),
     }
 }
 
@@ -171,36 +160,24 @@ fn render_running_command_status(state: &AppState, frame: &mut Frame<'_>, area: 
 }
 
 fn render_provider_bar(state: &AppState, frame: &mut Frame<'_>, area: Rect) {
-    let mut providers_label = match &state.hints.focus_providers {
-        Some(key) => format!("[{key}] Providers"),
-        None => "Providers".to_owned(),
-    };
-    if state.focused_pane == FocusedPane::Providers {
-        providers_label = format!("▶ {providers_label}");
-    }
     let mut provider_spans = vec![
         Span::styled(
-            providers_label,
+            provider_selector_label(state),
             panel_title_style(state.focused_pane == FocusedPane::Providers),
         ),
-        Span::raw("  "),
+        Span::raw(gap(PROVIDER_LABEL_GAP)),
     ];
     for (index, provider) in state.providers.iter().enumerate() {
         if index > 0 {
-            provider_spans.push(Span::raw("   "));
+            provider_spans.push(Span::raw(gap(PROVIDER_WORKSPACE_GAP)));
         }
-        if Some(index) == state.active_provider {
-            let label = match provider.target_environment() {
-                Some(target) => format!("[ {} · {target} ]", provider.name()),
-                None => format!("[ {} ]", provider.name()),
-            };
-            provider_spans.push(Span::styled(
-                label,
-                Style::default().add_modifier(Modifier::BOLD),
-            ));
+        let active = Some(index) == state.active_provider;
+        let label = provider_workspace_label(provider, active);
+        provider_spans.push(if active {
+            Span::styled(label, Style::default().add_modifier(Modifier::BOLD))
         } else {
-            provider_spans.push(Span::raw(provider.name()));
-        }
+            Span::raw(label)
+        });
     }
     frame.render_widget(Paragraph::new(Line::from(provider_spans)), area);
 }
@@ -345,7 +322,7 @@ fn render_resource_panel(
     );
 }
 
-fn visible_resource_range(
+pub(super) fn visible_resource_range(
     selected_index: usize,
     viewport_height: usize,
     resource_count: usize,
@@ -391,7 +368,7 @@ fn panel_title_style(focused: bool) -> Style {
 
 /// Builds a workspace panel title that prefixes the focus key, or shows only the
 /// label when the focus Command is unbound.
-fn pane_title(hint: Option<&str>, label: &str, focused: bool) -> String {
+pub(super) fn pane_title(hint: Option<&str>, label: &str, focused: bool) -> String {
     let title = match hint {
         Some(key) => format!(" [{key}] {label} "),
         None => format!(" {label} "),
@@ -403,7 +380,7 @@ fn pane_title(hint: Option<&str>, label: &str, focused: bool) -> String {
     }
 }
 
-fn pane_block(title: String, focused: bool) -> Block<'static> {
+pub(super) fn pane_block(title: String, focused: bool) -> Block<'static> {
     Block::default()
         .title(title)
         .title_style(panel_title_style(focused))
@@ -477,19 +454,17 @@ fn render_details_panel(
     let mut spans = Vec::new();
     for detail_view in views {
         if !spans.is_empty() {
-            spans.push(Span::raw("  "));
+            spans.push(Span::raw(gap(DETAIL_VIEW_GAP)));
         }
-        if view
+        let selected = view
             .and_then(|workspace| workspace.selected_detail_view)
-            .is_some_and(|selected| selected.id == detail_view.id)
-        {
-            spans.push(Span::styled(
-                format!("[ {} ]", detail_view.title),
-                Style::default().add_modifier(Modifier::BOLD),
-            ));
+            .is_some_and(|selected| selected.id == detail_view.id);
+        let label = detail_view_label(&detail_view.title, selected);
+        spans.push(if selected {
+            Span::styled(label, Style::default().add_modifier(Modifier::BOLD))
         } else {
-            spans.push(Span::raw(detail_view.title.as_str()));
-        }
+            Span::raw(label)
+        });
     }
     frame.render_widget(
         Paragraph::new(vec![Line::default(), Line::from(spans)]),
@@ -590,5 +565,42 @@ mod tests {
                 .add_modifier(Modifier::BOLD)
         );
         assert_eq!(panel_title_style(false), Style::default());
+    }
+
+    /// Hit-testing is only honest if it agrees with what the user sees, so this
+    /// compares measured regions against the drawn screen rather than against a
+    /// second copy of the same arithmetic.
+    #[test]
+    fn measured_provider_workspaces_sit_where_they_are_drawn() {
+        use crate::application::ProviderWorkspaceState;
+        use crate::domain::{Provider, ProviderId};
+
+        let state = AppState {
+            providers: vec![
+                ProviderWorkspaceState::new(
+                    Provider::new(ProviderId::new("docker"), "Docker", None, None),
+                    None,
+                ),
+                ProviderWorkspaceState::new(
+                    Provider::new(ProviderId::new("incus"), "Incus", None, None),
+                    None,
+                ),
+            ],
+            active_provider: Some(0),
+            ..AppState::default()
+        };
+        // The Providers Pane is unfocused by default, so no caret is drawn.
+        assert_eq!(state.focused_pane, FocusedPane::Resources);
+
+        let layout = ScreenLayout::measure(&state, Rect::new(0, 0, 80, 24));
+        let screen = render_to_text(&state, 80, 24);
+        let bar = screen.lines().next().expect("a provider bar is drawn");
+
+        let drawn = bar.find("Incus").expect("the Provider Workspace is drawn") as u16;
+
+        assert_eq!(
+            layout.provider_workspaces[1].x, drawn,
+            "a click lands where the Provider Workspace is drawn, not where a second calculation guessed"
+        );
     }
 }
