@@ -14,3 +14,6 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.0", features = ["macros", "process", "rt-multi-thread", "sync", "test-util", "time"] }
 toml = "0.8"
+
+[dev-dependencies]
+serde_yaml = "0.9"
