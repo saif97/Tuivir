@@ -255,16 +255,99 @@ fn app_on_workspace(snapshot: WorkspaceSnapshot) -> App {
 }
 
 fn click(app: &mut App, layout: &ScreenLayout, column: u16, row: u16) -> Vec<ProviderRequest> {
+    pointer(
+        app,
+        layout,
+        MouseEventKind::Down(MouseButton::Left),
+        column,
+        row,
+    )
+}
+
+fn pointer(
+    app: &mut App,
+    layout: &ScreenLayout,
+    kind: MouseEventKind,
+    column: u16,
+    row: u16,
+) -> Vec<ProviderRequest> {
     handle_mouse(
         app,
         MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
+            kind,
             column,
             row,
             modifiers: KeyModifiers::NONE,
         },
         Some(layout),
     )
+}
+
+/// One whole gesture through the terminal's own event type: take hold of the
+/// Pane Boundary, carry it, and let go.
+///
+/// Grabbing must not focus the Resource Panel the boundary's left column sits
+/// in, and a drag after the release must find nothing to move.
+#[test]
+fn a_whole_drag_gesture_resizes_the_panes_and_then_lets_go() {
+    let mut app = app_on_workspace(two_containers());
+    let layout = ScreenLayout::measure(app.state(), Rect::new(0, 0, 80, 24));
+    let boundary = layout
+        .panes
+        .as_ref()
+        .expect("a Provider Workspace is active")
+        .pane_boundary;
+    let row = boundary.y + 2;
+    let focus_before = app.state().focused_pane;
+
+    pointer(
+        &mut app,
+        &layout,
+        MouseEventKind::Down(MouseButton::Left),
+        boundary.x,
+        row,
+    );
+
+    assert_eq!(
+        app.state().focused_pane,
+        focus_before,
+        "taking hold of the boundary is not focusing the Pane behind it"
+    );
+
+    pointer(
+        &mut app,
+        &layout,
+        MouseEventKind::Drag(MouseButton::Left),
+        51,
+        row,
+    );
+
+    assert_eq!(
+        app.state().pane_boundary.resources_percent(),
+        65,
+        "column 51 ends a Resources column 52 of the 80 the Workspace has"
+    );
+
+    pointer(
+        &mut app,
+        &layout,
+        MouseEventKind::Up(MouseButton::Left),
+        51,
+        row,
+    );
+    pointer(
+        &mut app,
+        &layout,
+        MouseEventKind::Drag(MouseButton::Left),
+        30,
+        row,
+    );
+
+    assert_eq!(
+        app.state().pane_boundary.resources_percent(),
+        65,
+        "a drag after the release carries nothing"
+    );
 }
 
 /// A clicked Resource must load like a keyboard-selected one. Selecting without
