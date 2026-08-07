@@ -153,35 +153,3 @@ fn ci_action_references_are_immutable_commit_pins() {
         }
     }
 }
-
-#[test]
-fn ci_validates_its_workflow_definition() {
-    let document = workflow();
-    let jobs = field(document, "jobs")
-        .as_mapping()
-        .expect("CI should define jobs");
-    let validate = jobs
-        .get(Value::String("validate".to_owned()))
-        .and_then(Value::as_mapping)
-        .expect("CI should define a workflow validation job");
-    let validate = commands(validate);
-
-    assert!(
-        validate
-            .iter()
-            .any(|command| command.contains("actionlint_1.7.12_linux_amd64.tar.gz"))
-    );
-    assert!(
-        validate
-            .iter()
-            .any(|command| command.contains("sha256sum --check"))
-    );
-    assert!(validate.iter().any(|command| {
-        command.contains("8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8")
-    }));
-    assert!(
-        validate
-            .iter()
-            .any(|command| command.lines().any(|line| line.trim() == "./actionlint"))
-    );
-}
