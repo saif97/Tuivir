@@ -49,6 +49,10 @@ pub fn key_from_event(event: KeyEvent) -> Option<Key> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MouseAction {
     Press,
+    /// The pointer moving with the primary button held down.
+    Drag,
+    /// The primary button let go, whatever the pointer was carrying.
+    Release,
     ScrollUp,
     ScrollDown,
 }
@@ -61,10 +65,12 @@ pub struct MouseInput {
 }
 
 /// Normalizes terminal mouse events into the small pointer vocabulary the host
-/// needs for hit-testing. Motion, release, and non-primary buttons are ignored.
+/// needs for hit-testing. Bare motion and non-primary buttons are ignored.
 pub fn mouse_from_event(event: MouseEvent) -> Option<MouseInput> {
     let action = match event.kind {
         MouseEventKind::Down(MouseButton::Left) => MouseAction::Press,
+        MouseEventKind::Drag(MouseButton::Left) => MouseAction::Drag,
+        MouseEventKind::Up(MouseButton::Left) => MouseAction::Release,
         MouseEventKind::ScrollUp => MouseAction::ScrollUp,
         MouseEventKind::ScrollDown => MouseAction::ScrollDown,
         _ => return None,
@@ -115,5 +121,36 @@ mod tests {
             }),
             None
         );
+    }
+
+    /// Dragging needs both ends of the gesture: the movement that carries the
+    /// Pane Boundary, and the release that lets go of it. Movement with no
+    /// button held is still nothing, so pointing at a Pane never disturbs it.
+    #[test]
+    fn normalizes_drag_and_release_but_still_ignores_bare_movement() {
+        for (kind, expected) in [
+            (
+                MouseEventKind::Drag(MouseButton::Left),
+                Some(MouseAction::Drag),
+            ),
+            (
+                MouseEventKind::Up(MouseButton::Left),
+                Some(MouseAction::Release),
+            ),
+            (MouseEventKind::Drag(MouseButton::Right), None),
+            (MouseEventKind::Moved, None),
+        ] {
+            assert_eq!(
+                mouse_from_event(MouseEvent {
+                    kind,
+                    column: 4,
+                    row: 8,
+                    modifiers: KeyModifiers::NONE,
+                })
+                .map(|input| input.action),
+                expected,
+                "{kind:?} should normalize to {expected:?}"
+            );
+        }
     }
 }

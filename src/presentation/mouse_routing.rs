@@ -20,6 +20,7 @@ pub fn resolve(layout: &ScreenLayout, input: MouseInput) -> Option<Command> {
     }
     match input.action {
         MouseAction::Press => press(layout, input),
+        MouseAction::Drag | MouseAction::Release => None,
         MouseAction::ScrollUp => scroll(layout, input, ScrollDirection::Up),
         MouseAction::ScrollDown => scroll(layout, input, ScrollDirection::Down),
     }
