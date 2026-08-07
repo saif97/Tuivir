@@ -152,3 +152,20 @@ fn ci_action_references_are_immutable_commit_pins() {
         }
     }
 }
+
+#[test]
+fn ci_validates_its_workflow_definition() {
+    let document = workflow();
+    let jobs = field(&document, "jobs")
+        .as_mapping()
+        .expect("CI should define jobs");
+    let validate = jobs
+        .get(Value::String("validate".to_owned()))
+        .and_then(Value::as_mapping)
+        .expect("CI should define a workflow validation job");
+    let validate = commands(validate);
+
+    assert!(validate.iter().any(|command| {
+        command.contains("cargo +\"$RUST_TOOLCHAIN\" test --locked --test ci_workflow")
+    }));
+}
