@@ -403,6 +403,14 @@ impl App {
                 Vec::new()
             }
             Command::Refresh => self.refresh_active_provider(),
+            Command::MovePaneBoundaryLeft => {
+                self.state.pane_boundary = self.state.pane_boundary.moved_left();
+                Vec::new()
+            }
+            Command::MovePaneBoundaryRight => {
+                self.state.pane_boundary = self.state.pane_boundary.moved_right();
+                Vec::new()
+            }
             Command::FocusProviders => {
                 self.state.focused_pane = FocusedPane::Providers;
                 Vec::new()

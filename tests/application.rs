@@ -3296,3 +3296,28 @@ fn one_override_changes_dispatch_help_and_the_inline_hint_together() {
     );
     assert!(stale.is_empty(), "the old Restart key is unbound");
 }
+
+/// The user moves the Pane Boundary in steps they can predict, so five presses
+/// one way and five back leave the Panes where they started.
+#[test]
+fn moving_the_pane_boundary_steps_it_by_five_points_each_way() {
+    let mut app = App::new();
+    let start = app.state().pane_boundary.resources_percent();
+
+    app.invoke(Command::MovePaneBoundaryRight);
+
+    assert_eq!(
+        app.state().pane_boundary.resources_percent(),
+        start + 5,
+        "moving right gives the Resource Panels more of the width"
+    );
+
+    app.invoke(Command::MovePaneBoundaryLeft);
+    app.invoke(Command::MovePaneBoundaryLeft);
+
+    assert_eq!(
+        app.state().pane_boundary.resources_percent(),
+        start - 5,
+        "moving left gives the Details Pane more of the width"
+    );
+}

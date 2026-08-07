@@ -24,4 +24,18 @@ impl PaneBoundary {
     pub fn resources_percent(self) -> u16 {
         self.resources_percent
     }
+
+    pub fn moved_left(self) -> Self {
+        Self::new(self.resources_percent.saturating_sub(STEP))
+    }
+
+    pub fn moved_right(self) -> Self {
+        Self::new(self.resources_percent.saturating_add(STEP))
+    }
 }
+
+/// What one press of a resize Command moves the share by.
+///
+/// Twenty presses cross the whole width, which is few enough to reach the size
+/// the user wants and many enough to stop where they meant to.
+const STEP: u16 = 5;

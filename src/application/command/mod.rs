@@ -63,6 +63,10 @@ pub enum Command {
     /// Moves through the output of the visible detail view.
     ScrollDetailsDown,
     ScrollDetailsUp,
+    /// Moves the Pane Boundary between the Resource Panels and the Details
+    /// Pane, giving the width one of them gains to the other.
+    MovePaneBoundaryLeft,
+    MovePaneBoundaryRight,
     /// Hands the terminal to the Provider CLI for an Interactive Shell inside
     /// the selected Resource.
     OpenShell,
