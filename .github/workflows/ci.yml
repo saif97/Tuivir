@@ -20,7 +20,11 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - run: true
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component rustfmt --component clippy
+      - name: Validate workflow definitions
+        run: cargo +"$RUST_TOOLCHAIN" test --locked --test ci_workflow
 
   checks:
     runs-on: ubuntu-latest
