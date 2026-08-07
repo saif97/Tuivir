@@ -2,6 +2,7 @@ mod app;
 mod command;
 mod key;
 mod keybinding;
+mod pane_boundary;
 mod provider;
 mod shell;
 mod workspace;
@@ -16,6 +17,7 @@ pub use command::{
 };
 pub use key::{InvalidKey, Key, Named};
 pub use keybinding::KeybindingError;
+pub use pane_boundary::PaneBoundary;
 pub use provider::{
     DetailView, LifecycleCommandPolicy, ProviderRequest, ProviderRequestId, Resource,
     ResourceDetails, ResourcePanel, WorkspaceError, WorkspaceSnapshot, lifecycle_commands,

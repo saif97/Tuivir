@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use super::workspace::{DetailCompletion, ProviderWorkspaceState};
 use super::{
     Command, CommandRegistry, CommandScope, InteractiveShellOutcome, InteractiveShellProcess, Key,
-    NUMBERED_RESOURCE_PANEL_CAPACITY, ProviderRequest, ProviderRequestId, ResourceCommand,
-    ResourceDetails, WorkspaceError, WorkspaceSnapshot,
+    NUMBERED_RESOURCE_PANEL_CAPACITY, PaneBoundary, ProviderRequest, ProviderRequestId,
+    ResourceCommand, ResourceDetails, WorkspaceError, WorkspaceSnapshot,
 };
 use crate::domain::{DetailViewId, Provider, ProviderId, ResourceState, ResourceTarget};
 
@@ -97,6 +97,11 @@ pub struct AppState {
     ///
     /// `None` represents startup before any installed provider is discovered.
     pub active_provider: Option<usize>,
+    /// Where the Resource Panels give way to the Details Pane.
+    ///
+    /// One share for the whole run, so moving between Provider Workspaces finds
+    /// the Panes the size the user left them.
+    pub pane_boundary: PaneBoundary,
     pub help_overlay: Option<HelpOverlay>,
     pub confirmation: Option<ResourceCommandInvocation>,
     pub command_error: Option<String>,

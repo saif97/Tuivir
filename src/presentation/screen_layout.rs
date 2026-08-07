@@ -133,9 +133,13 @@ pub fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
 
 fn measure_panes(state: &AppState, workspace: Rect) -> Option<WorkspacePanes> {
     let provider = state.active_workspace()?;
+    let resources_share = state.pane_boundary.resources_percent();
     let columns = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(48), Constraint::Percentage(52)])
+        .constraints([
+            Constraint::Percentage(resources_share),
+            Constraint::Percentage(100_u16.saturating_sub(resources_share)),
+        ])
         .split(workspace);
     let (resources, details) = (columns[0], columns[1]);
 
@@ -271,4 +275,45 @@ pub fn label_width(label: &str) -> u16 {
 /// The blank columns drawn between labels, as a string of that width.
 pub fn gap(width: u16) -> String {
     " ".repeat(width as usize)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::application::{PaneBoundary, ProviderWorkspaceState};
+    use crate::domain::{Provider, ProviderId};
+
+    fn workspace_at(boundary: PaneBoundary) -> AppState {
+        AppState {
+            providers: vec![ProviderWorkspaceState::new(
+                Provider::new(ProviderId::new("docker"), "Docker", None, None),
+                None,
+            )],
+            active_provider: Some(0),
+            pane_boundary: boundary,
+            ..AppState::default()
+        }
+    }
+
+    /// The share the user chose is what the Panes are measured from, so one
+    /// terminal shows two different splits for two different shares.
+    #[test]
+    fn the_pane_boundary_decides_where_the_resource_panels_end() {
+        let area = Rect::new(0, 0, 80, 24);
+
+        let narrow = ScreenLayout::measure(&workspace_at(PaneBoundary::new(25)), area)
+            .panes
+            .expect("a Provider Workspace is active");
+        let wide = ScreenLayout::measure(&workspace_at(PaneBoundary::new(75)), area)
+            .panes
+            .expect("a Provider Workspace is active");
+
+        assert_eq!(narrow.resources.width, 20, "a quarter of 80 columns");
+        assert_eq!(wide.resources.width, 60, "three quarters of 80 columns");
+        assert_eq!(
+            narrow.details.x, 20,
+            "the Details Pane starts where the Resource Panels end"
+        );
+        assert_eq!(wide.details.x, 60);
+    }
 }
