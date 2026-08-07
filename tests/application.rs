@@ -3438,3 +3438,30 @@ fn resizing_the_panes_disturbs_nothing_inside_them() {
         "the Detail View is still where it was read to, rendered:\n{resized}"
     );
 }
+
+/// The Pane Boundary belongs to the run, not to one Provider Workspace. A user
+/// who sized the Panes to read Docker logs finds them that size in Incus too.
+#[test]
+fn the_pane_boundary_survives_provider_workspace_navigation() {
+    let mut app = App::new();
+    app.update(docker_discovery().into_event());
+    app.update(incus_discovery().into_event());
+    for _ in 0..3 {
+        app.invoke(Command::MovePaneBoundaryLeft);
+    }
+    let chosen = app.state().pane_boundary.resources_percent();
+    assert_eq!(chosen, 33, "three steps left from the starting share");
+
+    app.invoke(Command::NextWorkspace);
+
+    assert_eq!(app.state().active_provider, Some(1), "Incus is active");
+    assert_eq!(
+        app.state().pane_boundary.resources_percent(),
+        chosen,
+        "the Panes keep the size the user gave them"
+    );
+
+    app.invoke(Command::PreviousWorkspace);
+
+    assert_eq!(app.state().pane_boundary.resources_percent(), chosen);
+}

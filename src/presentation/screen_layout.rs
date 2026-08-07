@@ -327,4 +327,27 @@ mod tests {
         );
         assert_eq!(wide.details.x, 60);
     }
+
+    /// A share, not a column count. A terminal that changes size keeps the
+    /// split the user chose, instead of a width that only suited the terminal
+    /// they chose it in.
+    #[test]
+    fn a_terminal_that_changes_size_keeps_the_share_the_user_chose() {
+        let state = workspace_at(PaneBoundary::new(50));
+
+        let small = ScreenLayout::measure(&state, Rect::new(0, 0, 80, 24))
+            .panes
+            .expect("a Provider Workspace is active");
+        let large = ScreenLayout::measure(&state, Rect::new(0, 0, 120, 40))
+            .panes
+            .expect("a Provider Workspace is active");
+
+        assert_eq!(small.resources.width, 40, "half of 80 columns");
+        assert_eq!(large.resources.width, 60, "half of 120 columns");
+        assert_eq!(
+            small.pane_boundary.x, 39,
+            "the boundary follows the Panes it separates"
+        );
+        assert_eq!(large.pane_boundary.x, 59);
+    }
 }
