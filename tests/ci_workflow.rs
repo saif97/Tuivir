@@ -1,16 +1,21 @@
-use std::fs;
+use std::{fs, sync::OnceLock};
 
 use serde_yaml::{Mapping, Value};
 
-fn workflow() -> Mapping {
-    let source =
-        fs::read_to_string(".github/workflows/ci.yml").expect("the CI workflow should exist");
-    let document: Value = serde_yaml::from_str(&source).expect("the CI workflow should be YAML");
+fn workflow() -> &'static Mapping {
+    static WORKFLOW: OnceLock<Mapping> = OnceLock::new();
 
-    document
-        .as_mapping()
-        .expect("the CI workflow should have a mapping document")
-        .clone()
+    WORKFLOW.get_or_init(|| {
+        let source =
+            fs::read_to_string(".github/workflows/ci.yml").expect("the CI workflow should exist");
+        let document: Value =
+            serde_yaml::from_str(&source).expect("the CI workflow should be YAML");
+
+        document
+            .as_mapping()
+            .expect("the CI workflow should have a mapping document")
+            .clone()
+    })
 }
 
 fn field<'a>(workflow: &'a Mapping, name: &str) -> &'a Value {
@@ -38,7 +43,7 @@ fn ci_workflow_is_valid_yaml() {
 #[test]
 fn ci_runs_for_pull_requests_and_master_pushes() {
     let document = workflow();
-    let triggers = field(&document, "on")
+    let triggers = field(document, "on")
         .as_mapping()
         .expect("CI triggers should be a mapping");
 
@@ -61,7 +66,7 @@ fn ci_runs_for_pull_requests_and_master_pushes() {
 #[test]
 fn ci_has_read_only_contents_and_cancels_superseded_revisions() {
     let document = workflow();
-    let permissions = field(&document, "permissions")
+    let permissions = field(document, "permissions")
         .as_mapping()
         .expect("CI permissions should be a mapping");
 
@@ -71,7 +76,7 @@ fn ci_has_read_only_contents_and_cancels_superseded_revisions() {
         Some(&Value::String("read".to_owned()))
     );
 
-    let concurrency = field(&document, "concurrency")
+    let concurrency = field(document, "concurrency")
         .as_mapping()
         .expect("CI concurrency should be a mapping");
     assert_eq!(
@@ -89,14 +94,7 @@ fn ci_has_read_only_contents_and_cancels_superseded_revisions() {
 #[test]
 fn ci_runs_locked_checks_with_the_declared_toolchain() {
     let document = workflow();
-    let toolchain = field(&document, "env")
-        .as_mapping()
-        .and_then(|env| env.get(Value::String("RUST_TOOLCHAIN".to_owned())))
-        .and_then(Value::as_str)
-        .expect("CI should declare its Rust toolchain");
-    assert_eq!(toolchain, "1.97.1");
-
-    let jobs = field(&document, "jobs")
+    let jobs = field(document, "jobs")
         .as_mapping()
         .expect("CI should define jobs");
     let checks = jobs
@@ -108,26 +106,30 @@ fn ci_runs_locked_checks_with_the_declared_toolchain() {
     assert!(
         checks
             .iter()
-            .any(|command| { command.contains("rustup toolchain install \"$RUST_TOOLCHAIN\"") })
+            .any(|command| command.contains(
+                "rustup toolchain install \"$(awk -F '\"' '$1 ~ /^channel/ { print $2 }' rust-toolchain.toml)\""
+            ))
     );
     assert!(
         checks
             .iter()
-            .any(|command| command.contains("cargo +\"$RUST_TOOLCHAIN\" fmt --all -- --check"))
+            .any(|command| command.contains("cargo fmt --all -- --check"))
     );
     assert!(checks.iter().any(|command| {
-        command.contains("cargo +\"$RUST_TOOLCHAIN\" clippy --all-targets --all-features --locked")
+        command.contains("cargo clippy --all-targets --all-features --locked")
             && command.contains("-D warnings")
     }));
-    assert!(checks.iter().any(|command| {
-        command.contains("cargo +\"$RUST_TOOLCHAIN\" test --all-targets --all-features --locked")
-    }));
+    assert!(
+        checks.iter().any(|command| {
+            command.contains("cargo test --all-targets --all-features --locked")
+        })
+    );
 }
 
 #[test]
 fn ci_action_references_are_immutable_commit_pins() {
     let document = workflow();
-    let jobs = field(&document, "jobs")
+    let jobs = field(document, "jobs")
         .as_mapping()
         .expect("CI should define jobs");
 
@@ -160,7 +162,7 @@ fn ci_action_references_are_immutable_commit_pins() {
 #[test]
 fn ci_validates_its_workflow_definition() {
     let document = workflow();
-    let jobs = field(&document, "jobs")
+    let jobs = field(document, "jobs")
         .as_mapping()
         .expect("CI should define jobs");
     let validate = jobs
@@ -169,16 +171,27 @@ fn ci_validates_its_workflow_definition() {
         .expect("CI should define a workflow validation job");
     let validate = commands(validate);
 
+    assert!(
+        validate
+            .iter()
+            .any(|command| { command.contains("cargo test --locked --test ci_workflow") })
+    );
+    assert!(
+        validate
+            .iter()
+            .any(|command| command.contains("actionlint_1.7.12_linux_amd64.tar.gz"))
+    );
+    assert!(
+        validate
+            .iter()
+            .any(|command| command.contains("sha256sum --check"))
+    );
     assert!(validate.iter().any(|command| {
-        command.contains("cargo +\"$RUST_TOOLCHAIN\" test --locked --test ci_workflow")
+        command.contains("8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8")
     }));
-    assert!(validate
-        .iter()
-        .any(|command| command.contains("actionlint_1.7.12_linux_amd64.tar.gz")));
-    assert!(validate
-        .iter()
-        .any(|command| command.contains("sha256sum --check")));
-    assert!(validate
-        .iter()
-        .any(|command| command.lines().any(|line| line.trim() == "./actionlint")));
+    assert!(
+        validate
+            .iter()
+            .any(|command| command.lines().any(|line| line.trim() == "./actionlint"))
+    );
 }

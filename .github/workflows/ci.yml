@@ -13,16 +13,13 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  RUST_TOOLCHAIN: 1.97.1
-
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Install the pinned Rust toolchain
-        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component rustfmt --component clippy
+        run: rustup toolchain install "$(awk -F '"' '$1 ~ /^channel/ { print $2 }' rust-toolchain.toml)" --profile minimal --component rustfmt --component clippy
       - name: Install pinned actionlint
         run: |
           curl --fail --location --silent --show-error \
@@ -33,17 +30,17 @@ jobs:
       - name: Validate GitHub Actions syntax
         run: ./actionlint
       - name: Validate workflow definitions
-        run: cargo +"$RUST_TOOLCHAIN" test --locked --test ci_workflow
+        run: cargo test --locked --test ci_workflow
 
   checks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Install the pinned Rust toolchain
-        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component rustfmt --component clippy
+        run: rustup toolchain install "$(awk -F '"' '$1 ~ /^channel/ { print $2 }' rust-toolchain.toml)" --profile minimal --component rustfmt --component clippy
       - name: Check formatting
-        run: cargo +"$RUST_TOOLCHAIN" fmt --all -- --check
+        run: cargo fmt --all -- --check
       - name: Run Clippy
-        run: cargo +"$RUST_TOOLCHAIN" clippy --all-targets --all-features --locked -- -D warnings
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
       - name: Run tests
-        run: cargo +"$RUST_TOOLCHAIN" test --all-targets --all-features --locked
+        run: cargo test --all-targets --all-features --locked
