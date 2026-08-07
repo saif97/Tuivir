@@ -590,6 +590,7 @@ fn mouse_routing_resolves_each_region_without_a_terminal() {
             resource_rows: vec![vec![(3, Rect::new(1, 2, 8, 1))]],
             details: Rect::new(10, 1, 20, 5),
             detail_views: vec![Rect::new(12, 2, 8, 1)],
+            pane_boundary: Rect::new(9, 1, 2, 5),
         }),
         overlay: None,
     };
@@ -639,6 +640,7 @@ fn mouse_detail_click_focuses_details_without_live_terminal() {
             resource_rows: Vec::new(),
             details: Rect::new(0, 1, 0, 0),
             detail_views: vec![Rect::new(0, 0, 8, 1)],
+            pane_boundary: Rect::new(0, 1, 0, 0),
         }),
         overlay: None,
     };

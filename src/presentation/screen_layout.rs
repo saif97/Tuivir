@@ -45,6 +45,9 @@ pub struct WorkspacePanes {
     pub details: Rect,
     /// One region per Detail View label, in the order they are drawn.
     pub detail_views: Vec<Rect>,
+    /// The Pane Boundary the user drags: the two border columns that touch,
+    /// the right of the Resource Panels and the left of the Details Pane.
+    pub pane_boundary: Rect,
 }
 
 impl ScreenLayout {
@@ -142,6 +145,12 @@ fn measure_panes(state: &AppState, workspace: Rect) -> Option<WorkspacePanes> {
         ])
         .split(workspace);
     let (resources, details) = (columns[0], columns[1]);
+    let pane_boundary = Rect::new(
+        resources.right().saturating_sub(1),
+        resources.y,
+        2.min(resources.width),
+        resources.height,
+    );
 
     let WorkspacePresentation::Ready(view) = provider.presentation() else {
         // A Workspace that is still loading or has failed draws no Resource
@@ -152,6 +161,7 @@ fn measure_panes(state: &AppState, workspace: Rect) -> Option<WorkspacePanes> {
             resource_rows: Vec::new(),
             details,
             detail_views: Vec::new(),
+            pane_boundary,
         });
     };
 
@@ -229,6 +239,7 @@ fn measure_panes(state: &AppState, workspace: Rect) -> Option<WorkspacePanes> {
         resource_rows,
         details,
         detail_views,
+        pane_boundary,
     })
 }
 
