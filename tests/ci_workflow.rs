@@ -172,4 +172,13 @@ fn ci_validates_its_workflow_definition() {
     assert!(validate.iter().any(|command| {
         command.contains("cargo +\"$RUST_TOOLCHAIN\" test --locked --test ci_workflow")
     }));
+    assert!(validate
+        .iter()
+        .any(|command| command.contains("actionlint_1.7.12_linux_amd64.tar.gz")));
+    assert!(validate
+        .iter()
+        .any(|command| command.contains("sha256sum --check")));
+    assert!(validate
+        .iter()
+        .any(|command| command.lines().any(|line| line.trim() == "./actionlint")));
 }
