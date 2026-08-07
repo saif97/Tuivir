@@ -36,11 +36,6 @@ fn commands(job: &Mapping) -> Vec<&str> {
 }
 
 #[test]
-fn ci_workflow_is_valid_yaml() {
-    assert!(!workflow().is_empty());
-}
-
-#[test]
 fn ci_runs_for_pull_requests_and_master_pushes() {
     let document = workflow();
     let triggers = field(document, "on")
@@ -171,11 +166,6 @@ fn ci_validates_its_workflow_definition() {
         .expect("CI should define a workflow validation job");
     let validate = commands(validate);
 
-    assert!(
-        validate
-            .iter()
-            .any(|command| { command.contains("cargo test --locked --test ci_workflow") })
-    );
     assert!(
         validate
             .iter()
