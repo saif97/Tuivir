@@ -3379,3 +3379,62 @@ fn the_pane_boundary_moves_only_while_the_pointer_holds_it() {
         "letting go stops the boundary following the pointer"
     );
 }
+
+/// A resize is only a resize. Which Pane has focus, which Resource is selected,
+/// which Detail View is on screen, and how far through it the user had read are
+/// all still there afterwards.
+#[test]
+fn resizing_the_panes_disturbs_nothing_inside_them() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
+    let details = detail_request(app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[
+            ("container-a", "api", "nginx:1.27"),
+            ("container-b", "worker", "alpine:3.21"),
+        ])),
+    )));
+    app.update(details_completed(
+        details,
+        Ok(ResourceDetails::from_lines(
+            (0..30).map(|line| format!("line-{line}")),
+        )),
+    ));
+    app.invoke(Command::FocusDetails);
+    handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE),
+    );
+    let selected_before = app.state().providers[0].selected_resource_target();
+    let scrolled = render_to_text(app.state(), 100, 24);
+    assert!(scrolled.contains("line-10"), "rendered:\n{scrolled}");
+    assert!(
+        !scrolled.contains("line-0 "),
+        "the first line has been scrolled past, rendered:\n{scrolled}"
+    );
+
+    for _ in 0..4 {
+        app.invoke(Command::MovePaneBoundaryRight);
+    }
+
+    assert_ne!(
+        app.state().pane_boundary.resources_percent(),
+        48,
+        "the Panes really did change size"
+    );
+    assert_eq!(
+        app.state().focused_pane,
+        FocusedPane::Details,
+        "the Pane the keyboard drives is still the one the user left it on"
+    );
+    assert_eq!(
+        app.state().providers[0].selected_resource_target(),
+        selected_before,
+        "the selected Resource survives the resize"
+    );
+    let resized = render_to_text(app.state(), 100, 24);
+    assert!(
+        resized.contains("line-10") && !resized.contains("line-0 "),
+        "the Detail View is still where it was read to, rendered:\n{resized}"
+    );
+}
