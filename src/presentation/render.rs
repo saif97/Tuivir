@@ -8,11 +8,16 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph},
 };
 
-use crate::application::{AppState, FocusedPane};
+use crate::application::{AppState, FocusedPane, ProviderWorkspaceState};
 use crate::application::{
     DetailContent, ResourceDetailsView, ResourcePanelView, WorkspacePresentation, WorkspaceView,
 };
 use crate::domain::ResourceState;
+
+/// Blank columns between the Providers Pane label and the first Provider
+/// Workspace, and between one Provider Workspace and the next.
+const PROVIDER_LABEL_GAP: u16 = 2;
+const PROVIDER_WORKSPACE_GAP: u16 = 3;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct InteractionGeometry {
@@ -90,21 +95,17 @@ pub fn interaction_geometry(state: &AppState, area: Rect) -> InteractionGeometry
         .split(area);
     let mut geometry = InteractionGeometry::default();
     let mut x = rows[0].x;
-    let selector_width = provider_label_width(state) + 2;
+    let selector_width = label_width(&provider_selector_label(state)) + PROVIDER_LABEL_GAP;
     geometry.provider_selector = Some(Rect::new(x, rows[0].y, selector_width, 1));
     x += selector_width;
     for (index, provider) in state.providers.iter().enumerate() {
         if index > 0 {
-            x += 3;
+            x += PROVIDER_WORKSPACE_GAP;
         }
-        let width = if Some(index) == state.active_provider {
-            let target_width = provider
-                .target_environment()
-                .map_or(0, |target| target.to_string().chars().count() + 3);
-            provider.name().chars().count() as u16 + 4 + target_width as u16
-        } else {
-            provider.name().chars().count() as u16
-        };
+        let width = label_width(&provider_workspace_label(
+            provider,
+            Some(index) == state.active_provider,
+        ));
         geometry
             .provider_tabs
             .push((Rect::new(x, rows[0].y, width, 1), index));
@@ -197,13 +198,35 @@ pub fn interaction_geometry(state: &AppState, area: Rect) -> InteractionGeometry
     geometry
 }
 
-fn provider_label_width(state: &AppState) -> u16 {
-    let hint = state
-        .hints
-        .focus_providers
-        .as_deref()
-        .map_or(0, |hint| hint.chars().count() + 3);
-    ("▶ ".chars().count() + hint + "Providers".chars().count()) as u16
+/// Builds the Providers Pane label exactly as the provider bar draws it.
+///
+/// Measuring and drawing read this one string, so a hit-test region cannot
+/// disagree with the text under it.
+fn provider_selector_label(state: &AppState) -> String {
+    let label = match &state.hints.focus_providers {
+        Some(key) => format!("[{key}] Providers"),
+        None => "Providers".to_owned(),
+    };
+    if state.focused_pane == FocusedPane::Providers {
+        format!("▶ {label}")
+    } else {
+        label
+    }
+}
+
+/// Builds one Provider Workspace label exactly as the provider bar draws it.
+fn provider_workspace_label(provider: &ProviderWorkspaceState, active: bool) -> String {
+    if !active {
+        return provider.name().to_owned();
+    }
+    match provider.target_environment() {
+        Some(target) => format!("[ {} · {target} ]", provider.name()),
+        None => format!("[ {} ]", provider.name()),
+    }
+}
+
+fn label_width(label: &str) -> u16 {
+    label.chars().count() as u16
 }
 
 pub fn render(state: &AppState, frame: &mut Frame<'_>) {
@@ -374,36 +397,24 @@ fn render_running_command_status(state: &AppState, frame: &mut Frame<'_>, area: 
 }
 
 fn render_provider_bar(state: &AppState, frame: &mut Frame<'_>, area: Rect) {
-    let mut providers_label = match &state.hints.focus_providers {
-        Some(key) => format!("[{key}] Providers"),
-        None => "Providers".to_owned(),
-    };
-    if state.focused_pane == FocusedPane::Providers {
-        providers_label = format!("▶ {providers_label}");
-    }
     let mut provider_spans = vec![
         Span::styled(
-            providers_label,
+            provider_selector_label(state),
             panel_title_style(state.focused_pane == FocusedPane::Providers),
         ),
-        Span::raw("  "),
+        Span::raw(" ".repeat(PROVIDER_LABEL_GAP as usize)),
     ];
     for (index, provider) in state.providers.iter().enumerate() {
         if index > 0 {
-            provider_spans.push(Span::raw("   "));
+            provider_spans.push(Span::raw(" ".repeat(PROVIDER_WORKSPACE_GAP as usize)));
         }
-        if Some(index) == state.active_provider {
-            let label = match provider.target_environment() {
-                Some(target) => format!("[ {} · {target} ]", provider.name()),
-                None => format!("[ {} ]", provider.name()),
-            };
-            provider_spans.push(Span::styled(
-                label,
-                Style::default().add_modifier(Modifier::BOLD),
-            ));
+        let active = Some(index) == state.active_provider;
+        let label = provider_workspace_label(provider, active);
+        provider_spans.push(if active {
+            Span::styled(label, Style::default().add_modifier(Modifier::BOLD))
         } else {
-            provider_spans.push(Span::raw(provider.name()));
-        }
+            Span::raw(label)
+        });
     }
     frame.render_widget(Paragraph::new(Line::from(provider_spans)), area);
 }
@@ -793,6 +804,44 @@ mod tests {
                 .add_modifier(Modifier::BOLD)
         );
         assert_eq!(panel_title_style(false), Style::default());
+    }
+
+    /// Hit-testing is only honest if it agrees with what the user sees, so this
+    /// compares measured regions against the drawn screen rather than against a
+    /// second copy of the same arithmetic.
+    #[test]
+    fn measured_provider_workspaces_sit_where_they_are_drawn() {
+        use crate::application::ProviderWorkspaceState;
+        use crate::domain::{Provider, ProviderId};
+
+        let state = AppState {
+            providers: vec![
+                ProviderWorkspaceState::new(
+                    Provider::new(ProviderId::new("docker"), "Docker", None, None),
+                    None,
+                ),
+                ProviderWorkspaceState::new(
+                    Provider::new(ProviderId::new("incus"), "Incus", None, None),
+                    None,
+                ),
+            ],
+            active_provider: Some(0),
+            ..AppState::default()
+        };
+        // The Providers Pane is unfocused by default, so no caret is drawn.
+        assert_eq!(state.focused_pane, FocusedPane::Resources);
+
+        let geometry = interaction_geometry(&state, Rect::new(0, 0, 80, 24));
+        let screen = render_to_text(&state, 80, 24);
+        let bar = screen.lines().next().expect("a provider bar is drawn");
+
+        let drawn = bar.find("Incus").expect("the Provider Workspace is drawn") as u16;
+        let (measured, _) = geometry.provider_tabs[1];
+
+        assert_eq!(
+            measured.x, drawn,
+            "a click lands where the Provider Workspace is drawn, not where a second calculation guessed"
+        );
     }
 
     #[test]
