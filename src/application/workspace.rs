@@ -271,11 +271,20 @@ impl ProviderWorkspaceState {
     /// Moves the selected Resource within the focused panel and clamps at its
     /// ends. Every other panel keeps its own selection and scroll.
     pub fn move_resource_selection(&mut self, delta: isize) {
+        let Some(panel_id) = self.focused_resource_panel.clone() else {
+            return;
+        };
+        self.move_selection_within(&panel_id, delta);
+    }
+
+    /// Moves the selection inside one named Resource Panel.
+    ///
+    /// The panel is named rather than taken from focus, so moving a Panel the
+    /// user is only pointing at cannot be mistaken for moving the focused one —
+    /// and so cannot abandon the focused Resource's detail load.
+    fn move_selection_within(&mut self, panel_id: &ResourcePanelId, delta: isize) {
         self.invalidate_detail_when_target_changes(|workspace| {
             let WorkspaceLoadState::Ready(snapshot) = &workspace.load_state else {
-                return;
-            };
-            let Some(panel_id) = workspace.focused_resource_panel.as_ref() else {
                 return;
             };
             let Some(panel) = snapshot.panel(panel_id) else {
@@ -294,6 +303,7 @@ impl ProviderWorkspaceState {
                     .iter()
                     .position(|resource| &resource.id == selected)
             }) else {
+                // Nothing valid was selected, so start at the top.
                 navigation.selected_resource =
                     panel.resources.first().map(|resource| resource.id.clone());
                 navigation.selected_index = 0;
@@ -386,6 +396,8 @@ impl ProviderWorkspaceState {
         });
     }
 
+    /// Moves the selection inside the Resource Panel at one provider-defined
+    /// position, leaving focus where the keyboard left it.
     pub fn move_resource_selection_at(&mut self, panel_index: usize, delta: isize) {
         let Some(panel_id) = (match &self.load_state {
             WorkspaceLoadState::Ready(snapshot) => snapshot
@@ -396,10 +408,7 @@ impl ProviderWorkspaceState {
         }) else {
             return;
         };
-        let previous = self.focused_resource_panel.clone();
-        self.focused_resource_panel = Some(panel_id);
-        self.move_resource_selection(delta);
-        self.focused_resource_panel = previous;
+        self.move_selection_within(&panel_id, delta);
     }
 
     /// Starts a load only when the visible Resource and Detail View are not

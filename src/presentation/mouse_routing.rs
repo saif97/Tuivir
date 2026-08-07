@@ -13,6 +13,11 @@ use crate::application::Command;
 /// Returns `None` where there is nothing to do: over a border, over blank space,
 /// or while an overlay owns the screen.
 pub fn resolve(layout: &ScreenLayout, input: MouseInput) -> Option<Command> {
+    // A modal owns the screen while it is open, so a click anywhere is not for
+    // the widgets drawn beneath it. It is dismissed by its own Commands.
+    if layout.overlay.is_some() {
+        return None;
+    }
     match input.action {
         MouseAction::Press => press(layout, input),
         MouseAction::ScrollUp => scroll(layout, input, ScrollDirection::Up),

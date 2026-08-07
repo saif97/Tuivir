@@ -29,6 +29,8 @@ pub struct ScreenLayout {
     pub provider_workspaces: Vec<Rect>,
     /// Absent until a Provider Workspace is active.
     pub panes: Option<WorkspacePanes>,
+    /// The region the topmost modal owns, when one is open.
+    pub overlay: Option<Rect>,
 }
 
 /// The Panes of the Active Workspace, and the rows and Detail Views inside them.
@@ -82,7 +84,50 @@ impl ScreenLayout {
             provider_selector,
             provider_workspaces,
             panes: measure_panes(state, workspace),
+            overlay: overlay_area(state, area),
         }
+    }
+}
+
+/// The region of whichever modal is drawn last, and so sits on top.
+pub fn overlay_area(state: &AppState, area: Rect) -> Option<Rect> {
+    confirmation_area(state, area)
+        .or_else(|| command_error_area(state, area))
+        .or_else(|| help_overlay_area(state, area))
+}
+
+pub fn help_overlay_area(state: &AppState, area: Rect) -> Option<Rect> {
+    let help = state.help_overlay.as_ref()?;
+    Some(centered_rect(
+        42,
+        (help.entries.len() as u16 + 2).max(4),
+        area,
+    ))
+}
+
+pub fn command_error_area(state: &AppState, area: Rect) -> Option<Rect> {
+    let error = state.command_error.as_deref()?;
+    // Narrow terminals wrap the message instead of clipping it: an error that
+    // cannot name its Provider, Resource, and Command is not an identifying one.
+    let message_width = error.chars().count() as u16;
+    let width = (message_width + 4).min(area.width);
+    let wrapped_lines = message_width.div_ceil(width.saturating_sub(2).max(1));
+    Some(centered_rect(width, wrapped_lines + 3, area))
+}
+
+pub fn confirmation_area(state: &AppState, area: Rect) -> Option<Rect> {
+    state
+        .confirmation
+        .as_ref()
+        .map(|_| centered_rect(64, 5, area))
+}
+
+pub fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
+    Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width: width.min(area.width),
+        height: height.min(area.height),
     }
 }
 

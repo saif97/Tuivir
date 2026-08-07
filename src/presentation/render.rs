@@ -15,8 +15,9 @@ use crate::application::{
 use crate::domain::ResourceState;
 
 use super::screen_layout::{
-    DETAIL_VIEW_GAP, PROVIDER_LABEL_GAP, PROVIDER_WORKSPACE_GAP, ScreenLayout, detail_view_label,
-    gap, provider_selector_label, provider_workspace_label,
+    DETAIL_VIEW_GAP, PROVIDER_LABEL_GAP, PROVIDER_WORKSPACE_GAP, ScreenLayout, command_error_area,
+    confirmation_area, detail_view_label, gap, help_overlay_area, provider_selector_label,
+    provider_workspace_label,
 };
 
 pub fn render(state: &AppState, frame: &mut Frame<'_>) {
@@ -62,8 +63,8 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
         columns[1],
     );
 
-    if let Some(help) = &state.help_overlay {
-        let area = centered_rect(42, (help.entries.len() as u16 + 2).max(4), frame.area());
+    if let (Some(help), Some(area)) = (&state.help_overlay, help_overlay_area(state, frame.area()))
+    {
         let lines = help
             .entries
             .iter()
@@ -80,14 +81,10 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
         );
     }
 
-    if let Some(error) = &state.command_error {
-        // Narrow terminals wrap the message instead of clipping it: an error
-        // that cannot name its Provider, Resource, and Command is not an
-        // identifying one.
-        let message_width = error.chars().count() as u16;
-        let width = (message_width + 4).min(frame.area().width);
-        let wrapped_lines = message_width.div_ceil(width.saturating_sub(2).max(1));
-        let area = centered_rect(width, wrapped_lines + 3, frame.area());
+    if let (Some(error), Some(area)) = (
+        &state.command_error,
+        command_error_area(state, frame.area()),
+    ) {
         frame.render_widget(Clear, area);
         frame.render_widget(
             Paragraph::new(vec![
@@ -104,8 +101,9 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
         );
     }
 
-    if let Some(confirmation) = &state.confirmation {
-        let area = centered_rect(64, 5, frame.area());
+    if let (Some(confirmation), Some(area)) =
+        (&state.confirmation, confirmation_area(state, frame.area()))
+    {
         frame.render_widget(Clear, area);
         let mut lines = vec![Line::from(format!(
             "Delete {} resource {} ({})?",
@@ -127,15 +125,6 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
             ),
             area,
         );
-    }
-}
-
-fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
-    Rect {
-        x: area.x + area.width.saturating_sub(width) / 2,
-        y: area.y + area.height.saturating_sub(height) / 2,
-        width: width.min(area.width),
-        height: height.min(area.height),
     }
 }
 

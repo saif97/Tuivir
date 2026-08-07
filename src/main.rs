@@ -47,6 +47,15 @@ async fn main() -> io::Result<()> {
         ratatui::restore();
         return Err(error);
     }
+    // `ratatui::init` gives back raw mode and the alternate screen on a panic,
+    // but it never enabled mouse capture and so cannot know to turn it off.
+    // Without this a panic leaves the user's terminal spitting escape sequences
+    // at every movement of the mouse.
+    let restore_screen = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic| {
+        let _ = execute!(io::stdout(), DisableMouseCapture);
+        restore_screen(panic);
+    }));
     let result = run(&mut terminal, registry).await;
     let _ = execute!(io::stdout(), DisableMouseCapture);
     ratatui::restore();
@@ -297,7 +306,15 @@ impl ShellTerminal for Host<'_> {
         // instead opens the shell on nothing but itself, and leaves the real
         // terminal untouched for Virtui to hand back whole at the end.
         disable_raw_mode()?;
-        execute!(io::stdout(), Clear(ClearType::All), MoveTo(0, 0))
+        // Mouse capture goes with it: the Interactive Shell owns the whole
+        // terminal, and escape sequences meant for Virtui would otherwise be
+        // typed into the shell.
+        execute!(
+            io::stdout(),
+            DisableMouseCapture,
+            Clear(ClearType::All),
+            MoveTo(0, 0)
+        )
     }
 
     fn resume(&mut self) -> io::Result<()> {
@@ -306,6 +323,8 @@ impl ShellTerminal for Host<'_> {
         // wrapping the previous one, so a session with several shells in it
         // would nest a fresh hook per shell.
         enable_raw_mode()?;
+        // Mouse capture comes back with the screen it belongs to.
+        execute!(io::stdout(), EnableMouseCapture)?;
         // Asking for the alternate screen Virtui never gave up costs nothing,
         // and is what recovers the one case where it did lose it: a full-screen
         // program run inside the shell — an editor in the container — leaves the
