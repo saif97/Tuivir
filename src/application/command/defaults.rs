@@ -222,14 +222,14 @@ pub(super) const BUILTIN_COMMANDS: &[CommandDefinition] = &[
     // workspace scope. `<` and `>` point the way the boundary travels.
     CommandDefinition {
         id: "layout.boundary.left",
-        description: "Widen Details",
+        description: "Widen Details Pane",
         command: Command::MovePaneBoundaryLeft,
         scopes: WORKSPACE,
         default_keys: &["<"],
     },
     CommandDefinition {
         id: "layout.boundary.right",
-        description: "Widen Resources",
+        description: "Widen Resource Panels",
         command: Command::MovePaneBoundaryRight,
         scopes: WORKSPACE,
         default_keys: &[">"],
