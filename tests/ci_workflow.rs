@@ -19,6 +19,17 @@ fn field<'a>(workflow: &'a Mapping, name: &str) -> &'a Value {
         .unwrap_or_else(|| panic!("the CI workflow should define {name}"))
 }
 
+fn commands(job: &Mapping) -> Vec<&str> {
+    job.get(Value::String("steps".to_owned()))
+        .and_then(Value::as_sequence)
+        .expect("CI jobs should define steps")
+        .iter()
+        .filter_map(Value::as_mapping)
+        .filter_map(|step| step.get(Value::String("run".to_owned())))
+        .filter_map(Value::as_str)
+        .collect()
+}
+
 #[test]
 fn ci_workflow_is_valid_yaml() {
     assert!(!workflow().is_empty());
@@ -73,4 +84,71 @@ fn ci_has_read_only_contents_and_cancels_superseded_revisions() {
         .expect("CI concurrency should define a group");
     assert!(group.contains("github.workflow"));
     assert!(group.contains("github.ref"));
+}
+
+#[test]
+fn ci_runs_locked_checks_with_the_declared_toolchain() {
+    let document = workflow();
+    let toolchain = field(&document, "env")
+        .as_mapping()
+        .and_then(|env| env.get(Value::String("RUST_TOOLCHAIN".to_owned())))
+        .and_then(Value::as_str)
+        .expect("CI should declare its Rust toolchain");
+    assert_eq!(toolchain, "1.97.1");
+
+    let jobs = field(&document, "jobs")
+        .as_mapping()
+        .expect("CI should define jobs");
+    let checks = jobs
+        .get(Value::String("checks".to_owned()))
+        .and_then(Value::as_mapping)
+        .expect("CI should define a checks job");
+    let checks = commands(checks);
+
+    assert!(checks.iter().any(|command| {
+        command.contains("rustup toolchain install \"$RUST_TOOLCHAIN\"")
+    }));
+    assert!(checks
+        .iter()
+        .any(|command| command.contains("cargo +\"$RUST_TOOLCHAIN\" fmt --all -- --check")));
+    assert!(checks.iter().any(|command| {
+        command.contains("cargo +\"$RUST_TOOLCHAIN\" clippy --all-targets --all-features --locked")
+            && command.contains("-D warnings")
+    }));
+    assert!(checks.iter().any(|command| {
+        command.contains("cargo +\"$RUST_TOOLCHAIN\" test --all-targets --all-features --locked")
+    }));
+}
+
+#[test]
+fn ci_action_references_are_immutable_commit_pins() {
+    let document = workflow();
+    let jobs = field(&document, "jobs")
+        .as_mapping()
+        .expect("CI should define jobs");
+
+    for (job_name, job) in jobs {
+        let job = job
+            .as_mapping()
+            .unwrap_or_else(|| panic!("CI job {job_name:?} should be a mapping"));
+        let steps = job
+            .get(Value::String("steps".to_owned()))
+            .and_then(Value::as_sequence)
+            .expect("CI jobs should define steps");
+
+        for step in steps {
+            let Some(action) = step
+                .as_mapping()
+                .and_then(|step| step.get(Value::String("uses".to_owned())))
+                .and_then(Value::as_str)
+            else {
+                continue;
+            };
+            let (_, commit) = action
+                .rsplit_once('@')
+                .expect("CI actions should include a commit pin");
+            assert_eq!(commit.len(), 40, "action {action} is not pinned to a SHA");
+            assert!(commit.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        }
+    }
 }
