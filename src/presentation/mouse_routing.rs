@@ -209,6 +209,44 @@ mod tests {
         );
     }
 
+    /// Hit-testing follows the resize. The screen is measured afresh each frame,
+    /// so the boundary the user aims at is the one now drawn, and the column it
+    /// used to occupy belongs to the Pane that has taken it.
+    #[test]
+    fn hit_testing_follows_the_pane_boundary_after_a_resize() {
+        use crate::application::PaneBoundary;
+
+        let mut state = active_workspace();
+        let area = Rect::new(0, 0, 80, 24);
+        let before = ScreenLayout::measure(&state, area);
+        let was = before
+            .panes
+            .as_ref()
+            .expect("a Provider Workspace is active")
+            .pane_boundary;
+
+        state.pane_boundary = PaneBoundary::new(70);
+        let after = ScreenLayout::measure(&state, area);
+        let now = after
+            .panes
+            .as_ref()
+            .expect("a Provider Workspace is active")
+            .pane_boundary;
+        let row = now.y + 2;
+
+        assert_ne!(was.x, now.x, "the resize moved the boundary");
+        assert_eq!(
+            resolve(&after, press(now.x, row), None),
+            Some(Command::GrabPaneBoundary(0)),
+            "the boundary is grabbed where it is drawn now"
+        );
+        assert_eq!(
+            resolve(&after, press(was.x, row), None),
+            None,
+            "the column it left is the Resource Panels' again"
+        );
+    }
+
     /// Only the boundary the pointer took hold of follows it. A drag that began
     /// anywhere else is the user selecting text, and leaves the Panes alone.
     #[test]
