@@ -3,8 +3,8 @@ use std::fs;
 use serde_yaml::{Mapping, Value};
 
 fn workflow() -> Mapping {
-    let source = fs::read_to_string(".github/workflows/ci.yml")
-        .expect("the CI workflow should exist");
+    let source =
+        fs::read_to_string(".github/workflows/ci.yml").expect("the CI workflow should exist");
     let document: Value = serde_yaml::from_str(&source).expect("the CI workflow should be YAML");
 
     document
@@ -105,12 +105,16 @@ fn ci_runs_locked_checks_with_the_declared_toolchain() {
         .expect("CI should define a checks job");
     let checks = commands(checks);
 
-    assert!(checks.iter().any(|command| {
-        command.contains("rustup toolchain install \"$RUST_TOOLCHAIN\"")
-    }));
-    assert!(checks
-        .iter()
-        .any(|command| command.contains("cargo +\"$RUST_TOOLCHAIN\" fmt --all -- --check")));
+    assert!(
+        checks
+            .iter()
+            .any(|command| { command.contains("rustup toolchain install \"$RUST_TOOLCHAIN\"") })
+    );
+    assert!(
+        checks
+            .iter()
+            .any(|command| command.contains("cargo +\"$RUST_TOOLCHAIN\" fmt --all -- --check"))
+    );
     assert!(checks.iter().any(|command| {
         command.contains("cargo +\"$RUST_TOOLCHAIN\" clippy --all-targets --all-features --locked")
             && command.contains("-D warnings")
