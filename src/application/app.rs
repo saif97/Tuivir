@@ -388,6 +388,16 @@ impl App {
         self.refresh_active_provider()
     }
 
+    /// Resizes the Panes and nothing else. No Provider has work to do: the
+    /// Panes are drawn from state the shell already holds.
+    fn move_pane_boundary(
+        &mut self,
+        moved: impl FnOnce(PaneBoundary) -> PaneBoundary,
+    ) -> Vec<ProviderRequest> {
+        self.state.pane_boundary = moved(self.state.pane_boundary);
+        Vec::new()
+    }
+
     fn scroll_resource_panel(&mut self, panel: usize, delta: isize) -> Vec<ProviderRequest> {
         if let Some(workspace) = self.state.active_workspace_mut() {
             workspace.move_resource_selection_at(panel, delta);
@@ -403,26 +413,15 @@ impl App {
                 Vec::new()
             }
             Command::Refresh => self.refresh_active_provider(),
-            Command::MovePaneBoundaryLeft => {
-                self.state.pane_boundary = self.state.pane_boundary.moved_left();
-                Vec::new()
-            }
-            Command::MovePaneBoundaryRight => {
-                self.state.pane_boundary = self.state.pane_boundary.moved_right();
-                Vec::new()
-            }
+            Command::MovePaneBoundaryLeft => self.move_pane_boundary(PaneBoundary::moved_left),
+            Command::MovePaneBoundaryRight => self.move_pane_boundary(PaneBoundary::moved_right),
             Command::GrabPaneBoundary(column) => {
-                self.state.pane_boundary = self.state.pane_boundary.grabbed_at(column);
-                Vec::new()
+                self.move_pane_boundary(|boundary| boundary.grabbed_at(column))
             }
             Command::SetPaneBoundary(share) => {
-                self.state.pane_boundary = self.state.pane_boundary.dragged_to(share);
-                Vec::new()
+                self.move_pane_boundary(|boundary| boundary.dragged_to(share))
             }
-            Command::ReleasePaneBoundary => {
-                self.state.pane_boundary = self.state.pane_boundary.released();
-                Vec::new()
-            }
+            Command::ReleasePaneBoundary => self.move_pane_boundary(PaneBoundary::released),
             Command::FocusProviders => {
                 self.state.focused_pane = FocusedPane::Providers;
                 Vec::new()

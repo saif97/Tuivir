@@ -26,7 +26,7 @@ impl PaneBoundary {
     /// the boundary itself, so no way of moving it can leave the range.
     pub fn new(resources_percent: u16) -> Self {
         Self {
-            resources_percent: resources_percent.clamp(MINIMUM_PERCENT, MAXIMUM_PERCENT),
+            resources_percent: clamped(resources_percent),
             grab: None,
         }
     }
@@ -72,10 +72,14 @@ impl PaneBoundary {
 
     fn with_share(self, resources_percent: u16) -> Self {
         Self {
-            resources_percent: resources_percent.clamp(MINIMUM_PERCENT, MAXIMUM_PERCENT),
+            resources_percent: clamped(resources_percent),
             ..self
         }
     }
+}
+
+fn clamped(resources_percent: u16) -> u16 {
+    resources_percent.clamp(MINIMUM_PERCENT, MAXIMUM_PERCENT)
 }
 
 /// What one press of a resize Command moves the share by.
