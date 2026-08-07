@@ -21,17 +21,21 @@ pub fn resolve(
     input: MouseInput,
     boundary_grab: Option<u16>,
 ) -> Option<Command> {
-    // A modal owns the screen while it is open, so a click anywhere is not for
-    // the widgets drawn beneath it. It is dismissed by its own Commands.
-    if layout.overlay.is_some() {
-        return None;
-    }
     match input.action {
-        MouseAction::Press => press(layout, input),
-        MouseAction::Drag => drag(layout, input, boundary_grab?),
-        // Every click ends in a release, and only a held boundary makes one
+        // Letting go is answered first, because it is not a click on whatever is
+        // on screen — it ends a gesture that began before it. A modal that opened
+        // mid-drag would otherwise swallow the release and leave the boundary
+        // held, and the next drag anywhere would carry it off.
+        //
+        // Every click ends in a release too, and only a held boundary makes one
         // worth reporting.
         MouseAction::Release => boundary_grab.map(|_| Command::ReleasePaneBoundary),
+        // A modal owns the screen while it is open, so pointing at anything is
+        // not for the widgets drawn beneath it. It is dismissed by its own
+        // Commands.
+        _ if layout.overlay.is_some() => None,
+        MouseAction::Press => press(layout, input),
+        MouseAction::Drag => drag(layout, input, boundary_grab?),
         MouseAction::ScrollUp => scroll(layout, input, ScrollDirection::Up),
         MouseAction::ScrollDown => scroll(layout, input, ScrollDirection::Down),
     }
@@ -244,6 +248,37 @@ mod tests {
             resolve(&after, press(was.x, row), None),
             None,
             "the column it left is the Resource Panels' again"
+        );
+    }
+
+    /// A modal can open on its own while the pointer is mid-drag — a Resource
+    /// Command that failed in the background. It must not strand the Pane
+    /// Boundary in the user's hand: a release the modal swallowed would leave
+    /// the boundary held, and the next drag anywhere on screen would move it.
+    ///
+    /// The boundary still holds still underneath, because the modal owns the
+    /// screen until it is dismissed.
+    #[test]
+    fn a_modal_that_opens_mid_drag_does_not_strand_the_pane_boundary() {
+        let mut state = active_workspace();
+        state.command_error = Some("Docker stop failed for api".to_owned());
+        let layout = ScreenLayout::measure(&state, Rect::new(0, 0, 80, 24));
+        assert!(layout.overlay.is_some(), "the failure modal is open");
+        let at = |action| MouseInput {
+            action,
+            column: 39,
+            row: layout.workspace.y + 2,
+        };
+
+        assert_eq!(
+            resolve(&layout, at(MouseAction::Release), Some(0)),
+            Some(Command::ReleasePaneBoundary),
+            "letting go is not a click on the modal, and is always reported"
+        );
+        assert_eq!(
+            resolve(&layout, at(MouseAction::Drag), Some(0)),
+            None,
+            "the modal owns the screen, so the boundary holds still under it"
         );
     }
 
