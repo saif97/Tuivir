@@ -8,265 +8,39 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph},
 };
 
-use crate::application::{AppState, FocusedPane, ProviderWorkspaceState};
+use crate::application::{AppState, FocusedPane};
 use crate::application::{
     DetailContent, ResourceDetailsView, ResourcePanelView, WorkspacePresentation, WorkspaceView,
 };
 use crate::domain::ResourceState;
 
-/// Blank columns between the Providers Pane label and the first Provider
-/// Workspace, and between one Provider Workspace and the next.
-const PROVIDER_LABEL_GAP: u16 = 2;
-const PROVIDER_WORKSPACE_GAP: u16 = 3;
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct InteractionGeometry {
-    pub provider_tabs: Vec<(Rect, usize)>,
-    pub provider_selector: Option<Rect>,
-    pub resource_panels: Vec<(Rect, usize)>,
-    pub resource_rows: Vec<Vec<(usize, Rect)>>,
-    pub detail_view_tabs: Vec<(Rect, usize)>,
-    pub resources: Option<Rect>,
-    pub details: Option<Rect>,
-}
-
-impl InteractionGeometry {
-    pub fn hit(&self, column: u16, row: u16) -> Option<InteractionTarget> {
-        let point = ratatui::layout::Position::new(column, row);
-        if let Some((_, index)) = self
-            .provider_tabs
-            .iter()
-            .find(|(area, _)| area.contains(point))
-        {
-            return Some(InteractionTarget::Provider(*index));
-        }
-        for (panel_index, rows) in self.resource_rows.iter().enumerate() {
-            if let Some((resource_index, _)) = rows.iter().find(|(_, area)| area.contains(point)) {
-                return Some(InteractionTarget::Resource {
-                    panel: panel_index,
-                    resource: *resource_index,
-                });
-            }
-        }
-        if let Some((_, index)) = self
-            .resource_panels
-            .iter()
-            .find(|(area, _)| area.contains(point))
-        {
-            return Some(InteractionTarget::ResourcePanel(*index));
-        }
-        if let Some((_, index)) = self
-            .detail_view_tabs
-            .iter()
-            .find(|(area, _)| area.contains(point))
-        {
-            return Some(InteractionTarget::DetailView(*index));
-        }
-        if self
-            .provider_selector
-            .is_some_and(|area| area.contains(point))
-        {
-            return Some(InteractionTarget::ProviderSelector);
-        }
-        self.details
-            .filter(|area| area.contains(point))
-            .map(|_| InteractionTarget::Details)
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum InteractionTarget {
-    Provider(usize),
-    ProviderSelector,
-    ResourcePanel(usize),
-    Resource { panel: usize, resource: usize },
-    DetailView(usize),
-    Details,
-}
-
-pub fn interaction_geometry(state: &AppState, area: Rect) -> InteractionGeometry {
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Min(1),
-            Constraint::Length(u16::from(!state.running_commands.is_empty())),
-        ])
-        .split(area);
-    let mut geometry = InteractionGeometry::default();
-    let mut x = rows[0].x;
-    let selector_width = label_width(&provider_selector_label(state)) + PROVIDER_LABEL_GAP;
-    geometry.provider_selector = Some(Rect::new(x, rows[0].y, selector_width, 1));
-    x += selector_width;
-    for (index, provider) in state.providers.iter().enumerate() {
-        if index > 0 {
-            x += PROVIDER_WORKSPACE_GAP;
-        }
-        let width = label_width(&provider_workspace_label(
-            provider,
-            Some(index) == state.active_provider,
-        ));
-        geometry
-            .provider_tabs
-            .push((Rect::new(x, rows[0].y, width, 1), index));
-        x = x.saturating_add(width);
-    }
-    let Some(provider) = state.active_workspace() else {
-        return geometry;
-    };
-    let columns = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(48), Constraint::Percentage(52)])
-        .split(rows[1]);
-    geometry.details = Some(columns[1]);
-    geometry.resources = Some(columns[0]);
-    if let crate::application::WorkspacePresentation::Ready(view) = provider.presentation() {
-        let panel_areas = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints(
-                view.panels()
-                    .map(|panel| Constraint::Fill(panel.panel.resources.len().max(1) as u16)),
-            )
-            .split(columns[0]);
-        for (panel, panel_area) in view.panels().zip(panel_areas.iter().copied()) {
-            let panel_index = geometry.resource_panels.len();
-            geometry.resource_panels.push((panel_area, panel_index));
-            let viewport_height = panel_area.height.saturating_sub(2) as usize;
-            let visible = visible_resource_range(
-                panel.selected_index,
-                viewport_height,
-                panel.panel.resources.len(),
-            );
-            let inner = Rect::new(
-                panel_area.x + 1,
-                panel_area.y + 1,
-                panel_area.width.saturating_sub(2),
-                panel_area.height.saturating_sub(2),
-            );
-            geometry.resource_rows.push(
-                (visible.start..visible.end)
-                    .map(|index| {
-                        (
-                            index,
-                            Rect::new(
-                                inner.x,
-                                inner.y.saturating_add((index - visible.start) as u16),
-                                inner.width,
-                                1,
-                            ),
-                        )
-                    })
-                    .collect(),
-            );
-        }
-        let details = columns[1];
-        let block = pane_block(pane_title(None, "Details", false), false);
-        let inner = block.inner(details);
-        let summary_len = view
-            .selected_resource
-            .map_or(1, |resource| 1 + resource.fields.len()) as u16;
-        let detail_rows = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(summary_len),
-                Constraint::Length(u16::from(!view.detail_views.is_empty()) * 2),
-                Constraint::Min(0),
-            ])
-            .split(inner);
-        if !view.detail_views.is_empty() {
-            let mut tab_x = detail_rows[1].x;
-            for (index, detail) in view.detail_views.iter().enumerate() {
-                if index > 0 {
-                    tab_x += 2;
-                }
-                let width = detail.title.chars().count() as u16
-                    + if view
-                        .selected_detail_view
-                        .is_some_and(|selected| selected.id == detail.id)
-                    {
-                        4
-                    } else {
-                        0
-                    };
-                geometry
-                    .detail_view_tabs
-                    .push((Rect::new(tab_x, detail_rows[1].y + 1, width, 1), index));
-                tab_x = tab_x.saturating_add(width);
-            }
-        }
-    }
-    geometry
-}
-
-/// Builds the Providers Pane label exactly as the provider bar draws it.
-///
-/// Measuring and drawing read this one string, so a hit-test region cannot
-/// disagree with the text under it.
-fn provider_selector_label(state: &AppState) -> String {
-    let label = match &state.hints.focus_providers {
-        Some(key) => format!("[{key}] Providers"),
-        None => "Providers".to_owned(),
-    };
-    if state.focused_pane == FocusedPane::Providers {
-        format!("▶ {label}")
-    } else {
-        label
-    }
-}
-
-/// Builds one Provider Workspace label exactly as the provider bar draws it.
-fn provider_workspace_label(provider: &ProviderWorkspaceState, active: bool) -> String {
-    if !active {
-        return provider.name().to_owned();
-    }
-    match provider.target_environment() {
-        Some(target) => format!("[ {} · {target} ]", provider.name()),
-        None => format!("[ {} ]", provider.name()),
-    }
-}
-
-fn label_width(label: &str) -> u16 {
-    label.chars().count() as u16
-}
+use super::screen_layout::{
+    DETAIL_VIEW_GAP, PROVIDER_LABEL_GAP, PROVIDER_WORKSPACE_GAP, ScreenLayout, detail_view_label,
+    gap, provider_selector_label, provider_workspace_label,
+};
 
 pub fn render(state: &AppState, frame: &mut Frame<'_>) {
-    let geometry = interaction_geometry(state, frame.area());
-    render_with_geometry(state, frame, &geometry);
+    render_with_layout(state, frame, &ScreenLayout::measure(state, frame.area()));
 }
 
-pub fn render_with_geometry(
-    state: &AppState,
-    frame: &mut Frame<'_>,
-    geometry: &InteractionGeometry,
-) {
-    let status_height = u16::from(!state.running_commands.is_empty());
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Min(1),
-            Constraint::Length(status_height),
-        ])
-        .split(frame.area());
+/// Draws the screen into the regions already measured for it.
+///
+/// The host measures once per frame and keeps that layout for mouse routing, so
+/// what the user clicks is what they see.
+pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &ScreenLayout) {
+    render_provider_bar(state, frame, layout.provider_bar);
+    render_running_command_status(state, frame, layout.status);
 
-    render_provider_bar(state, frame, rows[0]);
-    render_running_command_status(state, frame, rows[2]);
-
-    let Some(provider) = state.active_workspace() else {
+    let (Some(provider), Some(panes)) = (state.active_workspace(), layout.panes.as_ref()) else {
         frame.render_widget(
             Paragraph::new("No providers discovered")
                 .block(Block::default().title(" Workspace ").borders(Borders::ALL)),
-            rows[1],
+            layout.workspace,
         );
         return;
     };
 
-    let columns = [
-        geometry
-            .resources
-            .expect("workspace geometry has resources"),
-        geometry.details.expect("workspace geometry has details"),
-    ];
+    let columns = [panes.resources, panes.details];
     let presentation = provider.presentation();
     let workspace_view = match &presentation {
         WorkspacePresentation::Ready(view) => Some(view),
@@ -402,11 +176,11 @@ fn render_provider_bar(state: &AppState, frame: &mut Frame<'_>, area: Rect) {
             provider_selector_label(state),
             panel_title_style(state.focused_pane == FocusedPane::Providers),
         ),
-        Span::raw(" ".repeat(PROVIDER_LABEL_GAP as usize)),
+        Span::raw(gap(PROVIDER_LABEL_GAP)),
     ];
     for (index, provider) in state.providers.iter().enumerate() {
         if index > 0 {
-            provider_spans.push(Span::raw(" ".repeat(PROVIDER_WORKSPACE_GAP as usize)));
+            provider_spans.push(Span::raw(gap(PROVIDER_WORKSPACE_GAP)));
         }
         let active = Some(index) == state.active_provider;
         let label = provider_workspace_label(provider, active);
@@ -559,7 +333,7 @@ fn render_resource_panel(
     );
 }
 
-fn visible_resource_range(
+pub(super) fn visible_resource_range(
     selected_index: usize,
     viewport_height: usize,
     resource_count: usize,
@@ -605,7 +379,7 @@ fn panel_title_style(focused: bool) -> Style {
 
 /// Builds a workspace panel title that prefixes the focus key, or shows only the
 /// label when the focus Command is unbound.
-fn pane_title(hint: Option<&str>, label: &str, focused: bool) -> String {
+pub(super) fn pane_title(hint: Option<&str>, label: &str, focused: bool) -> String {
     let title = match hint {
         Some(key) => format!(" [{key}] {label} "),
         None => format!(" {label} "),
@@ -617,7 +391,7 @@ fn pane_title(hint: Option<&str>, label: &str, focused: bool) -> String {
     }
 }
 
-fn pane_block(title: String, focused: bool) -> Block<'static> {
+pub(super) fn pane_block(title: String, focused: bool) -> Block<'static> {
     Block::default()
         .title(title)
         .title_style(panel_title_style(focused))
@@ -691,19 +465,17 @@ fn render_details_panel(
     let mut spans = Vec::new();
     for detail_view in views {
         if !spans.is_empty() {
-            spans.push(Span::raw("  "));
+            spans.push(Span::raw(gap(DETAIL_VIEW_GAP)));
         }
-        if view
+        let selected = view
             .and_then(|workspace| workspace.selected_detail_view)
-            .is_some_and(|selected| selected.id == detail_view.id)
-        {
-            spans.push(Span::styled(
-                format!("[ {} ]", detail_view.title),
-                Style::default().add_modifier(Modifier::BOLD),
-            ));
+            .is_some_and(|selected| selected.id == detail_view.id);
+        let label = detail_view_label(&detail_view.title, selected);
+        spans.push(if selected {
+            Span::styled(label, Style::default().add_modifier(Modifier::BOLD))
         } else {
-            spans.push(Span::raw(detail_view.title.as_str()));
-        }
+            Span::raw(label)
+        });
     }
     frame.render_widget(
         Paragraph::new(vec![Line::default(), Line::from(spans)]),
@@ -831,26 +603,15 @@ mod tests {
         // The Providers Pane is unfocused by default, so no caret is drawn.
         assert_eq!(state.focused_pane, FocusedPane::Resources);
 
-        let geometry = interaction_geometry(&state, Rect::new(0, 0, 80, 24));
+        let layout = ScreenLayout::measure(&state, Rect::new(0, 0, 80, 24));
         let screen = render_to_text(&state, 80, 24);
         let bar = screen.lines().next().expect("a provider bar is drawn");
 
         let drawn = bar.find("Incus").expect("the Provider Workspace is drawn") as u16;
-        let (measured, _) = geometry.provider_tabs[1];
 
         assert_eq!(
-            measured.x, drawn,
+            layout.provider_workspaces[1].x, drawn,
             "a click lands where the Provider Workspace is drawn, not where a second calculation guessed"
         );
-    }
-
-    #[test]
-    fn geometry_handles_empty_workspace_without_panics() {
-        let geometry = interaction_geometry(&AppState::default(), Rect::new(0, 0, 80, 24));
-        assert_eq!(
-            geometry.hit(0, 0),
-            Some(InteractionTarget::ProviderSelector)
-        );
-        assert_eq!(geometry.hit(79, 23), None);
     }
 }

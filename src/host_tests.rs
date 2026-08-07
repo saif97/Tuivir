@@ -16,6 +16,7 @@ use super::{DetailDispatchQueue, ShellTerminal, handle_key, handle_mouse, open_p
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use virtui::{
+    application::Command,
     application::{
         App, AppEvent, DetailView, InteractiveShellProcess, ProviderRequest, Resource,
         ResourceCommand, ResourcePanel, WorkspaceSnapshot,
@@ -23,7 +24,7 @@ use virtui::{
     domain::{Provider, ProviderId, ResourceId, ResourcePanelId, ResourceState, TargetEnvironment},
     infrastructure::process::{InteractiveRunner, ProcessError, ProcessFailure, ProcessSpec},
     infrastructure::provider::ProviderDiscovery,
-    presentation::{InteractionGeometry, InteractionTarget, render_to_text},
+    presentation::{ScreenLayout, WorkspacePanes, render_to_text, resolve_mouse},
 };
 
 /// Everything the host was asked to do, in the order it was asked.
@@ -431,36 +432,70 @@ fn a_loop_with_no_shell_waiting_leaves_the_terminal_alone() {
     assert!(requests.is_empty());
 }
 
+/// Every region resolves to the Command it means, with no terminal involved.
 #[test]
-fn mouse_hit_testing_routes_each_interactive_region_without_a_terminal() {
-    let geometry = InteractionGeometry {
-        provider_tabs: vec![(Rect::new(2, 0, 8, 1), 1)],
-        provider_selector: Some(Rect::new(0, 0, 2, 1)),
-        resource_panels: vec![(Rect::new(0, 1, 10, 5), 0)],
-        resource_rows: vec![vec![(3, Rect::new(1, 2, 8, 1))]],
-        detail_view_tabs: vec![(Rect::new(12, 2, 8, 1), 0)],
-        resources: Some(Rect::new(0, 1, 10, 5)),
-        details: Some(Rect::new(10, 1, 20, 5)),
+fn mouse_routing_resolves_each_region_without_a_terminal() {
+    let layout = ScreenLayout {
+        provider_bar: Rect::new(0, 0, 80, 1),
+        workspace: Rect::new(0, 1, 80, 22),
+        status: Rect::new(0, 23, 80, 0),
+        provider_selector: Rect::new(0, 0, 2, 1),
+        provider_workspaces: vec![Rect::new(10, 0, 6, 1), Rect::new(2, 0, 8, 1)],
+        panes: Some(WorkspacePanes {
+            resources: Rect::new(0, 1, 10, 5),
+            resource_panels: vec![Rect::new(0, 1, 10, 5)],
+            resource_rows: vec![vec![(3, Rect::new(1, 2, 8, 1))]],
+            details: Rect::new(10, 1, 20, 5),
+            detail_views: vec![Rect::new(12, 2, 8, 1)],
+        }),
     };
-    assert_eq!(geometry.hit(3, 0), Some(InteractionTarget::Provider(1)));
+
     assert_eq!(
-        geometry.hit(2, 2),
-        Some(InteractionTarget::Resource {
+        resolve_mouse(&layout, press(3, 0)),
+        Some(Command::ActivateProviderWorkspace(1))
+    );
+    assert_eq!(
+        resolve_mouse(&layout, press(2, 2)),
+        Some(Command::SelectResource {
             panel: 0,
             resource: 3
         })
     );
-    assert_eq!(geometry.hit(13, 2), Some(InteractionTarget::DetailView(0)));
-    assert_eq!(geometry.hit(29, 5), Some(InteractionTarget::Details));
-    assert_eq!(geometry.hit(79, 23), None);
+    assert_eq!(
+        resolve_mouse(&layout, press(13, 2)),
+        Some(Command::ActivateDetailView(0))
+    );
+    assert_eq!(
+        resolve_mouse(&layout, press(29, 5)),
+        Some(Command::FocusDetails)
+    );
+    assert_eq!(resolve_mouse(&layout, press(79, 23)), None);
+}
+
+fn press(column: u16, row: u16) -> virtui::presentation::MouseInput {
+    virtui::presentation::MouseInput {
+        action: virtui::presentation::MouseAction::Press,
+        column,
+        row,
+    }
 }
 
 #[test]
 fn mouse_detail_click_focuses_details_without_live_terminal() {
     let mut app = App::new();
-    let geometry = InteractionGeometry {
-        detail_view_tabs: vec![(Rect::new(0, 0, 8, 1), 0)],
-        ..InteractionGeometry::default()
+    let layout = ScreenLayout {
+        provider_bar: Rect::new(0, 0, 80, 0),
+        workspace: Rect::new(0, 1, 80, 22),
+        status: Rect::new(0, 23, 80, 0),
+        provider_selector: Rect::new(0, 0, 0, 0),
+        provider_workspaces: Vec::new(),
+        panes: Some(WorkspacePanes {
+            resources: Rect::new(0, 1, 0, 0),
+            resource_panels: Vec::new(),
+            resource_rows: Vec::new(),
+            details: Rect::new(0, 1, 0, 0),
+            detail_views: vec![Rect::new(0, 0, 8, 1)],
+        }),
     };
     handle_mouse(
         &mut app,
@@ -470,7 +505,7 @@ fn mouse_detail_click_focuses_details_without_live_terminal() {
             row: 0,
             modifiers: KeyModifiers::NONE,
         },
-        &geometry,
+        Some(&layout),
     );
     assert_eq!(
         app.state().focused_pane,

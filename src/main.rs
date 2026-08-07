@@ -116,73 +116,22 @@ fn handle_key(app: &mut App, event: KeyEvent) -> (ShellControl, Vec<ProviderRequ
     }
 }
 
+/// Routes one terminal mouse event through the layout that drew the screen.
+///
+/// The mouse resolves to a Command and goes through `App::invoke`, exactly as a
+/// Keybinding does, so it can never take a shortcut past the work a Command
+/// carries with it.
 fn handle_mouse(
     app: &mut App,
     event: crossterm::event::MouseEvent,
-    geometry: &presentation::InteractionGeometry,
+    layout: Option<&presentation::ScreenLayout>,
 ) -> Vec<ProviderRequest> {
-    let Some(input) = presentation::mouse_from_event(event) else {
+    let (Some(layout), Some(input)) = (layout, presentation::mouse_from_event(event)) else {
         return Vec::new();
     };
-    match input.action {
-        presentation::MouseAction::Press => match geometry.hit(input.column, input.row) {
-            Some(presentation::InteractionTarget::Provider(index)) => app.select_provider_at(index),
-            Some(presentation::InteractionTarget::Resource { panel, resource }) => {
-                app.select_resource_at(panel, resource);
-                Vec::new()
-            }
-            Some(presentation::InteractionTarget::ResourcePanel(panel)) => {
-                app.focus_resource_panel_at(panel);
-                Vec::new()
-            }
-            Some(presentation::InteractionTarget::ProviderSelector) => {
-                app.focus_providers();
-                Vec::new()
-            }
-            Some(presentation::InteractionTarget::DetailView(index)) => {
-                app.select_detail_view_at(index);
-                Vec::new()
-            }
-            Some(presentation::InteractionTarget::Details) => {
-                app.focus_details();
-                Vec::new()
-            }
-            None => Vec::new(),
-        },
-        presentation::MouseAction::ScrollUp | presentation::MouseAction::ScrollDown => {
-            if matches!(
-                geometry.hit(input.column, input.row),
-                Some(
-                    presentation::InteractionTarget::Details
-                        | presentation::InteractionTarget::DetailView(_)
-                )
-            ) {
-                app.invoke(if input.action == presentation::MouseAction::ScrollUp {
-                    Command::ScrollDetailsUp
-                } else {
-                    Command::ScrollDetailsDown
-                })
-            } else if let Some(target) = geometry.hit(input.column, input.row) {
-                let panel = match target {
-                    presentation::InteractionTarget::ResourcePanel(panel)
-                    | presentation::InteractionTarget::Resource { panel, .. } => Some(panel),
-                    _ => None,
-                };
-                if let Some(panel) = panel {
-                    app.scroll_resource_panel_at(
-                        panel,
-                        if input.action == presentation::MouseAction::ScrollUp {
-                            -1
-                        } else {
-                            1
-                        },
-                    );
-                }
-                Vec::new()
-            } else {
-                Vec::new()
-            }
-        }
+    match presentation::resolve_mouse(layout, input) {
+        Some(command) => app.invoke(command),
+        None => Vec::new(),
     }
 }
 
@@ -240,10 +189,12 @@ async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::R
     let mut refresh_timer = RefreshTimer::new();
 
     let result = loop {
-        let mut geometry = presentation::InteractionGeometry::default();
+        // Nothing has been drawn yet, so there is nothing to point at.
+        let mut layout: Option<presentation::ScreenLayout> = None;
         if let Err(error) = terminal.draw(|frame| {
-            geometry = presentation::interaction_geometry(app.state(), frame.area());
-            presentation::render_with_geometry(app.state(), frame, &geometry)
+            let measured = presentation::ScreenLayout::measure(app.state(), frame.area());
+            presentation::render_with_layout(app.state(), frame, &measured);
+            layout = Some(measured);
         }) {
             break Err(error);
         }
@@ -254,7 +205,7 @@ async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::R
             Some(event) = key_rx.recv() => {
                 let (control, requests) = match event {
                     Event::Key(key) => handle_key(&mut app, key),
-                    Event::Mouse(mouse) => (ShellControl::Continue, handle_mouse(&mut app, mouse, &geometry)),
+                    Event::Mouse(mouse) => (ShellControl::Continue, handle_mouse(&mut app, mouse, layout.as_ref())),
                     _ => (ShellControl::Continue, Vec::new()),
                 };
                 dispatch_all(&runtime, &completion_tx, &mut detail_dispatch, requests);
