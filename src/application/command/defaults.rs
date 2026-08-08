@@ -218,6 +218,22 @@ pub(super) const BUILTIN_COMMANDS: &[CommandDefinition] = &[
         scopes: DETAILS,
         default_keys: &["ctrl+u", "pageup"],
     },
+    // The Pane Boundary is the shell's, not one Pane's, so it answers in every
+    // workspace scope. `<` and `>` point the way the boundary travels.
+    CommandDefinition {
+        id: "layout.boundary.left",
+        description: "Widen Details Pane",
+        command: Command::MovePaneBoundaryLeft,
+        scopes: WORKSPACE,
+        default_keys: &["<"],
+    },
+    CommandDefinition {
+        id: "layout.boundary.right",
+        description: "Widen Resource Panels",
+        command: Command::MovePaneBoundaryRight,
+        scopes: WORKSPACE,
+        default_keys: &[">"],
+    },
     CommandDefinition {
         id: "modal.confirm",
         description: "Confirm",

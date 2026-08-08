@@ -32,6 +32,10 @@ _Avoid_: Selected backend, current tab
 A focusable region of the application shell, such as the Provider selector, a Resource Panel, or the Details pane. Use _Panel_ only for a provider-defined Resource Panel.
 _Avoid_: Area, section, focus region
 
+**Pane Boundary**:
+The movable edge between two Panes, held as the share of the width or height it leaves the first of them rather than as a column or row count — so a terminal that changes size keeps the split the user chose. It is moved by dragging the borders that draw it or by its own Commands, and it holds itself inside a range that leaves both Panes usable. One share serves the whole Virtui run and every Provider Workspace in it; it is not written to a file.
+_Avoid_: Divider, splitter, split ratio
+
 **Resource**:
 One selectable native thing managed by a Provider, such as a container, image, volume, network, or instance. A Resource has a Resource State only when its kind has a lifecycle state.
 _Avoid_: Item, entity, provider object

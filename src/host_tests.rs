@@ -255,16 +255,99 @@ fn app_on_workspace(snapshot: WorkspaceSnapshot) -> App {
 }
 
 fn click(app: &mut App, layout: &ScreenLayout, column: u16, row: u16) -> Vec<ProviderRequest> {
+    pointer(
+        app,
+        layout,
+        MouseEventKind::Down(MouseButton::Left),
+        column,
+        row,
+    )
+}
+
+fn pointer(
+    app: &mut App,
+    layout: &ScreenLayout,
+    kind: MouseEventKind,
+    column: u16,
+    row: u16,
+) -> Vec<ProviderRequest> {
     handle_mouse(
         app,
         MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
+            kind,
             column,
             row,
             modifiers: KeyModifiers::NONE,
         },
         Some(layout),
     )
+}
+
+/// One whole gesture through the terminal's own event type: take hold of the
+/// Pane Boundary, carry it, and let go.
+///
+/// Grabbing must not focus the Resource Panel the boundary's left column sits
+/// in, and a drag after the release must find nothing to move.
+#[test]
+fn a_whole_drag_gesture_resizes_the_panes_and_then_lets_go() {
+    let mut app = app_on_workspace(two_containers());
+    let layout = ScreenLayout::measure(app.state(), Rect::new(0, 0, 80, 24));
+    let boundary = layout
+        .panes
+        .as_ref()
+        .expect("a Provider Workspace is active")
+        .pane_boundary;
+    let row = boundary.y + 2;
+    let focus_before = app.state().focused_pane;
+
+    pointer(
+        &mut app,
+        &layout,
+        MouseEventKind::Down(MouseButton::Left),
+        boundary.x,
+        row,
+    );
+
+    assert_eq!(
+        app.state().focused_pane,
+        focus_before,
+        "taking hold of the boundary is not focusing the Pane behind it"
+    );
+
+    pointer(
+        &mut app,
+        &layout,
+        MouseEventKind::Drag(MouseButton::Left),
+        51,
+        row,
+    );
+
+    assert_eq!(
+        app.state().pane_boundary.resources_percent(),
+        65,
+        "column 51 ends a Resources column 52 of the 80 the Workspace has"
+    );
+
+    pointer(
+        &mut app,
+        &layout,
+        MouseEventKind::Up(MouseButton::Left),
+        51,
+        row,
+    );
+    pointer(
+        &mut app,
+        &layout,
+        MouseEventKind::Drag(MouseButton::Left),
+        30,
+        row,
+    );
+
+    assert_eq!(
+        app.state().pane_boundary.resources_percent(),
+        65,
+        "a drag after the release carries nothing"
+    );
 }
 
 /// A clicked Resource must load like a keyboard-selected one. Selecting without
@@ -590,30 +673,31 @@ fn mouse_routing_resolves_each_region_without_a_terminal() {
             resource_rows: vec![vec![(3, Rect::new(1, 2, 8, 1))]],
             details: Rect::new(10, 1, 20, 5),
             detail_views: vec![Rect::new(12, 2, 8, 1)],
+            pane_boundary: Rect::new(9, 1, 2, 5),
         }),
         overlay: None,
     };
 
     assert_eq!(
-        resolve_mouse(&layout, press(3, 0)),
+        resolve_mouse(&layout, press(3, 0), None),
         Some(Command::ActivateProviderWorkspace(1))
     );
     assert_eq!(
-        resolve_mouse(&layout, press(2, 2)),
+        resolve_mouse(&layout, press(2, 2), None),
         Some(Command::SelectResource {
             panel: 0,
             resource: 3
         })
     );
     assert_eq!(
-        resolve_mouse(&layout, press(13, 2)),
+        resolve_mouse(&layout, press(13, 2), None),
         Some(Command::ActivateDetailView(0))
     );
     assert_eq!(
-        resolve_mouse(&layout, press(29, 5)),
+        resolve_mouse(&layout, press(29, 5), None),
         Some(Command::FocusDetails)
     );
-    assert_eq!(resolve_mouse(&layout, press(79, 23)), None);
+    assert_eq!(resolve_mouse(&layout, press(79, 23), None), None);
 }
 
 fn press(column: u16, row: u16) -> virtui::presentation::MouseInput {
@@ -639,6 +723,7 @@ fn mouse_detail_click_focuses_details_without_live_terminal() {
             resource_rows: Vec::new(),
             details: Rect::new(0, 1, 0, 0),
             detail_views: vec![Rect::new(0, 0, 8, 1)],
+            pane_boundary: Rect::new(0, 1, 0, 0),
         }),
         overlay: None,
     };

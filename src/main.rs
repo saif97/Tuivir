@@ -143,7 +143,10 @@ fn handle_mouse(
     let (Some(layout), Some(input)) = (layout, presentation::mouse_from_event(event)) else {
         return Vec::new();
     };
-    match presentation::resolve_mouse(layout, input) {
+    // Read before invoking: a drag names no region, so what the pointer is
+    // already holding is what tells the layout which gesture this is.
+    let boundary_grab = app.state().pane_boundary.grab();
+    match presentation::resolve_mouse(layout, input, boundary_grab) {
         Some(command) => app.invoke(command),
         None => Vec::new(),
     }

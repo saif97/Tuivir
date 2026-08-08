@@ -3296,3 +3296,172 @@ fn one_override_changes_dispatch_help_and_the_inline_hint_together() {
     );
     assert!(stale.is_empty(), "the old Restart key is unbound");
 }
+
+/// The user moves the Pane Boundary in steps they can predict, so five presses
+/// one way and five back leave the Panes where they started.
+#[test]
+fn moving_the_pane_boundary_steps_it_by_five_points_each_way() {
+    let mut app = App::new();
+    let start = app.state().pane_boundary.resources_percent();
+
+    app.invoke(Command::MovePaneBoundaryRight);
+
+    assert_eq!(
+        app.state().pane_boundary.resources_percent(),
+        start + 5,
+        "moving right gives the Resource Panels more of the width"
+    );
+
+    app.invoke(Command::MovePaneBoundaryLeft);
+    app.invoke(Command::MovePaneBoundaryLeft);
+
+    assert_eq!(
+        app.state().pane_boundary.resources_percent(),
+        start - 5,
+        "moving left gives the Details Pane more of the width"
+    );
+}
+
+/// Neither Pane may be squeezed out of usefulness, however long the user holds
+/// the key down.
+#[test]
+fn the_pane_boundary_stops_at_the_edges_of_its_range() {
+    let mut app = App::new();
+
+    for _ in 0..20 {
+        app.invoke(Command::MovePaneBoundaryRight);
+    }
+
+    assert_eq!(
+        app.state().pane_boundary.resources_percent(),
+        75,
+        "the Details Pane keeps a quarter of the width"
+    );
+
+    for _ in 0..20 {
+        app.invoke(Command::MovePaneBoundaryLeft);
+    }
+
+    assert_eq!(
+        app.state().pane_boundary.resources_percent(),
+        25,
+        "the Resource Panels keep a quarter of the width"
+    );
+}
+
+/// A drag is only the Pane Boundary's while the pointer holds it. Every other
+/// drag on the screen reaches the application the same way and must not move
+/// the Panes.
+#[test]
+fn the_pane_boundary_moves_only_while_the_pointer_holds_it() {
+    let mut app = App::new();
+    let start = app.state().pane_boundary.resources_percent();
+
+    app.invoke(Command::SetPaneBoundary(60));
+
+    assert_eq!(
+        app.state().pane_boundary.resources_percent(),
+        start,
+        "a boundary nobody grabbed ignores the pointer"
+    );
+
+    app.invoke(Command::GrabPaneBoundary(0));
+    app.invoke(Command::SetPaneBoundary(60));
+
+    assert_eq!(app.state().pane_boundary.resources_percent(), 60);
+
+    app.invoke(Command::ReleasePaneBoundary);
+    app.invoke(Command::SetPaneBoundary(30));
+
+    assert_eq!(
+        app.state().pane_boundary.resources_percent(),
+        60,
+        "letting go stops the boundary following the pointer"
+    );
+}
+
+/// A resize is only a resize. Which Pane has focus, which Resource is selected,
+/// which Detail View is on screen, and how far through it the user had read are
+/// all still there afterwards.
+#[test]
+fn resizing_the_panes_disturbs_nothing_inside_them() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
+    let details = detail_request(app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[
+            ("container-a", "api", "nginx:1.27"),
+            ("container-b", "worker", "alpine:3.21"),
+        ])),
+    )));
+    app.update(details_completed(
+        details,
+        Ok(ResourceDetails::from_lines(
+            (0..30).map(|line| format!("line-{line}")),
+        )),
+    ));
+    app.invoke(Command::FocusDetails);
+    handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE),
+    );
+    let selected_before = app.state().providers[0].selected_resource_target();
+    let scrolled = render_to_text(app.state(), 100, 24);
+    assert!(scrolled.contains("line-10"), "rendered:\n{scrolled}");
+    assert!(
+        !scrolled.contains("line-0 "),
+        "the first line has been scrolled past, rendered:\n{scrolled}"
+    );
+
+    for _ in 0..4 {
+        app.invoke(Command::MovePaneBoundaryRight);
+    }
+
+    assert_ne!(
+        app.state().pane_boundary.resources_percent(),
+        48,
+        "the Panes really did change size"
+    );
+    assert_eq!(
+        app.state().focused_pane,
+        FocusedPane::Details,
+        "the Pane the keyboard drives is still the one the user left it on"
+    );
+    assert_eq!(
+        app.state().providers[0].selected_resource_target(),
+        selected_before,
+        "the selected Resource survives the resize"
+    );
+    let resized = render_to_text(app.state(), 100, 24);
+    assert!(
+        resized.contains("line-10") && !resized.contains("line-0 "),
+        "the Detail View is still where it was read to, rendered:\n{resized}"
+    );
+}
+
+/// The Pane Boundary belongs to the run, not to one Provider Workspace. A user
+/// who sized the Panes to read Docker logs finds them that size in Incus too.
+#[test]
+fn the_pane_boundary_survives_provider_workspace_navigation() {
+    let mut app = App::new();
+    app.update(docker_discovery().into_event());
+    app.update(incus_discovery().into_event());
+    for _ in 0..3 {
+        app.invoke(Command::MovePaneBoundaryLeft);
+    }
+    let chosen = app.state().pane_boundary.resources_percent();
+    assert_eq!(chosen, 33, "three steps left from the starting share");
+
+    app.invoke(Command::NextWorkspace);
+
+    assert_eq!(app.state().active_provider, Some(1), "Incus is active");
+    assert_eq!(
+        app.state().pane_boundary.resources_percent(),
+        chosen,
+        "the Panes keep the size the user gave them"
+    );
+
+    app.invoke(Command::PreviousWorkspace);
+
+    assert_eq!(app.state().pane_boundary.resources_percent(), chosen);
+}
