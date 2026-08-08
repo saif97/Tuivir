@@ -35,7 +35,7 @@ pub fn resolve(
         // Commands.
         _ if layout.overlay.is_some() => None,
         MouseAction::Press => press(layout, input),
-        MouseAction::Drag => drag(layout, input, boundary_grab?),
+        MouseAction::Drag => drag(layout, input, boundary_grab),
         MouseAction::ScrollUp => scroll(layout, input, ScrollDirection::Up),
         MouseAction::ScrollDown => scroll(layout, input, ScrollDirection::Down),
     }
@@ -47,7 +47,16 @@ pub fn resolve(
 /// The share is worked out here because the width it is a share of belongs to
 /// the screen. `grab` is the column of the boundary the pointer took hold of,
 /// and taking it off the pointer is what stops the boundary jumping.
-fn drag(layout: &ScreenLayout, input: MouseInput, grab: u16) -> Option<Command> {
+fn drag(layout: &ScreenLayout, input: MouseInput, boundary_grab: Option<u16>) -> Option<Command> {
+    if boundary_grab.is_none() {
+        let panes = layout.panes.as_ref()?;
+        let point = point(input);
+        return panes.detail_content.contains(point).then_some(Command::ExtendDetailsSelection {
+            line: point.y - panes.detail_content.y,
+            column: point.x - panes.detail_content.x,
+        });
+    }
+    let grab = boundary_grab.expect("checked above");
     let workspace = layout.workspace;
     if workspace.width == 0 {
         return None;

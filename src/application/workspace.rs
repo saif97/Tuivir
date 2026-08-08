@@ -520,12 +520,14 @@ impl ProviderWorkspaceState {
 
     pub fn begin_detail_selection(&mut self, line: u16, column: u16) {
         let Some(details) = self.details.as_mut() else { return };
+        let line = details.scroll.saturating_add(line);
         let Some(position) = detail_position(&details.content, line, column) else { return };
         details.selection = Some(DetailSelection { start: position, end: position });
     }
 
     pub fn extend_detail_selection(&mut self, line: u16, column: u16) {
         let Some(details) = self.details.as_mut() else { return };
+        let line = details.scroll.saturating_add(line);
         let Some(position) = detail_position(&details.content, line, column) else { return };
         if let Some(selection) = &mut details.selection {
             selection.end = position;

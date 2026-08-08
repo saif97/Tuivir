@@ -699,6 +699,18 @@ fn mouse_routing_resolves_each_region_without_a_terminal() {
         Some(Command::BeginDetailsSelection { line: 0, column: 3 })
     );
     assert_eq!(
+        resolve_mouse(
+            &layout,
+            virtui::presentation::MouseInput {
+                action: virtui::presentation::MouseAction::Drag,
+                column: 16,
+                row: 4,
+            },
+            None,
+        ),
+        Some(Command::ExtendDetailsSelection { line: 1, column: 5 })
+    );
+    assert_eq!(
         resolve_mouse(&layout, press(29, 5), None),
         Some(Command::FocusDetails)
     );
