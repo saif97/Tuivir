@@ -2851,6 +2851,26 @@ fn detail_source_lines_clip_at_the_panel_edge_instead_of_wrapping() {
     assert!(!screen.contains("SHOULD"), "rendered:\n{screen}");
 }
 
+#[test]
+fn copying_a_details_selection_returns_exact_source_text() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
+    let details = detail_request(app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    )));
+    app.update(details_completed(
+        details,
+        Ok(ResourceDetails::from_lines(["hello", "world"])),
+    ));
+
+    app.invoke(Command::BeginDetailsSelection { line: 0, column: 1 });
+    app.invoke(Command::ExtendDetailsSelection { line: 1, column: 3 });
+    app.invoke(Command::CopyDetails);
+
+    assert_eq!(app.take_pending_details_copy(), Some("ello\nwor".to_owned()));
+}
+
 /// Every view starts at its own top: a scrolled position belongs to the output
 /// it was scrolled through, not to the panel.
 #[test]

@@ -44,6 +44,20 @@ struct ResourceDetailsState {
     title: String,
     content: DetailContent,
     scroll: u16,
+    selection: Option<DetailSelection>,
+}
+
+/// A half-open source range inside loaded Details text.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DetailSelection {
+    pub start: DetailPosition,
+    pub end: DetailPosition,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct DetailPosition {
+    pub line: u16,
+    pub column: u16,
 }
 
 impl ResourceDetailsState {
@@ -450,6 +464,7 @@ impl ProviderWorkspaceState {
                 title: view.title,
                 content: DetailContent::Ready(content),
                 scroll: 0,
+                selection: None,
             });
             return None;
         }
@@ -468,6 +483,7 @@ impl ProviderWorkspaceState {
             title: view.title,
             content: DetailContent::Loading,
             scroll: 0,
+            selection: None,
         });
         Some(load)
     }
@@ -500,6 +516,33 @@ impl ProviderWorkspaceState {
         details.scroll = (details.scroll as usize)
             .saturating_add_signed(delta)
             .min(last_line) as u16;
+    }
+
+    pub fn begin_detail_selection(&mut self, line: u16, column: u16) {
+        let Some(details) = self.details.as_mut() else { return };
+        let Some(position) = detail_position(&details.content, line, column) else { return };
+        details.selection = Some(DetailSelection { start: position, end: position });
+    }
+
+    pub fn extend_detail_selection(&mut self, line: u16, column: u16) {
+        let Some(details) = self.details.as_mut() else { return };
+        let Some(position) = detail_position(&details.content, line, column) else { return };
+        if let Some(selection) = &mut details.selection {
+            selection.end = position;
+        }
+    }
+
+    pub fn clear_detail_selection(&mut self) {
+        if let Some(details) = self.details.as_mut() {
+            details.selection = None;
+        }
+    }
+
+    pub fn selected_detail_text(&self) -> Option<String> {
+        let details = self.details.as_ref()?;
+        let DetailContent::Ready(loaded) = &details.content else { return None };
+        let selection = details.selection.as_ref()?;
+        selected_text(&loaded.lines, selection)
     }
 
     /// Replaces Provider data while preserving every still-valid presentation
@@ -729,6 +772,7 @@ pub struct ResourceDetailsView<'a> {
     pub title: &'a str,
     pub content: &'a DetailContent,
     pub scroll: u16,
+    pub selection: Option<&'a DetailSelection>,
 }
 
 impl<'a> From<&'a ResourceDetailsState> for ResourceDetailsView<'a> {
@@ -738,8 +782,30 @@ impl<'a> From<&'a ResourceDetailsState> for ResourceDetailsView<'a> {
             title: &details.title,
             content: &details.content,
             scroll: details.scroll,
+            selection: details.selection.as_ref(),
         }
     }
+}
+
+fn detail_position(content: &DetailContent, line: u16, column: u16) -> Option<DetailPosition> {
+    let DetailContent::Ready(loaded) = content else { return None };
+    let text = loaded.lines.get(line as usize)?;
+    Some(DetailPosition { line, column: column.min(text.chars().count() as u16) })
+}
+
+fn selected_text(lines: &[String], selection: &DetailSelection) -> Option<String> {
+    let (start, end) = if selection.start <= selection.end {
+        (selection.start, selection.end)
+    } else {
+        (selection.end, selection.start)
+    };
+    if start == end || end.line as usize >= lines.len() { return None }
+    Some((start.line..=end.line).enumerate().map(|(offset, line)| {
+        let text = &lines[line as usize];
+        let from = if offset == 0 { start.column as usize } else { 0 };
+        let to = if line == end.line { end.column as usize } else { text.chars().count() };
+        text.chars().skip(from).take(to.saturating_sub(from)).collect::<String>()
+    }).collect::<Vec<_>>().join("\n"))
 }
 
 /// One Resource Panel paired with its private navigation projection.
