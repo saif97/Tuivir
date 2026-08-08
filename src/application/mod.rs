@@ -24,6 +24,6 @@ pub use provider::{
 };
 pub use shell::{InteractiveShellOutcome, InteractiveShellProcess};
 pub use workspace::{
-    DetailCompletion, DetailContent, DetailLoad, ProviderWorkspaceState, ResourceDetailsView,
+    DetailCompletion, DetailContent, DetailLoad, DetailPosition, DetailSelection, ProviderWorkspaceState, ResourceDetailsView,
     ResourcePanelView, WorkspaceLoadState, WorkspacePresentation, WorkspaceView,
 };

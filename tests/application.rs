@@ -2871,6 +2871,36 @@ fn copying_a_details_selection_returns_exact_source_text() {
     assert_eq!(app.take_pending_details_copy(), Some("ello\nwor".to_owned()));
 }
 
+#[test]
+fn selected_details_text_is_visibly_highlighted() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
+    let details = detail_request(app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    )));
+    app.update(details_completed(details, Ok(ResourceDetails::from_lines(["hello"]))));
+    app.invoke(Command::BeginDetailsSelection { line: 0, column: 1 });
+    app.invoke(Command::ExtendDetailsSelection { line: 0, column: 4 });
+
+    let screen = render_to_text(app.state(), 100, 24);
+    let backgrounds = render_background_colours(app.state(), 100, 24);
+    let (row, column) = screen
+        .lines()
+        .enumerate()
+        .find_map(|(row, line)| {
+            line.find("hello")
+                .map(|offset| (row, line[..offset].chars().count()))
+        })
+        .expect("detail text is rendered");
+
+    assert_eq!(
+        &backgrounds[row][column + 1..column + 4],
+        &[Color::Blue, Color::Blue, Color::Blue],
+        "screen:\n{screen}",
+    );
+}
+
 /// Every view starts at its own top: a scrolled position belongs to the output
 /// it was scrolled through, not to the panel.
 #[test]

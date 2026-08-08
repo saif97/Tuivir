@@ -8,7 +8,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph},
 };
 
-use crate::application::{AppState, FocusedPane};
+use crate::application::{AppState, DetailSelection, FocusedPane};
 use crate::application::{
     DetailContent, ResourceDetailsView, ResourcePanelView, WorkspacePresentation, WorkspaceView,
 };
@@ -536,9 +536,10 @@ fn render_detail_content(
         DetailContent::Ready(loaded) => loaded
             .lines
             .iter()
+            .enumerate()
             .skip(details.scroll as usize)
             .take(area.height as usize)
-            .map(|line| Line::from(line.as_str()))
+            .map(|(line_index, line)| detail_line(line, line_index as u16, details.selection))
             .collect(),
         DetailContent::Error(error) => vec![
             Line::styled(
@@ -552,6 +553,28 @@ fn render_detail_content(
         ],
     };
     frame.render_widget(Paragraph::new(lines), area);
+}
+
+fn detail_line(text: &str, line: u16, selection: Option<&DetailSelection>) -> Line<'static> {
+    let Some(selection) = selection else { return Line::from(text.to_owned()) };
+    let (start, end) = if selection.start <= selection.end {
+        (selection.start, selection.end)
+    } else {
+        (selection.end, selection.start)
+    };
+    if start == end || line < start.line || line > end.line {
+        return Line::from(text.to_owned());
+    }
+    let first = if line == start.line { start.column as usize } else { 0 };
+    let last = if line == end.line { end.column as usize } else { text.chars().count() };
+    let before = text.chars().take(first).collect::<String>();
+    let selected = text.chars().skip(first).take(last.saturating_sub(first)).collect::<String>();
+    let after = text.chars().skip(last).collect::<String>();
+    Line::from(vec![
+        Span::raw(before),
+        Span::styled(selected, Style::default().fg(Color::White).bg(Color::Blue)),
+        Span::raw(after),
+    ])
 }
 
 pub fn render_to_text(state: &AppState, width: u16, height: u16) -> String {
@@ -571,8 +594,8 @@ pub fn render_foreground_colours(state: &AppState, width: u16, height: u16) -> V
     render_to_buffer(state, width, height, |cell| cell.fg)
 }
 
-/// This is the background counterpart of [`render_to_text`]. It lets
-/// presentation tests verify that a raised surface paints over the terminal.
+/// The background counterpart of [`render_to_text`], used to verify raised
+/// surfaces and interactive selection highlights.
 pub fn render_background_colours(state: &AppState, width: u16, height: u16) -> Vec<Vec<Color>> {
     render_to_buffer(state, width, height, |cell| cell.bg)
 }
