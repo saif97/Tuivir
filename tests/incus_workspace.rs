@@ -557,7 +557,8 @@ async fn reachable_incus_without_instances_renders_a_distinct_empty_state() {
 
     let screen = render_to_text(app.state(), 100, 24);
     assert!(screen.contains("[ Incus · local / default ]"));
-    assert!(screen.contains("No Incus instances found"));
+    assert!(screen.contains("No resources"));
+    assert!(!screen.contains("No Incus instances found"));
     assert!(!screen.contains("unavailable"));
 }
 

@@ -52,6 +52,10 @@ _Avoid_: Cluster, server, connection
 A registered user intention that Virtui can invoke within its Command Scope.
 _Avoid_: Action, handler
 
+**Running Resource Command**:
+An invoked Command whose Provider work for one Resource has not completed. It belongs to that Resource and remains distinct from the Resource State last reported by its Provider.
+_Avoid_: Transitioning Resource, pending state
+
 **Command Scope**:
 The structural part of the interface in which a Command may be invoked, such as a focused panel or a Provider Workspace's resource view. Mutable resource state does not change a Command's scope.
 _Avoid_: Context, condition
@@ -60,12 +64,12 @@ _Avoid_: Context, condition
 An ordered association between one or more key combinations and a Command. The first combination is the preferred inline hint when the interface has room to show only one.
 _Avoid_: Shortcut, hotkey
 
-**Detail View**:
-One provider-native way of inspecting a selected Resource, declared by the Provider Workspace that offers it and named in that Provider's own words — Docker's Logs, Stats, and Inspect; Incus's Info, Config, and Console Log. Only the provider-backed view on screen is ever loaded; snapshot-backed content is resolved from the current Workspace Snapshot without Provider work. A result that arrives for a Resource or view the user has left is refused rather than shown.
-_Avoid_: Tab, pane, inspector, log view
+**Detail View Tab**:
+One selectable, provider-native view of a Resource, declared by the Provider Workspace that offers it and named in that Provider's own words — Docker's Logs, Stats, and Inspect; Incus's Info, Config, and Console Log. Only the provider-backed tab on screen is ever loaded; snapshot-backed content is resolved from the current Workspace Snapshot without Provider work. A result that arrives for a Resource or tab the user has left is refused rather than shown.
+_Avoid_: Detail View, pane, inspector, log view
 
 **Resource Shell Session**:
-An ongoing command shell attached to one Resource through a Detail View. It remains active when the user navigates elsewhere in Virtui and is ended explicitly or when Virtui exits.
+An ongoing command shell attached to one Resource through a Detail View Tab. It remains active when the user navigates elsewhere in Virtui and is ended explicitly or when Virtui exits.
 _Avoid_: Interactive Detail Session, shell panel, terminal tab
 
 **Resource State**:

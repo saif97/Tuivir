@@ -24,7 +24,9 @@ use virtui::{
     },
     infrastructure::provider::{DockerWorkspace, ProviderDiscovery, ProviderWorkspace},
     infrastructure::runtime::{ProviderRuntime, RefreshTimer},
-    presentation::{key_from_event, render_foreground_colours, render_to_text},
+    presentation::{
+        key_from_event, render_background_colours, render_foreground_colours, render_to_text,
+    },
 };
 
 mod common;
@@ -57,8 +59,24 @@ fn handle_key(app: &mut App, event: KeyEvent) -> (ShellControl, Vec<ProviderRequ
 /// Reports the single foreground colour `text` is rendered in, panicking when
 /// it is absent from the screen or split across colours.
 fn foreground_of(state: &AppState, width: u16, height: u16, text: &str) -> Color {
+    colour_of(state, width, height, text, render_foreground_colours)
+}
+
+fn background_of(state: &AppState, width: u16, height: u16, text: &str) -> Color {
+    colour_of(state, width, height, text, render_background_colours)
+}
+
+/// Reports the single colour `text` is rendered in, panicking when it is
+/// absent from the screen or split across colours.
+fn colour_of(
+    state: &AppState,
+    width: u16,
+    height: u16,
+    text: &str,
+    render_colours: fn(&AppState, u16, u16) -> Vec<Vec<Color>>,
+) -> Color {
     let screen = render_to_text(state, width, height);
-    let colours = render_foreground_colours(state, width, height);
+    let colours = render_colours(state, width, height);
     // Cell symbols such as a panel border are multi-byte, so a byte offset into
     // the rendered line is not a screen column until it is counted in chars.
     let (row, column) = screen
@@ -1396,6 +1414,74 @@ fn delete_requires_target_identifying_confirmation_before_dispatch() {
 }
 
 #[test]
+fn a_delete_confirmation_is_a_raised_warning_surface() {
+    let mut app = App::new();
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
+
+    app.invoke(Command::Resource(ResourceCommand::Delete));
+
+    assert_eq!(
+        foreground_of(app.state(), 100, 24, "Confirm deletion"),
+        Color::Yellow
+    );
+    assert_eq!(
+        background_of(
+            app.state(),
+            100,
+            24,
+            "Press y/Enter to confirm or n/Esc to cancel."
+        ),
+        Color::Black
+    );
+}
+
+#[test]
+fn help_and_failures_are_raised_semantic_surfaces() {
+    let mut help = App::new();
+    ready_workspace(
+        &mut help,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
+    handle_key(
+        &mut help,
+        KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+    );
+    assert_eq!(
+        foreground_of(help.state(), 100, 24, "Commands for api"),
+        Color::Blue
+    );
+    assert_eq!(
+        background_of(help.state(), 100, 24, "d  Delete"),
+        Color::Black
+    );
+
+    let mut failed = App::new();
+    ready_workspace(
+        &mut failed,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
+    let restart = command_request(failed.invoke(Command::Resource(ResourceCommand::Restart)));
+    failed.update(command_completed(
+        restart,
+        Err(WorkspaceError::new("permission denied")),
+    ));
+    assert_eq!(
+        foreground_of(failed.state(), 100, 24, "Command failed"),
+        Color::Red
+    );
+    assert_eq!(
+        background_of(failed.state(), 100, 24, "Press Esc to dismiss."),
+        Color::Black
+    );
+}
+
+#[test]
 fn confirming_a_running_resource_warns_it_is_stopped_and_dispatches_its_state() {
     let mut app = App::new();
     ready_workspace(
@@ -1574,7 +1660,7 @@ fn provider_bar_precedes_the_workspace_panes() {
         lines
             .next()
             .expect("workspace row")
-            .starts_with("┏ ▶ [2] Containers")
+            .starts_with(" ▶ [2] Containers")
     );
 }
 
@@ -1647,6 +1733,27 @@ fn a_resource_name_is_left_uncoloured_by_its_resource_state() {
     );
 
     assert_eq!(foreground_of(app.state(), 100, 24, "api"), Color::Reset);
+}
+
+#[test]
+fn an_empty_resource_panel_is_compact_muted_and_uses_the_terminal_background() {
+    let mut app = App::new();
+    ready_workspace(&mut app, docker_discovery(), snapshot(&[]));
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(screen.contains("No resources"), "rendered:\n{screen}");
+    assert!(
+        !screen.contains("No Docker Containers found"),
+        "the Panel title already identifies the Resources:\n{screen}"
+    );
+    assert_eq!(
+        foreground_of(app.state(), 100, 24, "No resources"),
+        Color::DarkGray
+    );
+    assert_eq!(
+        background_of(app.state(), 100, 24, "No resources"),
+        Color::Reset
+    );
 }
 
 #[test]
@@ -2021,25 +2128,27 @@ fn every_resource_panel_advertises_its_effective_focus_key() {
 }
 
 #[test]
-fn focus_has_a_non_colour_cue_on_every_pane() {
+fn focus_accents_a_pane_title_and_edge_without_a_thick_border() {
     let mut app = App::new();
     ready_workspace(&mut app, docker_discovery(), docker_multi_panel_snapshot());
 
     let screen = render_to_text(app.state(), 80, 30);
-    assert!(
-        screen.contains("┏ ▶ [2] Containers"),
-        "the focused Resource Panel uses a thick border and title cue:\n{screen}"
+    assert!(screen.contains("▶ [2] Containers"), "rendered:\n{screen}");
+    assert_eq!(
+        foreground_of(app.state(), 80, 30, "▶ [2] Containers"),
+        Color::Blue,
+        "the focused Pane title uses the primary accent"
     );
 
     app.invoke(Command::FocusResourcePanel(1));
     let screen = render_to_text(app.state(), 80, 30);
-    assert!(screen.contains("┏ ▶ [3] Images"), "rendered:\n{screen}");
+    assert!(screen.contains("▶ [3] Images"), "rendered:\n{screen}");
     assert!(!screen.contains("▶ [2] Containers"));
 
     app.invoke(Command::FocusDetails);
     let screen = render_to_text(app.state(), 80, 30);
     assert!(
-        screen.contains("┏ ▶ [enter] Details"),
+        screen.contains("┌ ▶ [enter] Details"),
         "rendered:\n{screen}"
     );
 

@@ -826,7 +826,8 @@ async fn reachable_docker_without_containers_renders_a_distinct_empty_state() {
 
     let screen = render_to_text(app.state(), 100, 24);
     assert!(screen.contains("[ Docker · colima ]"));
-    assert!(screen.contains("No Docker containers found"));
+    assert!(screen.contains("No resources"));
+    assert!(!screen.contains("No Docker containers found"));
     assert!(!screen.contains("unavailable"));
 }
 

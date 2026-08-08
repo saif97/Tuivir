@@ -112,7 +112,7 @@ fn the_measured_pane_boundary_sits_on_the_borders_that_are_drawn() {
 
     assert_eq!(
         drawn,
-        vec![0, boundary.x, boundary.x + 1, 79],
+        vec![0, boundary.x, boundary.x + 1],
         "drawn row: {row}"
     );
     assert_eq!(boundary.width, 2, "both drawn columns can be grabbed");

@@ -20,6 +20,55 @@ use super::screen_layout::{
     provider_workspace_label,
 };
 
+/// The default presentation palette names colours by their purpose so render
+/// sites never choose unrelated terminal colours for the same meaning.
+#[derive(Clone, Copy)]
+enum ThemeRole {
+    Primary,
+    Success,
+    Muted,
+    Warning,
+    Error,
+    Terminal,
+    RaisedSurface,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum PaneChrome {
+    Resource,
+    Details,
+    Full,
+}
+
+fn theme_colour(role: ThemeRole) -> Color {
+    match role {
+        ThemeRole::Primary => Color::Blue,
+        ThemeRole::Success => Color::Green,
+        ThemeRole::Muted => Color::DarkGray,
+        ThemeRole::Warning => Color::Yellow,
+        ThemeRole::Error => Color::Red,
+        ThemeRole::Terminal => Color::Reset,
+        ThemeRole::RaisedSurface => Color::Black,
+    }
+}
+
+fn themed_style(role: ThemeRole) -> Style {
+    Style::default().fg(theme_colour(role))
+}
+
+fn raised_surface_style() -> Style {
+    Style::default().bg(theme_colour(ThemeRole::RaisedSurface))
+}
+
+fn modal_block(title: impl Into<Line<'static>>, accent: ThemeRole) -> Block<'static> {
+    Block::default()
+        .title(title)
+        .title_style(themed_style(accent))
+        .border_style(themed_style(accent))
+        .style(raised_surface_style())
+        .borders(Borders::ALL)
+}
+
 pub fn render(state: &AppState, frame: &mut Frame<'_>) {
     render_with_layout(state, frame, &ScreenLayout::measure(state, frame.area()));
 }
@@ -72,11 +121,10 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
             .collect::<Vec<_>>();
         frame.render_widget(Clear, area);
         frame.render_widget(
-            Paragraph::new(lines).block(
-                Block::default()
-                    .title(format!(" Commands for {} ", help.target))
-                    .borders(Borders::ALL),
-            ),
+            Paragraph::new(lines).block(modal_block(
+                format!(" Commands for {} ", help.target),
+                ThemeRole::Primary,
+            )),
             area,
         );
     }
@@ -88,15 +136,11 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
         frame.render_widget(Clear, area);
         frame.render_widget(
             Paragraph::new(vec![
-                Line::styled(error.as_str(), Style::default().fg(Color::Red)),
+                Line::styled(error.as_str(), themed_style(ThemeRole::Error)),
                 Line::from("Press Esc to dismiss."),
             ])
             .wrap(ratatui::widgets::Wrap { trim: true })
-            .block(
-                Block::default()
-                    .title(" Command failed ")
-                    .borders(Borders::ALL),
-            ),
+            .block(modal_block(" Command failed ", ThemeRole::Error)),
             area,
         );
     }
@@ -118,11 +162,7 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
         }
         lines.push(Line::from("Press y/Enter to confirm or n/Esc to cancel."));
         frame.render_widget(
-            Paragraph::new(lines).block(
-                Block::default()
-                    .title(" Confirm deletion ")
-                    .borders(Borders::ALL),
-            ),
+            Paragraph::new(lines).block(modal_block(" Confirm deletion ", ThemeRole::Warning)),
             area,
         );
     }
@@ -151,9 +191,7 @@ fn render_running_command_status(state: &AppState, frame: &mut Frame<'_>, area: 
     frame.render_widget(
         Paragraph::new(Line::styled(
             status,
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
+            themed_style(ThemeRole::Warning).add_modifier(Modifier::BOLD),
         )),
         area,
     );
@@ -198,6 +236,7 @@ fn render_workspace_panel(
                     resource_focus,
                 ),
                 resource_focus,
+                PaneChrome::Full,
             )),
             area,
         ),
@@ -205,7 +244,7 @@ fn render_workspace_panel(
             Paragraph::new(vec![
                 Line::styled(
                     format!("{name} provider is unavailable"),
-                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                    themed_style(ThemeRole::Error).add_modifier(Modifier::BOLD),
                 ),
                 Line::from(error.message.as_str()),
             ])
@@ -217,6 +256,7 @@ fn render_workspace_panel(
                     resource_focus,
                 ),
                 resource_focus,
+                PaneChrome::Full,
             )),
             area,
         ),
@@ -230,6 +270,7 @@ fn render_workspace_panel(
                             resource_focus,
                         ),
                         resource_focus,
+                        PaneChrome::Resource,
                     )),
                     area,
                 );
@@ -251,7 +292,6 @@ fn render_workspace_panel(
                 let focused =
                     resource_focus && view.focused_resource_panel == Some(&panel.panel.id);
                 render_resource_panel(
-                    view.name,
                     &panel,
                     resource_hints.get(index).and_then(Option::as_deref),
                     focused,
@@ -264,7 +304,6 @@ fn render_workspace_panel(
 }
 
 fn render_resource_panel(
-    provider_name: &str,
     view: &ResourcePanelView<'_>,
     resources_hint: Option<&str>,
     focused: bool,
@@ -307,16 +346,16 @@ fn render_resource_panel(
         })
         .collect::<Vec<_>>();
     if items.is_empty() {
-        items.push(ListItem::new(format!(
-            "No {} {} found",
-            provider_name,
-            panel.title.to_lowercase()
+        items.push(ListItem::new(Line::styled(
+            "No resources",
+            themed_style(ThemeRole::Muted),
         )));
     }
     frame.render_widget(
         List::new(items).block(pane_block(
             pane_title(resources_hint, &panel.title, focused),
             focused,
+            PaneChrome::Resource,
         )),
         area,
     );
@@ -346,21 +385,19 @@ pub(super) fn visible_resource_range(
 /// does not recognise must not borrow the colour of a state Virtui understands.
 fn resource_state_style(state: ResourceState) -> Style {
     let colour = match state {
-        ResourceState::Running => Color::Green,
-        ResourceState::Stopped => Color::DarkGray,
-        ResourceState::Paused => Color::Yellow,
-        ResourceState::Transitioning => Color::Blue,
-        ResourceState::Broken => Color::Red,
-        ResourceState::Unknown => Color::Reset,
+        ResourceState::Running => theme_colour(ThemeRole::Success),
+        ResourceState::Stopped => theme_colour(ThemeRole::Muted),
+        ResourceState::Paused => theme_colour(ThemeRole::Warning),
+        ResourceState::Transitioning => theme_colour(ThemeRole::Primary),
+        ResourceState::Broken => theme_colour(ThemeRole::Error),
+        ResourceState::Unknown => theme_colour(ThemeRole::Terminal),
     };
     Style::default().fg(colour)
 }
 
 fn panel_title_style(focused: bool) -> Style {
     if focused {
-        Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD)
+        themed_style(ThemeRole::Primary).add_modifier(Modifier::BOLD)
     } else {
         Style::default()
     }
@@ -380,17 +417,18 @@ pub(super) fn pane_title(hint: Option<&str>, label: &str, focused: bool) -> Stri
     }
 }
 
-pub(super) fn pane_block(title: String, focused: bool) -> Block<'static> {
+pub(super) fn pane_block(title: String, focused: bool, chrome: PaneChrome) -> Block<'static> {
+    let borders = match chrome {
+        PaneChrome::Resource => Borders::TOP | Borders::BOTTOM | Borders::RIGHT,
+        PaneChrome::Details => Borders::TOP | Borders::BOTTOM | Borders::LEFT,
+        PaneChrome::Full => Borders::ALL,
+    };
     Block::default()
         .title(title)
         .title_style(panel_title_style(focused))
         .border_style(panel_title_style(focused))
-        .border_type(if focused {
-            BorderType::Thick
-        } else {
-            BorderType::Plain
-        })
-        .borders(Borders::ALL)
+        .border_type(BorderType::Plain)
+        .borders(borders)
 }
 
 fn render_details_panel(
@@ -425,7 +463,11 @@ fn render_details_panel(
             }
         });
 
-    let block = pane_block(pane_title(details_hint, "Details", focused), focused);
+    let block = pane_block(
+        pane_title(details_hint, "Details", focused),
+        focused,
+        PaneChrome::Details,
+    );
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -489,7 +531,7 @@ fn render_detail_content(
                 "{} returned no {} for {}",
                 provider_name, details.title, details.resource_name
             ),
-            Style::default().fg(Color::DarkGray),
+            themed_style(ThemeRole::Muted),
         )],
         DetailContent::Ready(loaded) => loaded
             .lines
@@ -504,7 +546,7 @@ fn render_detail_content(
                     "{} {} failed for {}:",
                     provider_name, details.title, details.resource_name
                 ),
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                themed_style(ThemeRole::Error).add_modifier(Modifier::BOLD),
             ),
             Line::from(error.message.as_str()),
         ],
@@ -527,6 +569,12 @@ pub fn render_to_text(state: &AppState, width: u16, height: u16) -> String {
 /// the other.
 pub fn render_foreground_colours(state: &AppState, width: u16, height: u16) -> Vec<Vec<Color>> {
     render_to_buffer(state, width, height, |cell| cell.fg)
+}
+
+/// This is the background counterpart of [`render_to_text`]. It lets
+/// presentation tests verify that a raised surface paints over the terminal.
+pub fn render_background_colours(state: &AppState, width: u16, height: u16) -> Vec<Vec<Color>> {
+    render_to_buffer(state, width, height, |cell| cell.bg)
 }
 
 fn render_to_buffer<T>(
@@ -561,7 +609,7 @@ mod tests {
         assert_eq!(
             panel_title_style(true),
             Style::default()
-                .fg(Color::Cyan)
+                .fg(theme_colour(ThemeRole::Primary))
                 .add_modifier(Modifier::BOLD)
         );
         assert_eq!(panel_title_style(false), Style::default());
