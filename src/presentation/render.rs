@@ -121,12 +121,10 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
             .collect::<Vec<_>>();
         frame.render_widget(Clear, area);
         frame.render_widget(
-            Paragraph::new(lines)
-                .style(raised_surface_style())
-                .block(modal_block(
-                    format!(" Commands for {} ", help.target),
-                    ThemeRole::Primary,
-                )),
+            Paragraph::new(lines).block(modal_block(
+                format!(" Commands for {} ", help.target),
+                ThemeRole::Primary,
+            )),
             area,
         );
     }
@@ -141,7 +139,6 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
                 Line::styled(error.as_str(), themed_style(ThemeRole::Error)),
                 Line::from("Press Esc to dismiss."),
             ])
-            .style(raised_surface_style())
             .wrap(ratatui::widgets::Wrap { trim: true })
             .block(modal_block(" Command failed ", ThemeRole::Error)),
             area,
@@ -165,9 +162,7 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
         }
         lines.push(Line::from("Press y/Enter to confirm or n/Esc to cancel."));
         frame.render_widget(
-            Paragraph::new(lines)
-                .style(raised_surface_style())
-                .block(modal_block(" Confirm deletion ", ThemeRole::Warning)),
+            Paragraph::new(lines).block(modal_block(" Confirm deletion ", ThemeRole::Warning)),
             area,
         );
     }
@@ -433,7 +428,6 @@ pub(super) fn pane_block(title: String, focused: bool, chrome: PaneChrome) -> Bl
         .title_style(panel_title_style(focused))
         .border_style(panel_title_style(focused))
         .border_type(BorderType::Plain)
-        .borders(Borders::NONE)
         .borders(borders)
 }
 
