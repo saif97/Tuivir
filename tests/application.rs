@@ -1574,7 +1574,7 @@ fn provider_bar_precedes_the_workspace_panes() {
         lines
             .next()
             .expect("workspace row")
-            .starts_with("┏ ▶ [2] Containers")
+            .starts_with("┌ ▶ [2] Containers")
     );
 }
 
@@ -2021,25 +2021,27 @@ fn every_resource_panel_advertises_its_effective_focus_key() {
 }
 
 #[test]
-fn focus_has_a_non_colour_cue_on_every_pane() {
+fn focus_accents_a_pane_title_and_edge_without_a_thick_border() {
     let mut app = App::new();
     ready_workspace(&mut app, docker_discovery(), docker_multi_panel_snapshot());
 
     let screen = render_to_text(app.state(), 80, 30);
-    assert!(
-        screen.contains("┏ ▶ [2] Containers"),
-        "the focused Resource Panel uses a thick border and title cue:\n{screen}"
+    assert!(screen.contains("┌ ▶ [2] Containers"), "rendered:\n{screen}");
+    assert_eq!(
+        foreground_of(app.state(), 80, 30, "▶ [2] Containers"),
+        Color::Blue,
+        "the focused Pane title uses the primary accent"
     );
 
     app.invoke(Command::FocusResourcePanel(1));
     let screen = render_to_text(app.state(), 80, 30);
-    assert!(screen.contains("┏ ▶ [3] Images"), "rendered:\n{screen}");
+    assert!(screen.contains("┌ ▶ [3] Images"), "rendered:\n{screen}");
     assert!(!screen.contains("▶ [2] Containers"));
 
     app.invoke(Command::FocusDetails);
     let screen = render_to_text(app.state(), 80, 30);
     assert!(
-        screen.contains("┏ ▶ [enter] Details"),
+        screen.contains("┌ ▶ [enter] Details"),
         "rendered:\n{screen}"
     );
 

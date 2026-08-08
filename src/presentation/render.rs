@@ -20,6 +20,33 @@ use super::screen_layout::{
     provider_workspace_label,
 };
 
+/// The default presentation palette names colours by their purpose so render
+/// sites never choose unrelated terminal colours for the same meaning.
+#[derive(Clone, Copy)]
+enum ThemeRole {
+    Primary,
+    Success,
+    Muted,
+    Warning,
+    Error,
+    Terminal,
+}
+
+fn theme_colour(role: ThemeRole) -> Color {
+    match role {
+        ThemeRole::Primary => Color::Blue,
+        ThemeRole::Success => Color::Green,
+        ThemeRole::Muted => Color::DarkGray,
+        ThemeRole::Warning => Color::Yellow,
+        ThemeRole::Error => Color::Red,
+        ThemeRole::Terminal => Color::Reset,
+    }
+}
+
+fn themed_style(role: ThemeRole) -> Style {
+    Style::default().fg(theme_colour(role))
+}
+
 pub fn render(state: &AppState, frame: &mut Frame<'_>) {
     render_with_layout(state, frame, &ScreenLayout::measure(state, frame.area()));
 }
@@ -88,7 +115,7 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
         frame.render_widget(Clear, area);
         frame.render_widget(
             Paragraph::new(vec![
-                Line::styled(error.as_str(), Style::default().fg(Color::Red)),
+                Line::styled(error.as_str(), themed_style(ThemeRole::Error)),
                 Line::from("Press Esc to dismiss."),
             ])
             .wrap(ratatui::widgets::Wrap { trim: true })
@@ -151,9 +178,7 @@ fn render_running_command_status(state: &AppState, frame: &mut Frame<'_>, area: 
     frame.render_widget(
         Paragraph::new(Line::styled(
             status,
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
+            themed_style(ThemeRole::Warning).add_modifier(Modifier::BOLD),
         )),
         area,
     );
@@ -205,7 +230,7 @@ fn render_workspace_panel(
             Paragraph::new(vec![
                 Line::styled(
                     format!("{name} provider is unavailable"),
-                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                    themed_style(ThemeRole::Error).add_modifier(Modifier::BOLD),
                 ),
                 Line::from(error.message.as_str()),
             ])
@@ -346,21 +371,19 @@ pub(super) fn visible_resource_range(
 /// does not recognise must not borrow the colour of a state Virtui understands.
 fn resource_state_style(state: ResourceState) -> Style {
     let colour = match state {
-        ResourceState::Running => Color::Green,
-        ResourceState::Stopped => Color::DarkGray,
-        ResourceState::Paused => Color::Yellow,
-        ResourceState::Transitioning => Color::Blue,
-        ResourceState::Broken => Color::Red,
-        ResourceState::Unknown => Color::Reset,
+        ResourceState::Running => theme_colour(ThemeRole::Success),
+        ResourceState::Stopped => theme_colour(ThemeRole::Muted),
+        ResourceState::Paused => theme_colour(ThemeRole::Warning),
+        ResourceState::Transitioning => theme_colour(ThemeRole::Primary),
+        ResourceState::Broken => theme_colour(ThemeRole::Error),
+        ResourceState::Unknown => theme_colour(ThemeRole::Terminal),
     };
     Style::default().fg(colour)
 }
 
 fn panel_title_style(focused: bool) -> Style {
     if focused {
-        Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD)
+        themed_style(ThemeRole::Primary).add_modifier(Modifier::BOLD)
     } else {
         Style::default()
     }
@@ -385,11 +408,7 @@ pub(super) fn pane_block(title: String, focused: bool) -> Block<'static> {
         .title(title)
         .title_style(panel_title_style(focused))
         .border_style(panel_title_style(focused))
-        .border_type(if focused {
-            BorderType::Thick
-        } else {
-            BorderType::Plain
-        })
+        .border_type(BorderType::Plain)
         .borders(Borders::ALL)
 }
 
@@ -489,7 +508,7 @@ fn render_detail_content(
                 "{} returned no {} for {}",
                 provider_name, details.title, details.resource_name
             ),
-            Style::default().fg(Color::DarkGray),
+            themed_style(ThemeRole::Muted),
         )],
         DetailContent::Ready(loaded) => loaded
             .lines
@@ -504,7 +523,7 @@ fn render_detail_content(
                     "{} {} failed for {}:",
                     provider_name, details.title, details.resource_name
                 ),
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                themed_style(ThemeRole::Error).add_modifier(Modifier::BOLD),
             ),
             Line::from(error.message.as_str()),
         ],
@@ -561,7 +580,7 @@ mod tests {
         assert_eq!(
             panel_title_style(true),
             Style::default()
-                .fg(Color::Cyan)
+                .fg(theme_colour(ThemeRole::Primary))
                 .add_modifier(Modifier::BOLD)
         );
         assert_eq!(panel_title_style(false), Style::default());
