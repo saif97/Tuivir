@@ -452,9 +452,10 @@ async fn reachable_docker_sandbox_without_sandboxes_renders_a_distinct_empty_sta
 
     let screen = render_to_text(app.state(), 100, 24);
     assert!(screen.contains("[ Docker Sandbox ]"), "{screen}");
+    assert!(screen.contains("No resources"), "{screen}");
     assert!(
-        screen.contains("No Docker Sandbox sandboxes found"),
-        "{screen}"
+        !screen.contains("No Docker Sandbox sandboxes found"),
+        "the Provider Workspace and Panel title already name these Resources: {screen}"
     );
     assert!(!screen.contains("unavailable"), "{screen}");
 }

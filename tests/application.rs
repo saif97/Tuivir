@@ -59,8 +59,24 @@ fn handle_key(app: &mut App, event: KeyEvent) -> (ShellControl, Vec<ProviderRequ
 /// Reports the single foreground colour `text` is rendered in, panicking when
 /// it is absent from the screen or split across colours.
 fn foreground_of(state: &AppState, width: u16, height: u16, text: &str) -> Color {
+    colour_of(state, width, height, text, render_foreground_colours)
+}
+
+fn background_of(state: &AppState, width: u16, height: u16, text: &str) -> Color {
+    colour_of(state, width, height, text, render_background_colours)
+}
+
+/// Reports the single colour `text` is rendered in, panicking when it is
+/// absent from the screen or split across colours.
+fn colour_of(
+    state: &AppState,
+    width: u16,
+    height: u16,
+    text: &str,
+    render_colours: fn(&AppState, u16, u16) -> Vec<Vec<Color>>,
+) -> Color {
     let screen = render_to_text(state, width, height);
-    let colours = render_foreground_colours(state, width, height);
+    let colours = render_colours(state, width, height);
     // Cell symbols such as a panel border are multi-byte, so a byte offset into
     // the rendered line is not a screen column until it is counted in chars.
     let (row, column) = screen
@@ -75,25 +91,6 @@ fn foreground_of(state: &AppState, width: u16, height: u16, text: &str) -> Color
     assert!(
         cells.iter().all(|colour| colour == &cells[0]),
         "{text:?} is rendered in one colour, not {cells:?}"
-    );
-    cells[0]
-}
-
-fn background_of(state: &AppState, width: u16, height: u16, text: &str) -> Color {
-    let screen = render_to_text(state, width, height);
-    let colours = render_background_colours(state, width, height);
-    let (row, column) = screen
-        .lines()
-        .enumerate()
-        .find_map(|(row, line)| {
-            line.find(text)
-                .map(|offset| (row, line[..offset].chars().count()))
-        })
-        .unwrap_or_else(|| panic!("{text:?} is on screen"));
-    let cells = &colours[row][column..column + text.chars().count()];
-    assert!(
-        cells.iter().all(|colour| colour == &cells[0]),
-        "{text:?} is rendered on one background, not {cells:?}"
     );
     cells[0]
 }
@@ -1432,7 +1429,12 @@ fn a_delete_confirmation_is_a_raised_warning_surface() {
         Color::Yellow
     );
     assert_eq!(
-        background_of(app.state(), 100, 24, "Press y/Enter to confirm or n/Esc to cancel."),
+        background_of(
+            app.state(),
+            100,
+            24,
+            "Press y/Enter to confirm or n/Esc to cancel."
+        ),
         Color::Black
     );
 }
@@ -1445,12 +1447,18 @@ fn help_and_failures_are_raised_semantic_surfaces() {
         docker_discovery(),
         snapshot(&[("container-a", "api", "nginx:1.27")]),
     );
-    handle_key(&mut help, KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
+    handle_key(
+        &mut help,
+        KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+    );
     assert_eq!(
         foreground_of(help.state(), 100, 24, "Commands for api"),
         Color::Blue
     );
-    assert_eq!(background_of(help.state(), 100, 24, "d  Delete"), Color::Black);
+    assert_eq!(
+        background_of(help.state(), 100, 24, "d  Delete"),
+        Color::Black
+    );
 
     let mut failed = App::new();
     ready_workspace(
@@ -1652,7 +1660,7 @@ fn provider_bar_precedes_the_workspace_panes() {
         lines
             .next()
             .expect("workspace row")
-            .starts_with("┌ ▶ [2] Containers")
+            .starts_with(" ▶ [2] Containers")
     );
 }
 
@@ -2125,7 +2133,7 @@ fn focus_accents_a_pane_title_and_edge_without_a_thick_border() {
     ready_workspace(&mut app, docker_discovery(), docker_multi_panel_snapshot());
 
     let screen = render_to_text(app.state(), 80, 30);
-    assert!(screen.contains("┌ ▶ [2] Containers"), "rendered:\n{screen}");
+    assert!(screen.contains("▶ [2] Containers"), "rendered:\n{screen}");
     assert_eq!(
         foreground_of(app.state(), 80, 30, "▶ [2] Containers"),
         Color::Blue,
@@ -2134,7 +2142,7 @@ fn focus_accents_a_pane_title_and_edge_without_a_thick_border() {
 
     app.invoke(Command::FocusResourcePanel(1));
     let screen = render_to_text(app.state(), 80, 30);
-    assert!(screen.contains("┌ ▶ [3] Images"), "rendered:\n{screen}");
+    assert!(screen.contains("▶ [3] Images"), "rendered:\n{screen}");
     assert!(!screen.contains("▶ [2] Containers"));
 
     app.invoke(Command::FocusDetails);

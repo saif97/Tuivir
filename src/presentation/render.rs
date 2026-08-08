@@ -33,6 +33,13 @@ enum ThemeRole {
     RaisedSurface,
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum PaneChrome {
+    Resource,
+    Details,
+    Full,
+}
+
 fn theme_colour(role: ThemeRole) -> Color {
     match role {
         ThemeRole::Primary => Color::Blue,
@@ -234,6 +241,7 @@ fn render_workspace_panel(
                     resource_focus,
                 ),
                 resource_focus,
+                PaneChrome::Full,
             )),
             area,
         ),
@@ -253,6 +261,7 @@ fn render_workspace_panel(
                     resource_focus,
                 ),
                 resource_focus,
+                PaneChrome::Full,
             )),
             area,
         ),
@@ -266,6 +275,7 @@ fn render_workspace_panel(
                             resource_focus,
                         ),
                         resource_focus,
+                        PaneChrome::Resource,
                     )),
                     area,
                 );
@@ -350,6 +360,7 @@ fn render_resource_panel(
         List::new(items).block(pane_block(
             pane_title(resources_hint, &panel.title, focused),
             focused,
+            PaneChrome::Resource,
         )),
         area,
     );
@@ -411,13 +422,19 @@ pub(super) fn pane_title(hint: Option<&str>, label: &str, focused: bool) -> Stri
     }
 }
 
-pub(super) fn pane_block(title: String, focused: bool) -> Block<'static> {
+pub(super) fn pane_block(title: String, focused: bool, chrome: PaneChrome) -> Block<'static> {
+    let borders = match chrome {
+        PaneChrome::Resource => Borders::TOP | Borders::BOTTOM | Borders::RIGHT,
+        PaneChrome::Details => Borders::TOP | Borders::BOTTOM | Borders::LEFT,
+        PaneChrome::Full => Borders::ALL,
+    };
     Block::default()
         .title(title)
         .title_style(panel_title_style(focused))
         .border_style(panel_title_style(focused))
         .border_type(BorderType::Plain)
-        .borders(Borders::ALL)
+        .borders(Borders::NONE)
+        .borders(borders)
 }
 
 fn render_details_panel(
@@ -452,7 +469,11 @@ fn render_details_panel(
             }
         });
 
-    let block = pane_block(pane_title(details_hint, "Details", focused), focused);
+    let block = pane_block(
+        pane_title(details_hint, "Details", focused),
+        focused,
+        PaneChrome::Details,
+    );
     let inner = block.inner(area);
     frame.render_widget(block, area);
 

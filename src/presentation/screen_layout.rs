@@ -7,7 +7,7 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 use crate::application::{AppState, FocusedPane, ProviderWorkspaceState, WorkspacePresentation};
 
-use super::render::{pane_block, pane_title, visible_resource_range};
+use super::render::{PaneChrome, pane_block, pane_title, visible_resource_range};
 
 /// Blank columns between the Providers Pane label and the first Provider
 /// Workspace, and between one Provider Workspace and the next.
@@ -206,7 +206,12 @@ fn measure_panes(state: &AppState, workspace: Rect) -> Option<WorkspacePanes> {
         );
     }
 
-    let inner = pane_block(pane_title(None, "Details", false), false).inner(details);
+    let inner = pane_block(
+        pane_title(None, "Details", false),
+        false,
+        PaneChrome::Details,
+    )
+    .inner(details);
     let summary_len = view
         .selected_resource
         .map_or(1, |resource| 1 + resource.fields.len()) as u16;
