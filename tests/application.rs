@@ -1728,6 +1728,27 @@ fn a_resource_name_is_left_uncoloured_by_its_resource_state() {
 }
 
 #[test]
+fn an_empty_resource_panel_is_compact_muted_and_uses_the_terminal_background() {
+    let mut app = App::new();
+    ready_workspace(&mut app, docker_discovery(), snapshot(&[]));
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(screen.contains("No resources"), "rendered:\n{screen}");
+    assert!(
+        !screen.contains("No Docker Containers found"),
+        "the Panel title already identifies the Resources:\n{screen}"
+    );
+    assert_eq!(
+        foreground_of(app.state(), 100, 24, "No resources"),
+        Color::DarkGray
+    );
+    assert_eq!(
+        background_of(app.state(), 100, 24, "No resources"),
+        Color::Reset
+    );
+}
+
+#[test]
 fn bracket_keys_switch_the_active_workspace() {
     let mut app = App::new();
     ready_workspace(

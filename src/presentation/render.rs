@@ -287,7 +287,6 @@ fn render_workspace_panel(
                 let focused =
                     resource_focus && view.focused_resource_panel == Some(&panel.panel.id);
                 render_resource_panel(
-                    view.name,
                     &panel,
                     resource_hints.get(index).and_then(Option::as_deref),
                     focused,
@@ -300,7 +299,6 @@ fn render_workspace_panel(
 }
 
 fn render_resource_panel(
-    provider_name: &str,
     view: &ResourcePanelView<'_>,
     resources_hint: Option<&str>,
     focused: bool,
@@ -343,10 +341,9 @@ fn render_resource_panel(
         })
         .collect::<Vec<_>>();
     if items.is_empty() {
-        items.push(ListItem::new(format!(
-            "No {} {} found",
-            provider_name,
-            panel.title.to_lowercase()
+        items.push(ListItem::new(Line::styled(
+            "No resources",
+            themed_style(ThemeRole::Muted),
         )));
     }
     frame.render_widget(
