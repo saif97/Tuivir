@@ -2901,6 +2901,26 @@ fn selected_details_text_is_visibly_highlighted() {
     );
 }
 
+#[test]
+fn changing_the_selected_resource_clears_details_selection() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
+    let details = detail_request(app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[
+            ("container-a", "api", "nginx:1.27"),
+            ("container-b", "worker", "alpine:3.21"),
+        ])),
+    )));
+    app.update(details_completed(details, Ok(ResourceDetails::from_lines(["hello"]))));
+    app.invoke(Command::BeginDetailsSelection { line: 0, column: 0 });
+    app.invoke(Command::ExtendDetailsSelection { line: 0, column: 5 });
+    app.invoke(Command::SelectNext);
+    app.invoke(Command::CopyDetails);
+
+    assert_eq!(app.take_pending_details_copy(), None);
+}
+
 /// Every view starts at its own top: a scrolled position belongs to the output
 /// it was scrolled through, not to the panel.
 #[test]

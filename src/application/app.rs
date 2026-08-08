@@ -414,6 +414,16 @@ impl App {
     }
 
     fn dispatch(&mut self, command: Command) -> Vec<ProviderRequest> {
+        if !matches!(
+            command,
+            Command::CopyDetails
+                | Command::BeginDetailsSelection { .. }
+                | Command::ExtendDetailsSelection { .. }
+        ) {
+            if let Some(workspace) = self.state.active_workspace_mut() {
+                workspace.clear_detail_selection();
+            }
+        }
         match command {
             Command::Quit => Vec::new(),
             Command::ToggleHelp => {
