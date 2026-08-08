@@ -69,6 +69,8 @@ pub enum Command {
     BeginDetailsSelection { line: u16, column: u16 },
     /// Extends the active Details selection to a source-line character boundary.
     ExtendDetailsSelection { line: u16, column: u16 },
+    /// Extends selection while the pointer is held above or below Details.
+    ExtendDetailsSelectionAtEdge { above: bool, column: u16, visible_rows: u16 },
     /// Moves the Pane Boundary between the Resource Panels and the Details
     /// Pane, giving the width one of them gains to the other.
     MovePaneBoundaryLeft,

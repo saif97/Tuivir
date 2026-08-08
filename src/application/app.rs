@@ -424,6 +424,7 @@ impl App {
             Command::CopyDetails
                 | Command::BeginDetailsSelection { .. }
                 | Command::ExtendDetailsSelection { .. }
+                | Command::ExtendDetailsSelectionAtEdge { .. }
         ) {
             if let Some(workspace) = self.state.active_workspace_mut() {
                 workspace.clear_detail_selection();
@@ -512,6 +513,16 @@ impl App {
             Command::ExtendDetailsSelection { line, column } => {
                 if let Some(workspace) = self.state.active_workspace_mut() {
                     workspace.extend_detail_selection(line, column);
+                }
+                Vec::new()
+            }
+            Command::ExtendDetailsSelectionAtEdge { above, column, visible_rows } => {
+                if let Some(workspace) = self.state.active_workspace_mut() {
+                    workspace.scroll_details(if above { -1 } else { 1 });
+                    workspace.extend_detail_selection(
+                        if above { 0 } else { visible_rows.saturating_sub(1) },
+                        column,
+                    );
                 }
                 Vec::new()
             }

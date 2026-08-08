@@ -51,13 +51,20 @@ fn drag(layout: &ScreenLayout, input: MouseInput, boundary_grab: Option<u16>) ->
     if boundary_grab.is_none() {
         let panes = layout.panes.as_ref()?;
         let point = point(input);
-        if !panes.detail_content.contains(point) {
-            return None;
+        if panes.detail_content.contains(point) {
+            return Some(Command::ExtendDetailsSelection {
+                line: point.y - panes.detail_content.y,
+                column: point.x - panes.detail_content.x,
+            });
         }
-        return Some(Command::ExtendDetailsSelection {
-            line: point.y - panes.detail_content.y,
-            column: point.x - panes.detail_content.x,
-        });
+        if point.x >= panes.detail_content.x && point.x < panes.detail_content.right() {
+            return Some(Command::ExtendDetailsSelectionAtEdge {
+                above: point.y < panes.detail_content.y,
+                column: point.x - panes.detail_content.x,
+                visible_rows: panes.detail_content.height,
+            });
+        }
+        return None;
     }
     let grab = boundary_grab.expect("checked above");
     let workspace = layout.workspace;
