@@ -1774,7 +1774,7 @@ fn bracket_keys_switch_the_active_workspace() {
         KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE),
     );
     assert_eq!(requests.len(), 1, "new Active Workspace is refreshed");
-    assert!(render_to_text(app.state(), 100, 24).starts_with("[1] Docker   Fixture"));
+    assert!(render_to_text(app.state(), 100, 24).starts_with("[1] Docker   [1] Fixture"));
 
     let (_, requests) = handle_key(
         &mut app,
@@ -1783,7 +1783,7 @@ fn bracket_keys_switch_the_active_workspace() {
     // Returning refreshes Docker and asks again for the detail view whose load
     // was abandoned on the way out.
     assert_eq!(requests.len(), 2, "unexpected requests: {requests:?}");
-    assert!(render_to_text(app.state(), 100, 24).starts_with("[1] Docker   Fixture"));
+    assert!(render_to_text(app.state(), 100, 24).starts_with("[1] Docker   [1] Fixture"));
 }
 
 #[test]
@@ -1820,7 +1820,7 @@ fn numbered_provider_panel_activates_incus_and_requests_its_refresh() {
             ..
         } if provider_id == ProviderId::new("incus")
     ));
-    assert!(render_to_text(app.state(), 100, 24).starts_with("[1] Docker   Incus"));
+    assert!(render_to_text(app.state(), 100, 24).starts_with("▶ [1] Docker   [1] Incus"));
 }
 
 #[test]
@@ -2145,7 +2145,7 @@ fn focus_accents_a_pane_title_and_edge_without_a_thick_border() {
 
     app.invoke(Command::FocusProviders);
     let screen = render_to_text(app.state(), 80, 30);
-    assert!(screen.starts_with("[1] Docker"), "rendered:\n{screen}");
+    assert!(screen.starts_with("▶ [1] Docker"), "rendered:\n{screen}");
 }
 
 #[test]
@@ -2180,7 +2180,7 @@ fn provider_workspaces_render_as_navigation_segments_with_the_active_target_on_t
     let screen = render_to_text(app.state(), 80, 30);
     let provider_bar = screen.lines().next().expect("a Provider bar");
     assert!(
-        provider_bar.starts_with("[1] Docker   Fixture"),
+        provider_bar.starts_with("[1] Docker   [1] Fixture"),
         "rendered:\n{screen}"
     );
     assert!(
@@ -2231,6 +2231,10 @@ fn the_active_workspace_stays_filled_when_the_providers_pane_has_focus() {
     );
 
     app.invoke(Command::FocusProviders);
+    assert!(
+        render_to_text(app.state(), 80, 30).starts_with("▶ [1] Docker   [1] Fixture"),
+        "the Providers Pane carries its own focus accent"
+    );
     assert_eq!(
         background_of(app.state(), 80, 30, "Docker"),
         Color::Blue,
