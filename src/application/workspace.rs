@@ -8,6 +8,7 @@ use crate::{
         ResourceTarget, TargetEnvironment,
     },
 };
+use unicode_width::UnicodeWidthChar;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// Whether a Provider Workspace is loading, ready to present, or unavailable.
@@ -792,7 +793,25 @@ impl<'a> From<&'a ResourceDetailsState> for ResourceDetailsView<'a> {
 fn detail_position(content: &DetailContent, line: u16, column: u16) -> Option<DetailPosition> {
     let DetailContent::Ready(loaded) = content else { return None };
     let text = loaded.lines.get(line as usize)?;
-    Some(DetailPosition { line, column: column.min(text.chars().count() as u16) })
+    Some(DetailPosition { line, column: character_at_terminal_column(text, column) })
+}
+
+/// Maps a terminal-cell offset to a source character boundary. A click in the
+/// second cell of a wide character resolves after that character, never into
+/// an invalid half-character boundary.
+fn character_at_terminal_column(text: &str, column: u16) -> u16 {
+    let mut cells = 0_u16;
+    for (index, character) in text.chars().enumerate() {
+        let width = UnicodeWidthChar::width(character).unwrap_or(0) as u16;
+        if column <= cells {
+            return index as u16;
+        }
+        cells = cells.saturating_add(width);
+        if column < cells {
+            return index as u16 + 1;
+        }
+    }
+    text.chars().count() as u16
 }
 
 fn selected_text(lines: &[String], selection: &DetailSelection) -> Option<String> {
