@@ -12,7 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use super::{DetailDispatchQueue, ShellTerminal, handle_key, handle_mouse, open_pending_shell};
+use super::{Clipboard, DetailDispatchQueue, Osc52Clipboard, ShellTerminal, handle_key, handle_mouse, open_pending_shell};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use virtui::{
@@ -126,6 +126,13 @@ fn detail_request(resource_id: &str) -> ProviderRequest {
         ),
         view_id: virtui::domain::DetailViewId::new("logs"),
     }
+}
+
+#[test]
+fn clipboard_adapter_emits_osc_52_for_exact_text() {
+    let mut clipboard = Osc52Clipboard(Vec::new());
+    clipboard.copy("a\nb").expect("clipboard write");
+    assert_eq!(clipboard.0, b"\x1b]52;c;YQpi\x07");
 }
 
 #[test]

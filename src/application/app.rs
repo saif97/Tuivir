@@ -370,6 +370,11 @@ impl App {
         self.state.pending_details_copy.take()
     }
 
+    /// Records a clipboard-adapter failure through the ordinary UI error path.
+    pub fn report_details_copy_failure(&mut self, reason: String) {
+        self.state.command_error = Some(format!("copy selected Details failed: {reason}"));
+    }
+
     /// Carries out one resolved user intention and returns any provider work.
     pub fn invoke(&mut self, command: Command) -> Vec<ProviderRequest> {
         let mut requests = self.dispatch(command);
