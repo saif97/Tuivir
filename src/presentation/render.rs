@@ -30,6 +30,7 @@ enum ThemeRole {
     Warning,
     Error,
     Terminal,
+    RaisedSurface,
 }
 
 fn theme_colour(role: ThemeRole) -> Color {
@@ -40,11 +41,25 @@ fn theme_colour(role: ThemeRole) -> Color {
         ThemeRole::Warning => Color::Yellow,
         ThemeRole::Error => Color::Red,
         ThemeRole::Terminal => Color::Reset,
+        ThemeRole::RaisedSurface => Color::Black,
     }
 }
 
 fn themed_style(role: ThemeRole) -> Style {
     Style::default().fg(theme_colour(role))
+}
+
+fn raised_surface_style() -> Style {
+    Style::default().bg(theme_colour(ThemeRole::RaisedSurface))
+}
+
+fn modal_block(title: impl Into<Line<'static>>, accent: ThemeRole) -> Block<'static> {
+    Block::default()
+        .title(title)
+        .title_style(themed_style(accent))
+        .border_style(themed_style(accent))
+        .style(raised_surface_style())
+        .borders(Borders::ALL)
 }
 
 pub fn render(state: &AppState, frame: &mut Frame<'_>) {
@@ -99,11 +114,12 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
             .collect::<Vec<_>>();
         frame.render_widget(Clear, area);
         frame.render_widget(
-            Paragraph::new(lines).block(
-                Block::default()
-                    .title(format!(" Commands for {} ", help.target))
-                    .borders(Borders::ALL),
-            ),
+            Paragraph::new(lines)
+                .style(raised_surface_style())
+                .block(modal_block(
+                    format!(" Commands for {} ", help.target),
+                    ThemeRole::Primary,
+                )),
             area,
         );
     }
@@ -118,12 +134,9 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
                 Line::styled(error.as_str(), themed_style(ThemeRole::Error)),
                 Line::from("Press Esc to dismiss."),
             ])
+            .style(raised_surface_style())
             .wrap(ratatui::widgets::Wrap { trim: true })
-            .block(
-                Block::default()
-                    .title(" Command failed ")
-                    .borders(Borders::ALL),
-            ),
+            .block(modal_block(" Command failed ", ThemeRole::Error)),
             area,
         );
     }
@@ -145,11 +158,9 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
         }
         lines.push(Line::from("Press y/Enter to confirm or n/Esc to cancel."));
         frame.render_widget(
-            Paragraph::new(lines).block(
-                Block::default()
-                    .title(" Confirm deletion ")
-                    .borders(Borders::ALL),
-            ),
+            Paragraph::new(lines)
+                .style(raised_surface_style())
+                .block(modal_block(" Confirm deletion ", ThemeRole::Warning)),
             area,
         );
     }
@@ -546,6 +557,12 @@ pub fn render_to_text(state: &AppState, width: u16, height: u16) -> String {
 /// the other.
 pub fn render_foreground_colours(state: &AppState, width: u16, height: u16) -> Vec<Vec<Color>> {
     render_to_buffer(state, width, height, |cell| cell.fg)
+}
+
+/// This is the background counterpart of [`render_to_text`]. It lets
+/// presentation tests verify that a raised surface paints over the terminal.
+pub fn render_background_colours(state: &AppState, width: u16, height: u16) -> Vec<Vec<Color>> {
+    render_to_buffer(state, width, height, |cell| cell.bg)
 }
 
 fn render_to_buffer<T>(

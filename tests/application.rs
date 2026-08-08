@@ -24,7 +24,9 @@ use virtui::{
     },
     infrastructure::provider::{DockerWorkspace, ProviderDiscovery, ProviderWorkspace},
     infrastructure::runtime::{ProviderRuntime, RefreshTimer},
-    presentation::{key_from_event, render_foreground_colours, render_to_text},
+    presentation::{
+        key_from_event, render_background_colours, render_foreground_colours, render_to_text,
+    },
 };
 
 mod common;
@@ -73,6 +75,25 @@ fn foreground_of(state: &AppState, width: u16, height: u16, text: &str) -> Color
     assert!(
         cells.iter().all(|colour| colour == &cells[0]),
         "{text:?} is rendered in one colour, not {cells:?}"
+    );
+    cells[0]
+}
+
+fn background_of(state: &AppState, width: u16, height: u16, text: &str) -> Color {
+    let screen = render_to_text(state, width, height);
+    let colours = render_background_colours(state, width, height);
+    let (row, column) = screen
+        .lines()
+        .enumerate()
+        .find_map(|(row, line)| {
+            line.find(text)
+                .map(|offset| (row, line[..offset].chars().count()))
+        })
+        .unwrap_or_else(|| panic!("{text:?} is on screen"));
+    let cells = &colours[row][column..column + text.chars().count()];
+    assert!(
+        cells.iter().all(|colour| colour == &cells[0]),
+        "{text:?} is rendered on one background, not {cells:?}"
     );
     cells[0]
 }
@@ -1393,6 +1414,63 @@ fn delete_requires_target_identifying_confirmation_before_dispatch() {
                 ResourceId::new("container-a"),
             )
     ));
+}
+
+#[test]
+fn a_delete_confirmation_is_a_raised_warning_surface() {
+    let mut app = App::new();
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
+
+    app.invoke(Command::Resource(ResourceCommand::Delete));
+
+    assert_eq!(
+        foreground_of(app.state(), 100, 24, "Confirm deletion"),
+        Color::Yellow
+    );
+    assert_eq!(
+        background_of(app.state(), 100, 24, "Press y/Enter to confirm or n/Esc to cancel."),
+        Color::Black
+    );
+}
+
+#[test]
+fn help_and_failures_are_raised_semantic_surfaces() {
+    let mut help = App::new();
+    ready_workspace(
+        &mut help,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
+    handle_key(&mut help, KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
+    assert_eq!(
+        foreground_of(help.state(), 100, 24, "Commands for api"),
+        Color::Blue
+    );
+    assert_eq!(background_of(help.state(), 100, 24, "d  Delete"), Color::Black);
+
+    let mut failed = App::new();
+    ready_workspace(
+        &mut failed,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
+    let restart = command_request(failed.invoke(Command::Resource(ResourceCommand::Restart)));
+    failed.update(command_completed(
+        restart,
+        Err(WorkspaceError::new("permission denied")),
+    ));
+    assert_eq!(
+        foreground_of(failed.state(), 100, 24, "Command failed"),
+        Color::Red
+    );
+    assert_eq!(
+        background_of(failed.state(), 100, 24, "Press Esc to dismiss."),
+        Color::Black
+    );
 }
 
 #[test]
