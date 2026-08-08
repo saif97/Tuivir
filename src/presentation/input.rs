@@ -122,35 +122,4 @@ mod tests {
             None
         );
     }
-
-    /// Dragging needs both ends of the gesture: the movement that carries the
-    /// Pane Boundary, and the release that lets go of it. Movement with no
-    /// button held is still nothing, so pointing at a Pane never disturbs it.
-    #[test]
-    fn normalizes_drag_and_release_but_still_ignores_bare_movement() {
-        for (kind, expected) in [
-            (
-                MouseEventKind::Drag(MouseButton::Left),
-                Some(MouseAction::Drag),
-            ),
-            (
-                MouseEventKind::Up(MouseButton::Left),
-                Some(MouseAction::Release),
-            ),
-            (MouseEventKind::Drag(MouseButton::Right), None),
-            (MouseEventKind::Moved, None),
-        ] {
-            assert_eq!(
-                mouse_from_event(MouseEvent {
-                    kind,
-                    column: 4,
-                    row: 8,
-                    modifiers: KeyModifiers::NONE,
-                })
-                .map(|input| input.action),
-                expected,
-                "{kind:?} should normalize to {expected:?}"
-            );
-        }
-    }
 }

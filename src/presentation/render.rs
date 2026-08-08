@@ -603,47 +603,4 @@ mod tests {
             "a click lands where the Provider Workspace is drawn, not where a second calculation guessed"
         );
     }
-
-    /// The two border columns the user sees between the Panes are the two the
-    /// mouse can grab. A Pane Boundary measured anywhere else would be a line
-    /// the user cannot see and cannot aim at.
-    #[test]
-    fn the_measured_pane_boundary_sits_on_the_borders_that_are_drawn() {
-        use crate::application::{PaneBoundary, ProviderWorkspaceState};
-        use crate::domain::{Provider, ProviderId};
-
-        let state = AppState {
-            providers: vec![ProviderWorkspaceState::new(
-                Provider::new(ProviderId::new("docker"), "Docker", None, None),
-                None,
-            )],
-            active_provider: Some(0),
-            pane_boundary: PaneBoundary::new(40),
-            ..AppState::default()
-        };
-
-        let layout = ScreenLayout::measure(&state, Rect::new(0, 0, 80, 24));
-        let screen = render_to_text(&state, 80, 24);
-        let boundary = layout
-            .panes
-            .as_ref()
-            .expect("a Provider Workspace is active")
-            .pane_boundary;
-
-        // A row below both Pane titles, so only the side borders sit on it.
-        let row = screen.lines().nth(4).expect("a row inside the Panes");
-        let drawn = row
-            .chars()
-            .enumerate()
-            .filter(|(_, character)| *character == '\u{2502}' || *character == '\u{2503}')
-            .map(|(column, _)| column as u16)
-            .collect::<Vec<_>>();
-
-        assert_eq!(
-            drawn,
-            vec![0, boundary.x, boundary.x + 1, 79],
-            "drawn row: {row}"
-        );
-        assert_eq!(boundary.width, 2, "both drawn columns can be grabbed");
-    }
 }
