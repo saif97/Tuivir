@@ -63,6 +63,8 @@ pub enum Command {
     /// Moves through the output of the visible detail view.
     ScrollDetailsDown,
     ScrollDetailsUp,
+    /// Copies the text selected in the visible detail view.
+    CopyDetails,
     /// Moves the Pane Boundary between the Resource Panels and the Details
     /// Pane, giving the width one of them gains to the other.
     MovePaneBoundaryLeft,

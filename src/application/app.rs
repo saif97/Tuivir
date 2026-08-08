@@ -470,6 +470,9 @@ impl App {
                 self.scroll_details(-DETAIL_SCROLL_LINES);
                 Vec::new()
             }
+            // A Details selection arrives through the mouse path. Until one is
+            // present, Copy deliberately has nothing to send to the host.
+            Command::CopyDetails => Vec::new(),
             Command::OpenShell => {
                 self.open_shell();
                 Vec::new()
