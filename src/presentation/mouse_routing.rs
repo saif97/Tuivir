@@ -95,6 +95,12 @@ fn press(layout: &ScreenLayout, input: MouseInput) -> Option<Command> {
     if let Some(index) = index_containing(&panes.detail_views, point) {
         return Some(Command::ActivateDetailView(index));
     }
+    if panes.detail_content.contains(point) {
+        return Some(Command::BeginDetailsSelection {
+            line: point.y - panes.detail_content.y,
+            column: point.x - panes.detail_content.x,
+        });
+    }
     if let Some(panel) = index_containing(&panes.resource_panels, point) {
         return Some(Command::FocusResourcePanel(panel));
     }

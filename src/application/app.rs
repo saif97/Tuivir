@@ -124,7 +124,8 @@ pub struct AppState {
     /// rendered hints cannot drift. `None` means the Command is unbound and its
     /// hint is omitted.
     pub hints: KeyHints,
-    pending_details_copy: Option<String>,
+    #[doc(hidden)]
+    pub pending_details_copy: Option<String>,
 }
 
 impl AppState {

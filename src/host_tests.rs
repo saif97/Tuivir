@@ -672,6 +672,7 @@ fn mouse_routing_resolves_each_region_without_a_terminal() {
             resource_panels: vec![Rect::new(0, 1, 10, 5)],
             resource_rows: vec![vec![(3, Rect::new(1, 2, 8, 1))]],
             details: Rect::new(10, 1, 20, 5),
+            detail_content: Rect::new(11, 3, 18, 2),
             detail_views: vec![Rect::new(12, 2, 8, 1)],
             pane_boundary: Rect::new(9, 1, 2, 5),
         }),
@@ -692,6 +693,10 @@ fn mouse_routing_resolves_each_region_without_a_terminal() {
     assert_eq!(
         resolve_mouse(&layout, press(13, 2), None),
         Some(Command::ActivateDetailView(0))
+    );
+    assert_eq!(
+        resolve_mouse(&layout, press(14, 3), None),
+        Some(Command::BeginDetailsSelection { line: 0, column: 3 })
     );
     assert_eq!(
         resolve_mouse(&layout, press(29, 5), None),
@@ -722,6 +727,7 @@ fn mouse_detail_click_focuses_details_without_live_terminal() {
             resource_panels: Vec::new(),
             resource_rows: Vec::new(),
             details: Rect::new(0, 1, 0, 0),
+            detail_content: Rect::default(),
             detail_views: vec![Rect::new(0, 0, 8, 1)],
             pane_boundary: Rect::new(0, 1, 0, 0),
         }),
