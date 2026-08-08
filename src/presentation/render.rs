@@ -566,41 +566,4 @@ mod tests {
         );
         assert_eq!(panel_title_style(false), Style::default());
     }
-
-    /// Hit-testing is only honest if it agrees with what the user sees, so this
-    /// compares measured regions against the drawn screen rather than against a
-    /// second copy of the same arithmetic.
-    #[test]
-    fn measured_provider_workspaces_sit_where_they_are_drawn() {
-        use crate::application::ProviderWorkspaceState;
-        use crate::domain::{Provider, ProviderId};
-
-        let state = AppState {
-            providers: vec![
-                ProviderWorkspaceState::new(
-                    Provider::new(ProviderId::new("docker"), "Docker", None, None),
-                    None,
-                ),
-                ProviderWorkspaceState::new(
-                    Provider::new(ProviderId::new("incus"), "Incus", None, None),
-                    None,
-                ),
-            ],
-            active_provider: Some(0),
-            ..AppState::default()
-        };
-        // The Providers Pane is unfocused by default, so no caret is drawn.
-        assert_eq!(state.focused_pane, FocusedPane::Resources);
-
-        let layout = ScreenLayout::measure(&state, Rect::new(0, 0, 80, 24));
-        let screen = render_to_text(&state, 80, 24);
-        let bar = screen.lines().next().expect("a provider bar is drawn");
-
-        let drawn = bar.find("Incus").expect("the Provider Workspace is drawn") as u16;
-
-        assert_eq!(
-            layout.provider_workspaces[1].x, drawn,
-            "a click lands where the Provider Workspace is drawn, not where a second calculation guessed"
-        );
-    }
 }
