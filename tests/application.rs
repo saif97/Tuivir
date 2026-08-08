@@ -2921,6 +2921,31 @@ fn changing_the_selected_resource_clears_details_selection() {
     assert_eq!(app.take_pending_details_copy(), None);
 }
 
+#[test]
+fn dragging_below_details_autoscrolls_and_extends_the_selection() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
+    let details = detail_request(app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    )));
+    app.update(details_completed(
+        details,
+        Ok(ResourceDetails::from_lines((0..20).map(|line| format!("line-{line}")))),
+    ));
+    app.invoke(Command::BeginDetailsSelection { line: 0, column: 0 });
+    for _ in 0..3 {
+        app.invoke(Command::ExtendDetailsSelectionAtEdge {
+            above: false,
+            column: 6,
+            visible_rows: 1,
+        });
+    }
+    app.invoke(Command::CopyDetails);
+
+    assert_eq!(app.take_pending_details_copy(), Some("line-0\nline-1\nline-2\nline-3".to_owned()));
+}
+
 /// Every view starts at its own top: a scrolled position belongs to the output
 /// it was scrolled through, not to the panel.
 #[test]
