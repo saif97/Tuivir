@@ -229,30 +229,29 @@ fn measure_panes(state: &AppState, workspace: Rect) -> Option<WorkspacePanes> {
         PaneChrome::Details,
     )
     .inner(details);
-    let summary_len = view
-        .selected_resource
-        .map_or(1, |resource| 1 + resource.fields.len()) as u16;
+    let has_detail_tabs = view.selected_resource.is_some();
     let detail_rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(summary_len),
-            Constraint::Length(u16::from(!view.detail_views.is_empty()) * 2),
+            Constraint::Length(u16::from(has_detail_tabs)),
             Constraint::Min(0),
         ])
         .split(inner);
 
     let mut detail_views = Vec::new();
-    let mut tab_x = detail_rows[1].x;
-    for (index, detail) in view.detail_views.iter().enumerate() {
-        if index > 0 {
-            tab_x += DETAIL_VIEW_GAP;
-        }
+    let mut tab_x = detail_rows[0].x;
+    if has_detail_tabs {
+        let overview_width = label_width(&detail_view_label("Overview", view.overview_selected));
+        detail_views.push(Rect::new(tab_x, detail_rows[0].y, overview_width, 1));
+        tab_x = tab_x.saturating_add(overview_width + DETAIL_VIEW_GAP);
+    }
+    for detail in view.detail_views {
         let selected = view
             .selected_detail_view
             .is_some_and(|selected| selected.id == detail.id);
         let width = label_width(&detail_view_label(&detail.title, selected));
-        detail_views.push(Rect::new(tab_x, detail_rows[1].y + 1, width, 1));
-        tab_x = tab_x.saturating_add(width);
+        detail_views.push(Rect::new(tab_x, detail_rows[0].y, width, 1));
+        tab_x = tab_x.saturating_add(width + DETAIL_VIEW_GAP);
     }
 
     Some(WorkspacePanes {
@@ -260,7 +259,7 @@ fn measure_panes(state: &AppState, workspace: Rect) -> Option<WorkspacePanes> {
         resource_panels,
         resource_rows,
         details,
-        detail_content: detail_rows[2],
+        detail_content: detail_rows[1],
         detail_views,
         pane_boundary,
     })

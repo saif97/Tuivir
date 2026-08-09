@@ -409,15 +409,13 @@ impl ProviderWorkspaceState {
             let Some(panel) = snapshot.panel(panel_id) else {
                 return;
             };
-            workspace.selected_detail_view = Some(if index == 0 {
-                DetailViewId::new(OVERVIEW_DETAIL_VIEW_ID)
-            } else {
-                panel
-                    .detail_views
-                    .get(index - 1)
-                    .map(|view| view.id.clone())
-                    .unwrap_or_else(|| DetailViewId::new(OVERVIEW_DETAIL_VIEW_ID))
-            });
+            let Some(view_id) = (index == 0)
+                .then(|| DetailViewId::new(OVERVIEW_DETAIL_VIEW_ID))
+                .or_else(|| panel.detail_views.get(index - 1).map(|view| view.id.clone()))
+            else {
+                return;
+            };
+            workspace.selected_detail_view = Some(view_id);
         });
     }
 
