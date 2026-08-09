@@ -2019,10 +2019,10 @@ fn docker_multi_panel_snapshot() -> WorkspaceSnapshot {
     }
 }
 
-/// The shell offers whatever views the Provider Workspace declared, under the
-/// Provider's own names, and shows the first of them.
+/// Every selected Resource starts with its snapshot-backed Overview before the
+/// Provider's own Detail View Tabs.
 #[test]
-fn a_selected_container_offers_dockers_native_detail_views() {
+fn a_selected_container_starts_on_snapshot_backed_overview() {
     let mut app = App::new();
     let initial = refresh_request(app.update(docker_discovery().into_event()));
 
@@ -2033,15 +2033,19 @@ fn a_selected_container_offers_dockers_native_detail_views() {
 
     let screen = render_to_text(app.state(), 100, 24);
     assert!(
-        screen.contains("[ Logs ]  Stats  Inspect"),
+        screen.contains("[ Overview ]  Logs  Stats  Inspect"),
         "rendered:\n{screen}"
+    );
+    assert!(
+        screen.find("[ Overview ]") < screen.find("Image: nginx:1.27"),
+        "the Overview tab precedes its snapshot-backed content:\n{screen}"
     );
 }
 
-/// Detail data is lazy: settling on a Resource asks the Provider for the one
-/// view on screen and for nothing else.
+/// The visible Overview comes entirely from the Workspace Snapshot, so
+/// selecting a Resource does not ask its Provider to load details yet.
 #[test]
-fn settling_on_a_resource_requests_only_the_visible_detail_view() {
+fn settling_on_a_resource_does_not_load_snapshot_backed_overview() {
     let mut app = App::new();
     let initial = refresh_request(app.update(docker_discovery().into_event()));
 
@@ -2050,25 +2054,7 @@ fn settling_on_a_resource_requests_only_the_visible_detail_view() {
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
     ));
 
-    assert_eq!(requests.len(), 1, "one view is visible, so one is loaded");
-    assert!(
-        matches!(
-            &requests[0],
-            ProviderRequest::LoadResourceDetails {
-                provider_id,
-                target,
-                view_id,
-                ..
-            } if provider_id == &ProviderId::new("docker")
-                && target == &ResourceTarget::new(
-                    ResourcePanelId::new("containers"),
-                    ResourceId::new("container-a"),
-                )
-                && view_id == &DetailViewId::new("logs")
-        ),
-        "unexpected request: {:?}",
-        requests[0]
-    );
+    assert!(requests.is_empty(), "unexpected requests: {requests:?}");
 }
 
 #[test]

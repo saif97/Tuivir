@@ -534,46 +534,47 @@ fn render_details_panel(
     frame.render_widget(block, area);
 
     let views = view.map_or(&[][..], |view| view.detail_views);
-    // The view strip is a control, not another summary field, so it gets a
-    // blank line to sit behind rather than running straight into the fields.
+    let has_detail_tabs = view.is_some_and(|view| view.selected_resource.is_some());
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(summary.len() as u16),
-            Constraint::Length(u16::from(!views.is_empty()) * 2),
+            Constraint::Length(u16::from(has_detail_tabs)),
             Constraint::Min(0),
         ])
         .split(inner);
-    frame.render_widget(
-        Paragraph::new(summary).wrap(ratatui::widgets::Wrap { trim: true }),
-        rows[0],
-    );
 
-    if views.is_empty() {
+    if !has_detail_tabs {
+        frame.render_widget(
+            Paragraph::new(summary).wrap(ratatui::widgets::Wrap { trim: true }),
+            rows[1],
+        );
         return;
     }
     if let Some(details) = view.and_then(|view| view.details) {
-        render_detail_content(provider_name, details, frame, rows[2]);
+        render_detail_content(provider_name, details, frame, rows[1]);
     }
-    let mut spans = Vec::new();
+    let overview_selected = view.is_some_and(|view| view.overview_selected);
+    let mut spans = vec![detail_view_tab("Overview", overview_selected)];
     for detail_view in views {
-        if !spans.is_empty() {
-            spans.push(Span::raw(gap(DETAIL_VIEW_GAP)));
-        }
+        spans.push(Span::raw(gap(DETAIL_VIEW_GAP)));
         let selected = view
             .and_then(|workspace| workspace.selected_detail_view)
             .is_some_and(|selected| selected.id == detail_view.id);
-        let label = detail_view_label(&detail_view.title, selected);
-        spans.push(if selected {
-            Span::styled(label, Style::default().add_modifier(Modifier::BOLD))
-        } else {
-            Span::raw(label)
-        });
+        spans.push(detail_view_tab(&detail_view.title, selected));
     }
     frame.render_widget(
-        Paragraph::new(vec![Line::default(), Line::from(spans)]),
-        rows[1],
+        Paragraph::new(Line::from(spans)),
+        rows[0],
     );
+}
+
+fn detail_view_tab(title: &str, selected: bool) -> Span<'static> {
+    let label = detail_view_label(title, selected);
+    if selected {
+        Span::styled(label, themed_style(ThemeRole::Primary).add_modifier(Modifier::BOLD))
+    } else {
+        Span::styled(label, themed_style(ThemeRole::Muted))
+    }
 }
 
 /// Draws the loaded detail view, or what is happening to it.
