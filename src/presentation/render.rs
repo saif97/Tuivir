@@ -354,7 +354,11 @@ fn render_resource_panel(
     }
     frame.render_widget(
         List::new(items).block(pane_block(
-            pane_title(resources_hint, &panel.title, focused),
+            pane_title(
+                resources_hint,
+                &format!("{} ({})", panel.title, panel.resources.len()),
+                focused,
+            ),
             focused,
             PaneChrome::Resource,
         )),

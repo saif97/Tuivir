@@ -2102,7 +2102,9 @@ fn docker_renders_every_provider_defined_resource_panel() {
 
     let screen = render_to_text(app.state(), 80, 30);
     assert!(screen.contains("Containers"), "rendered:\n{screen}");
+    assert!(screen.contains("Containers (1)"), "rendered:\n{screen}");
     assert!(screen.contains("Images"), "rendered:\n{screen}");
+    assert!(screen.contains("Images (1)"), "rendered:\n{screen}");
     assert!(screen.contains("api"), "rendered:\n{screen}");
     assert!(screen.contains("nginx:1.27"), "rendered:\n{screen}");
 }
