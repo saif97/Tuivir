@@ -967,6 +967,7 @@ fn a_running_resource_command_shows_a_status_identifying_provider_resource_and_c
         screen.contains("Running Docker restart for api (container-a)"),
         "rendered screen:\n{screen}"
     );
+    assert!(screen.contains("⏳  api"), "rendered screen:\n{screen}");
 }
 
 #[test]

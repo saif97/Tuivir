@@ -12,7 +12,7 @@ use crate::application::{AppState, DetailSelection, FocusedPane};
 use crate::application::{
     DetailContent, ResourceDetailsView, ResourcePanelView, WorkspacePresentation, WorkspaceView,
 };
-use crate::domain::ResourceState;
+use crate::domain::{ResourceState, ResourceTarget};
 
 use super::screen_layout::{
     DETAIL_VIEW_GAP, ScreenLayout, active_target_label, command_error_area, confirmation_area,
@@ -103,6 +103,7 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
         &presentation,
         matches!(&state.focused_pane, FocusedPane::Resources),
         &state.hints.focus_resource_panels,
+        &state.running_commands,
         frame,
         columns[0],
     );
@@ -238,6 +239,7 @@ fn render_workspace_panel(
     presentation: &WorkspacePresentation<'_>,
     resource_focus: bool,
     resource_hints: &[Option<String>],
+    running_commands: &[crate::application::RunningResourceCommand],
     frame: &mut Frame<'_>,
     area: Rect,
 ) {
@@ -308,6 +310,8 @@ fn render_workspace_panel(
                 render_resource_panel(
                     &panel,
                     resource_hints.get(index).and_then(Option::as_deref),
+                    view.id,
+                    running_commands,
                     focused,
                     frame,
                     area,
@@ -320,6 +324,8 @@ fn render_workspace_panel(
 fn render_resource_panel(
     view: &ResourcePanelView<'_>,
     resources_hint: Option<&str>,
+    provider_id: &crate::domain::ProviderId,
+    running_commands: &[crate::application::RunningResourceCommand],
     focused: bool,
     frame: &mut Frame<'_>,
     area: Rect,
@@ -337,13 +343,25 @@ fn render_resource_panel(
         .iter()
         .map(|resource| {
             let selected = view.selected_resource == Some(&resource.id);
-            let state = resource.state.map(resource_state_symbol).unwrap_or(" ");
+            let target = ResourceTarget::new(panel.id.clone(), resource.id.clone());
+            let running = running_commands
+                .iter()
+                .find(|running| running.provider_id == *provider_id && running.target == target);
+            let state = running.map_or_else(
+                || resource.state.map(resource_state_symbol).unwrap_or(" "),
+                |_| "⏳",
+            );
             let spans = vec![
                 Span::styled(
                     state,
-                    resource
-                        .state
-                        .map_or_else(Style::default, resource_state_style),
+                    running.map_or_else(
+                        || {
+                            resource
+                                .state
+                                .map_or_else(Style::default, resource_state_style)
+                        },
+                        |_| themed_style(ThemeRole::Warning),
+                    ),
                 ),
                 Span::raw(" "),
                 Span::raw(resource.name.as_str()),
