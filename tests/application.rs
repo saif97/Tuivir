@@ -959,6 +959,7 @@ fn a_running_resource_command_marks_its_resource_without_replacing_the_command_b
     let screen = render_to_text(app.state(), 160, 24);
     assert!(screen.contains("⏳  api"), "rendered screen:\n{screen}");
     assert!(screen.contains("Running restart for api…"), "rendered screen:\n{screen}");
+    assert!(screen.contains("r  Restart"), "rendered screen:\n{screen}");
     assert!(screen.contains("?  all commands"), "rendered screen:\n{screen}");
 }
 

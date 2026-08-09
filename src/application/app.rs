@@ -390,7 +390,7 @@ impl App {
     fn update_command_bar(&mut self) {
         let scope = self.active_scope();
         let resource = self.state.active_workspace().and_then(|workspace| workspace.selected_resource());
-        self.state.command_bar = self
+        let commands = self
             .commands
             .in_scope(scope)
             .filter(|entry| match entry.command {
@@ -398,6 +398,15 @@ impl App {
                 _ => true,
             })
             .filter(|entry| entry.command != Command::ToggleHelp)
+            .collect::<Vec<_>>();
+        self.state.command_bar = commands
+            .iter()
+            .filter(|entry| matches!(entry.command, Command::Resource(_)))
+            .chain(
+                commands
+                    .iter()
+                    .filter(|entry| !matches!(entry.command, Command::Resource(_))),
+            )
             .take(4)
             .filter_map(|entry| entry.keys.first().map(|key| HelpEntry {
                 key: key.to_string(),
@@ -449,10 +458,9 @@ impl App {
                 | Command::BeginDetailsSelection { .. }
                 | Command::ExtendDetailsSelection { .. }
                 | Command::ExtendDetailsSelectionAtEdge { .. }
-        ) {
-            if let Some(workspace) = self.state.active_workspace_mut() {
-                workspace.clear_detail_selection();
-            }
+        ) && let Some(workspace) = self.state.active_workspace_mut()
+        {
+            workspace.clear_detail_selection();
         }
         match command {
             Command::Quit => Vec::new(),
