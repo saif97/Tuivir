@@ -28,6 +28,8 @@ enum ThemeRole {
     Muted,
     Warning,
     Error,
+    Selection,
+    InactiveSelection,
     Terminal,
     RaisedSurface,
 }
@@ -46,6 +48,8 @@ fn theme_colour(role: ThemeRole) -> Color {
         ThemeRole::Muted => Color::DarkGray,
         ThemeRole::Warning => Color::Yellow,
         ThemeRole::Error => Color::Red,
+        ThemeRole::Selection => Color::Blue,
+        ThemeRole::InactiveSelection => Color::DarkGray,
         ThemeRole::Terminal => Color::Reset,
         ThemeRole::RaisedSurface => Color::Black,
     }
@@ -332,6 +336,7 @@ fn render_resource_panel(
         .unwrap_or_default()
         .iter()
         .map(|resource| {
+            let selected = view.selected_resource == Some(&resource.id);
             let state = resource.state.map(resource_state_symbol).unwrap_or(" ");
             let spans = vec![
                 Span::styled(
@@ -343,7 +348,14 @@ fn render_resource_panel(
                 Span::raw(" "),
                 Span::raw(resource.name.as_str()),
             ];
-            ListItem::new(Line::from(spans))
+            let style = selected.then(|| {
+                Style::default().bg(theme_colour(if focused {
+                    ThemeRole::Selection
+                } else {
+                    ThemeRole::InactiveSelection
+                }))
+            });
+            ListItem::new(Line::from(spans)).style(style.unwrap_or_default())
         })
         .collect::<Vec<_>>();
     if items.is_empty() {

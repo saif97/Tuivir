@@ -2154,6 +2154,18 @@ fn focus_accents_a_pane_title_and_edge_without_a_thick_border() {
 }
 
 #[test]
+fn selected_resource_uses_a_full_row_background_that_dims_without_focus() {
+    let mut app = App::new();
+    ready_workspace(&mut app, docker_discovery(), docker_multi_panel_snapshot());
+
+    assert_eq!(background_of(app.state(), 80, 30, "api"), Color::Blue);
+
+    app.invoke(Command::FocusDetails);
+
+    assert_eq!(background_of(app.state(), 80, 30, "api"), Color::DarkGray);
+}
+
+#[test]
 fn a_workspace_over_the_numbered_panel_capacity_is_refused() {
     let mut app = App::new();
     let initial = refresh_request(app.update(docker_discovery().into_event()));
