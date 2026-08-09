@@ -2,7 +2,7 @@ use ratatui::{
     Frame, Terminal,
     backend::TestBackend,
     buffer::Cell,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph},
@@ -15,9 +15,8 @@ use crate::application::{
 use crate::domain::ResourceState;
 
 use super::screen_layout::{
-    DETAIL_VIEW_GAP, PROVIDER_LABEL_GAP, PROVIDER_WORKSPACE_GAP, ScreenLayout, command_error_area,
-    confirmation_area, detail_view_label, gap, help_overlay_area, provider_selector_label,
-    provider_workspace_label,
+    DETAIL_VIEW_GAP, ScreenLayout, active_target_label, command_error_area, confirmation_area,
+    detail_view_label, gap, help_overlay_area, provider_selector_label, provider_workspace_label,
 };
 
 /// The default presentation palette names colours by their purpose so render
@@ -78,7 +77,7 @@ pub fn render(state: &AppState, frame: &mut Frame<'_>) {
 /// The host measures once per frame and keeps that layout for mouse routing, so
 /// what the user clicks is what they see.
 pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &ScreenLayout) {
-    render_provider_bar(state, frame, layout.provider_bar);
+    render_provider_bar(state, frame, layout);
     render_running_command_status(state, frame, layout.status);
 
     let (Some(provider), Some(panes)) = (state.active_workspace(), layout.panes.as_ref()) else {
@@ -197,27 +196,38 @@ fn render_running_command_status(state: &AppState, frame: &mut Frame<'_>, area: 
     );
 }
 
-fn render_provider_bar(state: &AppState, frame: &mut Frame<'_>, area: Rect) {
-    let mut provider_spans = vec![
-        Span::styled(
-            provider_selector_label(state),
-            panel_title_style(state.focused_pane == FocusedPane::Providers),
-        ),
-        Span::raw(gap(PROVIDER_LABEL_GAP)),
-    ];
-    for (index, provider) in state.providers.iter().enumerate() {
-        if index > 0 {
-            provider_spans.push(Span::raw(gap(PROVIDER_WORKSPACE_GAP)));
-        }
-        let active = Some(index) == state.active_provider;
-        let label = provider_workspace_label(provider, active);
-        provider_spans.push(if active {
-            Span::styled(label, Style::default().add_modifier(Modifier::BOLD))
-        } else {
-            Span::raw(label)
-        });
+fn render_provider_bar(state: &AppState, frame: &mut Frame<'_>, layout: &ScreenLayout) {
+    if state.providers.is_empty() {
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                provider_selector_label(state),
+                panel_title_style(state.focused_pane == FocusedPane::Providers),
+            )),
+            layout.provider_bar,
+        );
     }
-    frame.render_widget(Paragraph::new(Line::from(provider_spans)), area);
+    for (index, area) in layout.provider_workspaces.iter().copied().enumerate() {
+        let active = Some(index) == state.active_provider;
+        let style = if active {
+            Style::default()
+                .fg(theme_colour(ThemeRole::Terminal))
+                .bg(theme_colour(ThemeRole::Primary))
+                .add_modifier(Modifier::BOLD)
+        } else {
+            themed_style(ThemeRole::Muted)
+        };
+        frame.render_widget(
+            Paragraph::new(Span::styled(provider_workspace_label(state, index), style)),
+            area,
+        );
+    }
+    if let (Some(target), Some(target_area)) = (active_target_label(state), layout.active_target) {
+        frame.render_widget(
+            Paragraph::new(Span::styled(target, themed_style(ThemeRole::Muted)))
+                .alignment(Alignment::Right),
+            target_area,
+        );
+    }
 }
 
 fn render_workspace_panel(

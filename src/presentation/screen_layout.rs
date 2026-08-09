@@ -5,7 +5,7 @@
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
-use crate::application::{AppState, FocusedPane, ProviderWorkspaceState, WorkspacePresentation};
+use crate::application::{AppState, FocusedPane, WorkspacePresentation};
 
 use super::render::{PaneChrome, pane_block, pane_title, visible_resource_range};
 
@@ -25,6 +25,8 @@ pub struct ScreenLayout {
     pub status: Rect,
     /// The Providers Pane label inside the provider bar.
     pub provider_selector: Rect,
+    /// The Active Workspace's Target Environment, kept apart from navigation.
+    pub active_target: Option<Rect>,
     /// One region per Provider Workspace, in the order they are drawn.
     pub provider_workspaces: Vec<Rect>,
     /// Absent until a Provider Workspace is active.
@@ -63,19 +65,29 @@ impl ScreenLayout {
         let (provider_bar, workspace, status) = (bands[0], bands[1], bands[2]);
 
         let mut x = provider_bar.x;
-        let selector_width = label_width(&provider_selector_label(state)) + PROVIDER_LABEL_GAP;
+        let selector_width = u16::from(state.providers.is_empty())
+            * (label_width(&provider_selector_label(state)) + PROVIDER_LABEL_GAP);
         let provider_selector = Rect::new(x, provider_bar.y, selector_width, 1);
         x += selector_width;
 
+        let active_target = active_target_label(state).map(|label| {
+            let width = label_width(&label).min(provider_bar.width);
+            Rect::new(
+                provider_bar.right().saturating_sub(width),
+                provider_bar.y,
+                width,
+                1,
+            )
+        });
+        let navigation_end = active_target.map_or(provider_bar.right(), |area| area.x);
+
         let mut provider_workspaces = Vec::with_capacity(state.providers.len());
-        for (index, provider) in state.providers.iter().enumerate() {
+        for index in 0..state.providers.len() {
             if index > 0 {
                 x += PROVIDER_WORKSPACE_GAP;
             }
-            let width = label_width(&provider_workspace_label(
-                provider,
-                Some(index) == state.active_provider,
-            ));
+            let width = label_width(&provider_workspace_label(state, index))
+                .min(navigation_end.saturating_sub(x));
             provider_workspaces.push(Rect::new(x, provider_bar.y, width, 1));
             x = x.saturating_add(width);
         }
@@ -85,6 +97,7 @@ impl ScreenLayout {
             workspace,
             status,
             provider_selector,
+            active_target,
             provider_workspaces,
             panes: measure_panes(state, workspace),
             overlay: overlay_area(state, area),
@@ -265,14 +278,25 @@ pub fn provider_selector_label(state: &AppState) -> String {
 }
 
 /// Builds one Provider Workspace label exactly as the provider bar draws it.
-pub fn provider_workspace_label(provider: &ProviderWorkspaceState, active: bool) -> String {
-    if !active {
-        return provider.name().to_owned();
+pub fn provider_workspace_label(state: &AppState, index: usize) -> String {
+    let provider = &state.providers[index];
+    let label = match state.hints.focus_providers.as_deref() {
+        Some(key) => format!("[{key}] {}", provider.name()),
+        None => provider.name().to_owned(),
+    };
+    if index == 0 && state.focused_pane == FocusedPane::Providers {
+        format!("▶ {label}")
+    } else {
+        label
     }
-    match provider.target_environment() {
-        Some(target) => format!("[ {} · {target} ]", provider.name()),
-        None => format!("[ {} ]", provider.name()),
-    }
+}
+
+/// Builds the Active Workspace's Target Environment label.
+pub fn active_target_label(state: &AppState) -> Option<String> {
+    state
+        .active_workspace()
+        .and_then(|workspace| workspace.target_environment())
+        .map(|target| format!("Target: {target}"))
 }
 
 /// Builds one Detail View label exactly as the Details Pane draws it.

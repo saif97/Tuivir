@@ -666,6 +666,7 @@ fn mouse_routing_resolves_each_region_without_a_terminal() {
         workspace: Rect::new(0, 1, 80, 22),
         status: Rect::new(0, 23, 80, 0),
         provider_selector: Rect::new(0, 0, 2, 1),
+        active_target: None,
         provider_workspaces: vec![Rect::new(10, 0, 6, 1), Rect::new(2, 0, 8, 1)],
         panes: Some(WorkspacePanes {
             resources: Rect::new(0, 1, 10, 5),
@@ -716,6 +717,7 @@ fn mouse_detail_click_focuses_details_without_live_terminal() {
         workspace: Rect::new(0, 1, 80, 22),
         status: Rect::new(0, 23, 80, 0),
         provider_selector: Rect::new(0, 0, 0, 0),
+        active_target: None,
         provider_workspaces: Vec::new(),
         panes: Some(WorkspacePanes {
             resources: Rect::new(0, 1, 0, 0),

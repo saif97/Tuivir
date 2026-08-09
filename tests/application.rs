@@ -1654,7 +1654,7 @@ fn provider_bar_precedes_the_workspace_panes() {
         lines
             .next()
             .expect("provider row")
-            .starts_with("[1] Providers  [ Docker · desktop-linux ]")
+            .starts_with("[1] Docker")
     );
     assert!(
         lines
@@ -1674,7 +1674,7 @@ fn numbered_panels_render_their_navigation_shortcuts() {
     );
 
     let screen = render_to_text(app.state(), 100, 24);
-    assert!(screen.starts_with("[1] Providers"));
+    assert!(screen.starts_with("[1] Docker"));
     assert!(screen.contains("[2] Containers"));
 }
 
@@ -1774,10 +1774,7 @@ fn bracket_keys_switch_the_active_workspace() {
         KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE),
     );
     assert_eq!(requests.len(), 1, "new Active Workspace is refreshed");
-    assert!(
-        render_to_text(app.state(), 100, 24)
-            .starts_with("[1] Providers  Docker   [ Fixture · local ]")
-    );
+    assert!(render_to_text(app.state(), 100, 24).starts_with("[1] Docker   [1] Fixture"));
 
     let (_, requests) = handle_key(
         &mut app,
@@ -1786,10 +1783,7 @@ fn bracket_keys_switch_the_active_workspace() {
     // Returning refreshes Docker and asks again for the detail view whose load
     // was abandoned on the way out.
     assert_eq!(requests.len(), 2, "unexpected requests: {requests:?}");
-    assert!(
-        render_to_text(app.state(), 100, 24)
-            .starts_with("[1] Providers  [ Docker · desktop-linux ]   Fixture")
-    );
+    assert!(render_to_text(app.state(), 100, 24).starts_with("[1] Docker   [1] Fixture"));
 }
 
 #[test]
@@ -1826,10 +1820,7 @@ fn numbered_provider_panel_activates_incus_and_requests_its_refresh() {
             ..
         } if provider_id == ProviderId::new("incus")
     ));
-    assert!(
-        render_to_text(app.state(), 100, 24)
-            .starts_with("▶ [1] Providers  Docker   [ Incus · local / default ]")
-    );
+    assert!(render_to_text(app.state(), 100, 24).starts_with("▶ [1] Docker   [1] Incus"));
 }
 
 #[test]
@@ -1851,7 +1842,7 @@ fn late_docker_result_cannot_replace_the_active_incus_workspace() {
     ));
 
     assert_eq!(render_to_text(app.state(), 100, 24), current_screen);
-    assert!(current_screen.contains("[ Incus · local / default ]"));
+    assert!(current_screen.contains("Target: local / default"));
     assert!(current_screen.contains("gateway"));
     assert!(!current_screen.contains("nginx:1.27"));
 }
@@ -2154,7 +2145,7 @@ fn focus_accents_a_pane_title_and_edge_without_a_thick_border() {
 
     app.invoke(Command::FocusProviders);
     let screen = render_to_text(app.state(), 80, 30);
-    assert!(screen.starts_with("▶ [1] Providers"), "rendered:\n{screen}");
+    assert!(screen.starts_with("▶ [1] Docker"), "rendered:\n{screen}");
 }
 
 #[test]
@@ -2181,16 +2172,74 @@ fn a_workspace_over_the_numbered_panel_capacity_is_refused() {
 }
 
 #[test]
-fn active_provider_and_target_environment_share_the_top_bar() {
+fn provider_workspaces_render_as_navigation_segments_with_the_active_target_on_the_right() {
     let mut app = App::new();
     ready_workspace(&mut app, docker_discovery(), docker_multi_panel_snapshot());
+    app.update(fixture_discovery().into_event());
 
     let screen = render_to_text(app.state(), 80, 30);
+    let provider_bar = screen.lines().next().expect("a Provider bar");
     assert!(
-        screen.starts_with("[1] Providers  [ Docker · desktop-linux ]"),
+        provider_bar.starts_with("[1] Docker   [1] Fixture"),
         "rendered:\n{screen}"
     );
-    assert!(!screen.contains("Target:"));
+    assert!(
+        provider_bar.ends_with("Target: desktop-linux"),
+        "rendered:\n{screen}"
+    );
+    assert!(!provider_bar.contains("Docker · desktop-linux"));
+}
+
+#[test]
+fn the_default_target_environment_stays_visible_beside_the_provider_navigation() {
+    let default_docker = ProviderDiscovery::new(
+        Provider::new(
+            ProviderId::new("docker"),
+            "Docker",
+            Some(TargetEnvironment::new("default")),
+            None,
+        ),
+        None,
+    );
+    let mut app = App::new();
+    ready_workspace(&mut app, default_docker, docker_multi_panel_snapshot());
+
+    assert!(
+        render_to_text(app.state(), 80, 30)
+            .lines()
+            .next()
+            .expect("a Provider bar")
+            .ends_with("Target: default")
+    );
+}
+
+#[test]
+fn the_active_workspace_stays_filled_when_the_providers_pane_has_focus() {
+    let mut app = App::new();
+    ready_workspace(&mut app, docker_discovery(), docker_multi_panel_snapshot());
+    app.update(fixture_discovery().into_event());
+
+    assert_eq!(
+        background_of(app.state(), 80, 30, "Docker"),
+        Color::Blue,
+        "the Active Workspace has a filled segment"
+    );
+    assert_eq!(
+        foreground_of(app.state(), 80, 30, "Fixture"),
+        Color::DarkGray,
+        "inactive Provider Workspaces are subdued"
+    );
+
+    app.invoke(Command::FocusProviders);
+    assert!(
+        render_to_text(app.state(), 80, 30).starts_with("▶ [1] Docker   [1] Fixture"),
+        "the Providers Pane carries its own focus accent"
+    );
+    assert_eq!(
+        background_of(app.state(), 80, 30, "Docker"),
+        Color::Blue,
+        "Pane focus does not remove the Active Workspace selection"
+    );
 }
 
 #[test]
@@ -3326,11 +3375,11 @@ fn an_overridden_focus_key_renders_its_effective_hint() {
 
     let screen = render_to_text(app.state(), 100, 24);
     assert!(
-        screen.starts_with("[f10] Providers"),
+        screen.starts_with("[f10] Docker"),
         "the panel hint follows the effective binding:\n{screen}"
     );
     assert!(
-        !screen.contains("[1] Providers"),
+        !screen.contains("[1] Docker"),
         "the replaced default hint is gone:\n{screen}"
     );
 }
@@ -3370,7 +3419,7 @@ fn one_override_changes_dispatch_help_and_the_inline_hint_together() {
 
     // The inline hint follows the override.
     let screen = render_to_text(app.state(), 100, 24);
-    assert!(screen.starts_with("[f10] Providers"), "rendered:\n{screen}");
+    assert!(screen.starts_with("[f10] Docker"), "rendered:\n{screen}");
 
     // Contextual help follows the override.
     handle_key(
