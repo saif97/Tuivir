@@ -2166,6 +2166,15 @@ fn selected_resource_uses_a_full_row_background_that_dims_without_focus() {
 }
 
 #[test]
+fn resource_panel_shows_a_visual_scrollbar_only_when_rows_overflow() {
+    let mut app = App::new();
+    ready_workspace(&mut app, docker_discovery(), seven_resources());
+
+    assert!(render_to_text(app.state(), 100, 8).contains("█"));
+    assert!(!render_to_text(app.state(), 100, 24).contains("█"));
+}
+
+#[test]
 fn a_workspace_over_the_numbered_panel_capacity_is_refused() {
     let mut app = App::new();
     let initial = refresh_request(app.update(docker_discovery().into_event()));

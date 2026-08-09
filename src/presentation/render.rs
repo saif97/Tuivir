@@ -332,7 +332,7 @@ fn render_resource_panel(
     // easy to scan without repeating Provider-specific status text.
     let mut items = panel
         .resources
-        .get(visible)
+        .get(visible.clone())
         .unwrap_or_default()
         .iter()
         .map(|resource| {
@@ -375,6 +375,40 @@ fn render_resource_panel(
             PaneChrome::Resource,
         )),
         area,
+    );
+    render_resource_scrollbar(visible, viewport_height, panel.resources.len(), frame, area);
+}
+
+fn render_resource_scrollbar(
+    visible: std::ops::Range<usize>,
+    viewport_height: usize,
+    resource_count: usize,
+    frame: &mut Frame<'_>,
+    area: Rect,
+) {
+    if resource_count <= viewport_height || viewport_height == 0 || area.width < 2 {
+        return;
+    }
+    let thumb_height = (viewport_height * viewport_height / resource_count).max(1);
+    let thumb_start = visible.start * viewport_height / resource_count;
+    let lines = (0..viewport_height).map(|row| {
+        Line::styled(
+            if (thumb_start..thumb_start + thumb_height).contains(&row) {
+                "█"
+            } else {
+                "░"
+            },
+            themed_style(ThemeRole::Muted),
+        )
+    });
+    frame.render_widget(
+        Paragraph::new(lines.collect::<Vec<_>>()),
+        Rect::new(
+            area.x + area.width - 2,
+            area.y + 1,
+            1,
+            area.height.saturating_sub(2),
+        ),
     );
 }
 
