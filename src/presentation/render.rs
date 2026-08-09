@@ -82,7 +82,7 @@ pub fn render(state: &AppState, frame: &mut Frame<'_>) {
 /// what the user clicks is what they see.
 pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &ScreenLayout) {
     render_provider_bar(state, frame, layout);
-    render_running_command_status(state, frame, layout.status);
+    render_command_bar(state, frame, layout.status);
 
     let (Some(provider), Some(panes)) = (state.active_workspace(), layout.panes.as_ref()) else {
         frame.render_widget(
@@ -177,28 +177,30 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
 /// Each entry names the Provider, Resource, and Command it was dispatched for,
 /// so the status identifies its target even while another Provider Workspace
 /// is active.
-fn render_running_command_status(state: &AppState, frame: &mut Frame<'_>, area: Rect) {
-    if state.running_commands.is_empty() {
-        return;
-    }
-    let status = state
-        .running_commands
+fn render_command_bar(state: &AppState, frame: &mut Frame<'_>, area: Rect) {
+    let mut spans = state
+        .command_bar
         .iter()
-        .map(|running| {
-            format!(
-                "Running {} {} for {} ({})…",
-                running.provider_name, running.command, running.resource_name, running.target
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("   ");
-    frame.render_widget(
-        Paragraph::new(Line::styled(
-            status,
-            themed_style(ThemeRole::Warning).add_modifier(Modifier::BOLD),
-        )),
-        area,
-    );
+        .flat_map(|hint| [
+            Span::styled(
+                format!(" {} ", hint.key),
+                Style::default()
+                    .fg(theme_colour(ThemeRole::Terminal))
+                    .bg(theme_colour(ThemeRole::Primary))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(format!(" {}  ", hint.description)),
+        ])
+        .collect::<Vec<_>>();
+    spans.push(Span::styled(
+        " ? ",
+        Style::default()
+            .fg(theme_colour(ThemeRole::Terminal))
+            .bg(theme_colour(ThemeRole::Primary))
+            .add_modifier(Modifier::BOLD),
+    ));
+    spans.push(Span::raw(" all commands"));
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 fn render_provider_bar(state: &AppState, frame: &mut Frame<'_>, layout: &ScreenLayout) {

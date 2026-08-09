@@ -124,6 +124,9 @@ pub struct AppState {
     /// rendered hints cannot drift. `None` means the Command is unbound and its
     /// hint is omitted.
     pub hints: KeyHints,
+    /// A compact, scope-correct subset of Commands shown at the bottom of the
+    /// screen. The help overlay remains the complete reference.
+    pub command_bar: Vec<HelpEntry>,
     #[doc(hidden)]
     pub pending_details_copy: Option<String>,
 }
@@ -290,6 +293,7 @@ impl App {
     pub fn update(&mut self, event: AppEvent) -> Vec<ProviderRequest> {
         let mut requests = self.apply(event);
         requests.extend(self.sync_details());
+        self.update_command_bar();
         requests
     }
 
@@ -379,7 +383,27 @@ impl App {
     pub fn invoke(&mut self, command: Command) -> Vec<ProviderRequest> {
         let mut requests = self.dispatch(command);
         requests.extend(self.sync_details());
+        self.update_command_bar();
         requests
+    }
+
+    fn update_command_bar(&mut self) {
+        let scope = self.active_scope();
+        let resource = self.state.active_workspace().and_then(|workspace| workspace.selected_resource());
+        self.state.command_bar = self
+            .commands
+            .in_scope(scope)
+            .filter(|entry| match entry.command {
+                Command::Resource(command) => resource.is_some_and(|resource| resource.available_commands.contains(&command)),
+                _ => true,
+            })
+            .filter(|entry| entry.command != Command::ToggleHelp)
+            .take(4)
+            .filter_map(|entry| entry.keys.first().map(|key| HelpEntry {
+                key: key.to_string(),
+                description: entry.description.to_owned(),
+            }))
+            .collect();
     }
 
     /// Makes one Provider Workspace active.

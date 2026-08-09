@@ -62,7 +62,7 @@ impl ScreenLayout {
             .constraints([
                 Constraint::Length(1),
                 Constraint::Min(1),
-                Constraint::Length(u16::from(!state.running_commands.is_empty())),
+                Constraint::Length(1),
             ])
             .split(area);
         let (provider_bar, workspace, status) = (bands[0], bands[1], bands[2]);

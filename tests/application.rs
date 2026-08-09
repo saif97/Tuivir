@@ -952,7 +952,7 @@ fn switching_provider_workspaces_keeps_an_in_flight_resource_command() {
 }
 
 #[test]
-fn a_running_resource_command_shows_a_status_identifying_provider_resource_and_command() {
+fn a_running_resource_command_marks_its_resource_without_replacing_the_command_bar() {
     let mut app = App::new();
     ready_workspace(
         &mut app,
@@ -963,11 +963,8 @@ fn a_running_resource_command_shows_a_status_identifying_provider_resource_and_c
     app.invoke(Command::Resource(ResourceCommand::Restart));
 
     let screen = render_to_text(app.state(), 160, 24);
-    assert!(
-        screen.contains("Running Docker restart for api (container-a)"),
-        "rendered screen:\n{screen}"
-    );
     assert!(screen.contains("⏳  api"), "rendered screen:\n{screen}");
+    assert!(screen.contains("?  all commands"), "rendered screen:\n{screen}");
 }
 
 #[test]
