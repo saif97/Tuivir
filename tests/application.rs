@@ -1694,16 +1694,16 @@ fn resource_panel_keeps_its_navigation_shortcut_while_loading_or_unavailable() {
 }
 
 #[test]
-fn each_resource_status_is_coloured_by_its_resource_state() {
-    for (state, status, colour) in [
-        (ResourceState::Running, "running", Color::Green),
-        (ResourceState::Stopped, "exited", Color::DarkGray),
-        (ResourceState::Paused, "paused", Color::Yellow),
-        (ResourceState::Transitioning, "restarting", Color::Blue),
-        (ResourceState::Broken, "dead", Color::Red),
+fn each_resource_state_has_a_coloured_symbol_without_repeating_its_status_text() {
+    for (state, status, symbol, colour) in [
+        (ResourceState::Running, "running", "●", Color::Green),
+        (ResourceState::Stopped, "exited", "○", Color::DarkGray),
+        (ResourceState::Paused, "paused", "‖", Color::Yellow),
+        (ResourceState::Transitioning, "restarting", "↻", Color::Blue),
+        (ResourceState::Broken, "dead", "✕", Color::Red),
         // An unrecognised Provider status stays neutral rather than borrowing
         // the colour of a state Virtui understands.
-        (ResourceState::Unknown, "teleporting", Color::Reset),
+        (ResourceState::Unknown, "teleporting", "?", Color::Reset),
     ] {
         let mut app = App::new();
         let initial = refresh_request(app.update(docker_discovery().into_event()));
@@ -1715,10 +1715,13 @@ fn each_resource_status_is_coloured_by_its_resource_state() {
             )),
         ));
 
+        let screen = render_to_text(app.state(), 100, 24);
+        assert!(screen.contains(symbol), "rendered:\n{screen}");
+        assert!(!screen.contains(status), "rendered:\n{screen}");
         assert_eq!(
-            foreground_of(app.state(), 100, 24, status),
+            foreground_of(app.state(), 100, 24, symbol),
             colour,
-            "{state:?} status should be rendered in {colour:?}"
+            "{state:?} symbol should be rendered in {colour:?}"
         );
     }
 }

@@ -324,34 +324,25 @@ fn render_resource_panel(
     let viewport_height = area.height.saturating_sub(2) as usize;
     let visible =
         visible_resource_range(view.selected_index, viewport_height, panel.resources.len());
-    // A row names its Resource and, where the Resource has one, says what it is
-    // doing. Everything else a Provider reported is in the Details pane, so a
-    // row never has to compete for width with it.
+    // A row starts with the Resource State symbol, leaving the Resource name
+    // easy to scan without repeating Provider-specific status text.
     let mut items = panel
         .resources
         .get(visible)
         .unwrap_or_default()
         .iter()
         .map(|resource| {
-            let marker = if view.selected_resource == Some(&resource.id) {
-                ">"
-            } else {
-                " "
-            };
-            let mut spans = vec![
-                Span::raw(marker),
-                Span::raw(" "),
-                Span::raw(resource.name.as_str()),
-            ];
-            if let Some(status) = &resource.status {
-                spans.push(Span::raw("  "));
-                spans.push(Span::styled(
-                    status.as_str(),
+            let state = resource.state.map(resource_state_symbol).unwrap_or(" ");
+            let spans = vec![
+                Span::styled(
+                    state,
                     resource
                         .state
                         .map_or_else(Style::default, resource_state_style),
-                ));
-            }
+                ),
+                Span::raw(" "),
+                Span::raw(resource.name.as_str()),
+            ];
             ListItem::new(Line::from(spans))
         })
         .collect::<Vec<_>>();
@@ -369,6 +360,17 @@ fn render_resource_panel(
         )),
         area,
     );
+}
+
+fn resource_state_symbol(state: ResourceState) -> &'static str {
+    match state {
+        ResourceState::Running => "●",
+        ResourceState::Stopped => "○",
+        ResourceState::Paused => "‖",
+        ResourceState::Transitioning => "↻",
+        ResourceState::Broken => "✕",
+        ResourceState::Unknown => "?",
+    }
 }
 
 pub(super) fn visible_resource_range(
