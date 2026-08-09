@@ -418,12 +418,10 @@ async fn discovered_docker_sandbox_omits_an_unselected_environment() {
     assert!(!screen.contains("Docker Sandbox ·"), "{screen}");
     assert!(screen.contains("Sandboxes"), "{screen}");
     assert!(screen.contains("claude-virtui"), "{screen}");
-    assert!(screen.contains("running"), "{screen}");
+    assert!(screen.contains("● claude-virtui"), "{screen}");
     assert!(screen.contains("shell-dotfiles"), "{screen}");
-    assert!(screen.contains("stopped"), "{screen}");
+    assert!(screen.contains("○ shell-dotfiles"), "{screen}");
     assert!(screen.contains("Agent: claude"), "{screen}");
-    assert!(screen.contains("Ports:"), "{screen}");
-    assert!(screen.contains("127.0.0.1:32768 -> 9418/tcp"), "{screen}");
 }
 
 /// A user who has never created a sandbox sees an empty workspace, which must

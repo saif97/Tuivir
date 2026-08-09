@@ -786,9 +786,9 @@ async fn discovered_docker_workspace_renders_target_environment_and_containers()
     assert!(screen.contains("Containers"), "rendered screen:\n{screen}");
     assert!(screen.contains("api"));
     assert!(screen.contains("nginx:1.27"));
-    assert!(screen.contains("running"));
+    assert!(screen.contains("● api"));
     assert!(screen.contains("worker"));
-    assert!(screen.contains("exited"));
+    assert!(screen.contains("○ worker"));
 }
 
 #[tokio::test]
