@@ -35,7 +35,7 @@ pub fn resolve(
         // Commands.
         _ if layout.overlay.is_some() => None,
         MouseAction::Press => press(layout, input),
-        MouseAction::Drag => drag(layout, input, boundary_grab?),
+        MouseAction::Drag => drag(layout, input, boundary_grab),
         MouseAction::ScrollUp => scroll(layout, input, ScrollDirection::Up),
         MouseAction::ScrollDown => scroll(layout, input, ScrollDirection::Down),
     }
@@ -47,7 +47,26 @@ pub fn resolve(
 /// The share is worked out here because the width it is a share of belongs to
 /// the screen. `grab` is the column of the boundary the pointer took hold of,
 /// and taking it off the pointer is what stops the boundary jumping.
-fn drag(layout: &ScreenLayout, input: MouseInput, grab: u16) -> Option<Command> {
+fn drag(layout: &ScreenLayout, input: MouseInput, boundary_grab: Option<u16>) -> Option<Command> {
+    if boundary_grab.is_none() {
+        let panes = layout.panes.as_ref()?;
+        let point = point(input);
+        if panes.detail_content.contains(point) {
+            return Some(Command::ExtendDetailsSelection {
+                line: point.y - panes.detail_content.y,
+                column: point.x - panes.detail_content.x,
+            });
+        }
+        if point.x >= panes.detail_content.x && point.x < panes.detail_content.right() {
+            return Some(Command::ExtendDetailsSelectionAtEdge {
+                above: point.y < panes.detail_content.y,
+                column: point.x - panes.detail_content.x,
+                visible_rows: panes.detail_content.height,
+            });
+        }
+        return None;
+    }
+    let grab = boundary_grab.expect("checked above");
     let workspace = layout.workspace;
     if workspace.width == 0 {
         return None;
@@ -94,6 +113,12 @@ fn press(layout: &ScreenLayout, input: MouseInput) -> Option<Command> {
     }
     if let Some(index) = index_containing(&panes.detail_views, point) {
         return Some(Command::ActivateDetailView(index));
+    }
+    if panes.detail_content.contains(point) {
+        return Some(Command::BeginDetailsSelection {
+            line: point.y - panes.detail_content.y,
+            column: point.x - panes.detail_content.x,
+        });
     }
     if let Some(panel) = index_containing(&panes.resource_panels, point) {
         return Some(Command::FocusResourcePanel(panel));

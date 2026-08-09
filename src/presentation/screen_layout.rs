@@ -45,6 +45,9 @@ pub struct WorkspacePanes {
     /// shows. Scrolling means a row's position is not its Resource index.
     pub resource_rows: Vec<Vec<(usize, Rect)>>,
     pub details: Rect,
+    /// The scrollable text area of the active Detail View, excluding its
+    /// summary, view strip, and border.
+    pub detail_content: Rect,
     /// One region per Detail View label, in the order they are drawn.
     pub detail_views: Vec<Rect>,
     /// The Pane Boundary the user drags: the two border columns that touch,
@@ -173,6 +176,7 @@ fn measure_panes(state: &AppState, workspace: Rect) -> Option<WorkspacePanes> {
             resource_panels: Vec::new(),
             resource_rows: Vec::new(),
             details,
+            detail_content: Rect::default(),
             detail_views: Vec::new(),
             pane_boundary,
         });
@@ -256,6 +260,7 @@ fn measure_panes(state: &AppState, workspace: Rect) -> Option<WorkspacePanes> {
         resource_panels,
         resource_rows,
         details,
+        detail_content: detail_rows[2],
         detail_views,
         pane_boundary,
     })

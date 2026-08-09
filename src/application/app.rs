@@ -124,6 +124,8 @@ pub struct AppState {
     /// rendered hints cannot drift. `None` means the Command is unbound and its
     /// hint is omitted.
     pub hints: KeyHints,
+    #[doc(hidden)]
+    pub pending_details_copy: Option<String>,
 }
 
 impl AppState {
@@ -362,6 +364,17 @@ impl App {
         self.commands.reserved(key)
     }
 
+    /// Takes the exact selected text a Details Copy Command asked the host to
+    /// place on the clipboard. The application never performs clipboard I/O.
+    pub fn take_pending_details_copy(&mut self) -> Option<String> {
+        self.state.pending_details_copy.take()
+    }
+
+    /// Records a clipboard-adapter failure through the ordinary UI error path.
+    pub fn report_details_copy_failure(&mut self, reason: String) {
+        self.state.command_error = Some(format!("copy selected Details failed: {reason}"));
+    }
+
     /// Carries out one resolved user intention and returns any provider work.
     pub fn invoke(&mut self, command: Command) -> Vec<ProviderRequest> {
         let mut requests = self.dispatch(command);
@@ -406,6 +419,17 @@ impl App {
     }
 
     fn dispatch(&mut self, command: Command) -> Vec<ProviderRequest> {
+        if !matches!(
+            command,
+            Command::CopyDetails
+                | Command::BeginDetailsSelection { .. }
+                | Command::ExtendDetailsSelection { .. }
+                | Command::ExtendDetailsSelectionAtEdge { .. }
+        ) {
+            if let Some(workspace) = self.state.active_workspace_mut() {
+                workspace.clear_detail_selection();
+            }
+        }
         match command {
             Command::Quit => Vec::new(),
             Command::ToggleHelp => {
@@ -468,6 +492,38 @@ impl App {
             }
             Command::ScrollDetailsUp => {
                 self.scroll_details(-DETAIL_SCROLL_LINES);
+                Vec::new()
+            }
+            // A Details selection arrives through the mouse path. Until one is
+            // present, Copy deliberately has nothing to send to the host.
+            Command::CopyDetails => {
+                self.state.pending_details_copy = self
+                    .state
+                    .active_workspace()
+                    .and_then(ProviderWorkspaceState::selected_detail_text);
+                Vec::new()
+            }
+            Command::BeginDetailsSelection { line, column } => {
+                self.state.focused_pane = FocusedPane::Details;
+                if let Some(workspace) = self.state.active_workspace_mut() {
+                    workspace.begin_detail_selection(line, column);
+                }
+                Vec::new()
+            }
+            Command::ExtendDetailsSelection { line, column } => {
+                if let Some(workspace) = self.state.active_workspace_mut() {
+                    workspace.extend_detail_selection(line, column);
+                }
+                Vec::new()
+            }
+            Command::ExtendDetailsSelectionAtEdge { above, column, visible_rows } => {
+                if let Some(workspace) = self.state.active_workspace_mut() {
+                    workspace.scroll_details(if above { -1 } else { 1 });
+                    workspace.extend_detail_selection(
+                        if above { 0 } else { visible_rows.saturating_sub(1) },
+                        column,
+                    );
+                }
                 Vec::new()
             }
             Command::OpenShell => {

@@ -268,6 +268,20 @@ fn shell_focus_and_navigation_defaults_resolve_in_their_own_scopes() {
 }
 
 #[test]
+fn details_copy_defaults_to_y_and_remains_configurable() {
+    let registry = CommandRegistry::builtin();
+
+    assert_eq!(
+        registry.resolve(CommandScope::Details, key("y")),
+        Some(Command::CopyDetails)
+    );
+    assert_eq!(
+        effective(&[("details.copy", &["f8"])]).resolve(CommandScope::Details, key("f8")),
+        Some(Command::CopyDetails)
+    );
+}
+
+#[test]
 fn every_direct_focus_command_exposes_its_effective_hint() {
     let registry = effective(&[("focus.resources.2", &["f7"]), ("focus.details", &["f6"])]);
 

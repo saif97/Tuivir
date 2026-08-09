@@ -1580,6 +1580,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "toml",
+ "unicode-width",
 ]
 
 [[package]]

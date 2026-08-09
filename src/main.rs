@@ -1,5 +1,6 @@
 use std::{
     future, io,
+    io::Write,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -82,6 +83,41 @@ const DETAIL_DISPATCH_QUIET_PERIOD: Duration = Duration::from_millis(75);
 struct DetailDispatchQueue {
     quiet_period: Duration,
     pending: Option<(Instant, ProviderRequest)>,
+}
+
+/// Host boundary for copying application-owned Details text.
+trait Clipboard {
+    fn copy(&mut self, text: &str) -> io::Result<()>;
+}
+
+/// OSC 52 lets capable terminals (including Ghostty) own the platform
+/// clipboard while keeping Virtui independent of a desktop clipboard API.
+struct Osc52Clipboard<W>(W);
+
+impl<W: Write> Clipboard for Osc52Clipboard<W> {
+    fn copy(&mut self, text: &str) -> io::Result<()> {
+        const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let bytes = text.as_bytes();
+        let mut encoded = String::with_capacity(bytes.len().div_ceil(3) * 4);
+        for chunk in bytes.chunks(3) {
+            let bits = (u32::from(chunk[0]) << 16)
+                | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8)
+                | u32::from(*chunk.get(2).unwrap_or(&0));
+            encoded.push(TABLE[(bits >> 18) as usize & 63] as char);
+            encoded.push(TABLE[(bits >> 12) as usize & 63] as char);
+            encoded.push(if chunk.len() > 1 { TABLE[(bits >> 6) as usize & 63] as char } else { '=' });
+            encoded.push(if chunk.len() > 2 { TABLE[bits as usize & 63] as char } else { '=' });
+        }
+        write!(self.0, "\x1b]52;c;{encoded}\x07")?;
+        self.0.flush()
+    }
+}
+
+fn copy_pending_details(app: &mut App, clipboard: &mut dyn Clipboard) {
+    let Some(text) = app.take_pending_details_copy() else { return };
+    if let Err(error) = clipboard.copy(&text) {
+        app.report_details_copy_failure(error.to_string());
+    }
 }
 
 impl DetailDispatchQueue {
@@ -194,6 +230,7 @@ async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::R
     let runtime = ProviderRuntime::with_builtin_providers(cli);
     let (completion_tx, mut completion_rx) = mpsc::unbounded_channel();
     let mut app = App::with_registry(registry);
+    let mut clipboard = Osc52Clipboard(io::stdout());
     let mut detail_dispatch = DetailDispatchQueue::new(DETAIL_DISPATCH_QUIET_PERIOD);
 
     for discovered in runtime.discover().await {
@@ -226,6 +263,7 @@ async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::R
                     _ => (ShellControl::Continue, Vec::new()),
                 };
                 dispatch_all(&runtime, &completion_tx, &mut detail_dispatch, requests);
+                copy_pending_details(&mut app, &mut clipboard);
                 if control == ShellControl::Quit {
                     break Ok(());
                 }

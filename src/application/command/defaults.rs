@@ -218,6 +218,13 @@ pub(super) const BUILTIN_COMMANDS: &[CommandDefinition] = &[
         scopes: DETAILS,
         default_keys: &["ctrl+u", "pageup"],
     },
+    CommandDefinition {
+        id: "details.copy",
+        description: "Copy selected details",
+        command: Command::CopyDetails,
+        scopes: DETAILS,
+        default_keys: &["y"],
+    },
     // The Pane Boundary is the shell's, not one Pane's, so it answers in every
     // workspace scope. `<` and `>` point the way the boundary travels.
     CommandDefinition {
