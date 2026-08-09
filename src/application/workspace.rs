@@ -265,10 +265,12 @@ impl ProviderWorkspaceState {
             let still_offered = workspace
                 .selected_detail_view
                 .as_ref()
-                .is_some_and(|selected| panel.detail_views.iter().any(|view| &view.id == selected));
+                .is_some_and(|selected| {
+                    selected.0 == OVERVIEW_DETAIL_VIEW_ID
+                        || panel.detail_views.iter().any(|view| &view.id == selected)
+                });
             if !still_offered {
-                workspace.selected_detail_view =
-                    panel.detail_views.first().map(|view| view.id.clone());
+                workspace.selected_detail_view = Some(DetailViewId::new(OVERVIEW_DETAIL_VIEW_ID));
             }
             true
         })
@@ -612,6 +614,15 @@ impl ProviderWorkspaceState {
                     snapshot.panels.first().map(|panel| panel.id.clone());
             }
             workspace.reconcile_detail_view(&snapshot);
+            if workspace
+                .selected_detail_view
+                .as_ref()
+                .is_some_and(|view| view.0 == OVERVIEW_DETAIL_VIEW_ID)
+            {
+                // Overview belongs to the current snapshot, so it is rebuilt
+                // on refresh rather than retaining fields from an older one.
+                workspace.details = None;
+            }
             workspace.load_state = WorkspaceLoadState::Ready(snapshot);
         });
     }
