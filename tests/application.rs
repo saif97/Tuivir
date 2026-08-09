@@ -32,8 +32,7 @@ use virtui::{
 mod common;
 use common::{
     command_completed, command_request, detail_request, details_completed, first_provider_detail,
-    ready_workspace,
-    refresh_completed, refresh_request,
+    ready_workspace, refresh_completed, refresh_request,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -957,10 +956,37 @@ fn a_running_resource_command_marks_its_resource_without_replacing_the_command_b
     app.invoke(Command::Resource(ResourceCommand::Restart));
 
     let screen = render_to_text(app.state(), 160, 24);
-    assert!(screen.contains("⏳  api"), "rendered screen:\n{screen}");
-    assert!(screen.contains("Running restart for api…"), "rendered screen:\n{screen}");
+    assert!(screen.contains("* api"), "rendered screen:\n{screen}");
+    assert!(
+        screen.contains("Running restart for api…"),
+        "rendered screen:\n{screen}"
+    );
     assert!(screen.contains("r  Restart"), "rendered screen:\n{screen}");
-    assert!(screen.contains("?  all commands"), "rendered screen:\n{screen}");
+    assert!(
+        screen.contains("?  all commands"),
+        "rendered screen:\n{screen}"
+    );
+}
+
+#[test]
+fn concurrent_resource_commands_mark_every_affected_resource() {
+    let mut app = App::new();
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[
+            ("container-a", "api", "nginx:1.27"),
+            ("container-b", "worker", "alpine:3.21"),
+        ]),
+    );
+
+    app.invoke(Command::Resource(ResourceCommand::Restart));
+    app.invoke(Command::SelectNext);
+    app.invoke(Command::Resource(ResourceCommand::Restart));
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(screen.contains("* api"), "rendered screen:\n{screen}");
+    assert!(screen.contains("* worker"), "rendered screen:\n{screen}");
 }
 
 #[test]
@@ -2919,7 +2945,10 @@ fn copying_a_details_selection_returns_exact_source_text() {
     app.invoke(Command::ExtendDetailsSelection { line: 1, column: 3 });
     app.invoke(Command::CopyDetails);
 
-    assert_eq!(app.take_pending_details_copy(), Some("ello\nwor".to_owned()));
+    assert_eq!(
+        app.take_pending_details_copy(),
+        Some("ello\nwor".to_owned())
+    );
 }
 
 #[test]
@@ -2931,7 +2960,10 @@ fn selected_details_text_is_visibly_highlighted() {
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
     ));
     let details = first_provider_detail(&mut app);
-    app.update(details_completed(details, Ok(ResourceDetails::from_lines(["hello"]))));
+    app.update(details_completed(
+        details,
+        Ok(ResourceDetails::from_lines(["hello"])),
+    ));
     app.invoke(Command::BeginDetailsSelection { line: 0, column: 1 });
     app.invoke(Command::ExtendDetailsSelection { line: 0, column: 4 });
 
@@ -2965,7 +2997,10 @@ fn changing_the_selected_resource_clears_details_selection() {
         ])),
     ));
     let details = first_provider_detail(&mut app);
-    app.update(details_completed(details, Ok(ResourceDetails::from_lines(["hello"]))));
+    app.update(details_completed(
+        details,
+        Ok(ResourceDetails::from_lines(["hello"])),
+    ));
     app.invoke(Command::BeginDetailsSelection { line: 0, column: 0 });
     app.invoke(Command::ExtendDetailsSelection { line: 0, column: 5 });
     app.invoke(Command::SelectNext);
@@ -2985,7 +3020,9 @@ fn dragging_below_details_autoscrolls_and_extends_the_selection() {
     let details = first_provider_detail(&mut app);
     app.update(details_completed(
         details,
-        Ok(ResourceDetails::from_lines((0..20).map(|line| format!("line-{line}")))),
+        Ok(ResourceDetails::from_lines(
+            (0..20).map(|line| format!("line-{line}")),
+        )),
     ));
     app.invoke(Command::BeginDetailsSelection { line: 0, column: 0 });
     for _ in 0..3 {
@@ -2997,7 +3034,10 @@ fn dragging_below_details_autoscrolls_and_extends_the_selection() {
     }
     app.invoke(Command::CopyDetails);
 
-    assert_eq!(app.take_pending_details_copy(), Some("line-0\nline-1\nline-2\nline-3".to_owned()));
+    assert_eq!(
+        app.take_pending_details_copy(),
+        Some("line-0\nline-1\nline-2\nline-3".to_owned())
+    );
 }
 
 /// Every view starts at its own top: a scrolled position belongs to the output
@@ -3640,7 +3680,7 @@ fn the_pane_boundary_moves_only_while_the_pointer_holds_it() {
 }
 
 /// A resize is only a resize. Which Pane has focus, which Resource is selected,
-/// which Detail View is on screen, and how far through it the user had read are
+/// which Detail View Tab is on screen, and how far through it the user had read are
 /// all still there afterwards.
 #[test]
 fn resizing_the_panes_disturbs_nothing_inside_them() {
@@ -3695,7 +3735,7 @@ fn resizing_the_panes_disturbs_nothing_inside_them() {
     let resized = render_to_text(app.state(), 100, 24);
     assert!(
         resized.contains("line-10") && !resized.contains("line-0 "),
-        "the Detail View is still where it was read to, rendered:\n{resized}"
+        "the Detail View Tab is still where it was read to, rendered:\n{resized}"
     );
 }
 

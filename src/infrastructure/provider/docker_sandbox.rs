@@ -18,7 +18,7 @@ const PROVIDER_NAME: &str = "Docker Sandbox";
 const SANDBOXES_PANEL_ID: &str = "sandboxes";
 /// The one Resource listing sbx offers.
 const LIST_SANDBOXES: [&str; 2] = ["ls", "--json"];
-/// The only Detail View Docker Sandbox declares.
+/// The only Detail View Tab Docker Sandbox declares.
 const INFO_VIEW: &str = "info";
 /// What a user can run to check the Target Environment a refresh could not read.
 const REFRESH_HELP: &str = "Run `sbx ls` to verify access to the current Target Environment.";

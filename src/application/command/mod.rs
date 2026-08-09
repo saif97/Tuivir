@@ -66,11 +66,21 @@ pub enum Command {
     /// Copies the text selected in the visible detail view.
     CopyDetails,
     /// Starts a selection at a source-line character boundary in Details.
-    BeginDetailsSelection { line: u16, column: u16 },
+    BeginDetailsSelection {
+        line: u16,
+        column: u16,
+    },
     /// Extends the active Details selection to a source-line character boundary.
-    ExtendDetailsSelection { line: u16, column: u16 },
+    ExtendDetailsSelection {
+        line: u16,
+        column: u16,
+    },
     /// Extends selection while the pointer is held above or below Details.
-    ExtendDetailsSelectionAtEdge { above: bool, column: u16, visible_rows: u16 },
+    ExtendDetailsSelectionAtEdge {
+        above: bool,
+        column: u16,
+        visible_rows: u16,
+    },
     /// Moves the Pane Boundary between the Resource Panels and the Details
     /// Pane, giving the width one of them gains to the other.
     MovePaneBoundaryLeft,
@@ -105,7 +115,7 @@ pub enum Command {
         panel: usize,
         resource: usize,
     },
-    /// Activates one Detail View by its position in the Details Pane.
+    /// Activates one Detail View Tab by its position in the Details Pane.
     ActivateDetailView(usize),
     /// Moves the selection inside one Resource Panel, leaving focus alone.
     ScrollResourcePanelUp(usize),

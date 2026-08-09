@@ -12,7 +12,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use super::{Clipboard, DetailDispatchQueue, Osc52Clipboard, ShellTerminal, handle_key, handle_mouse, open_pending_shell};
+use super::{
+    Clipboard, DetailDispatchQueue, Osc52Clipboard, ShellTerminal, handle_key, handle_mouse,
+    open_pending_shell,
+};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use virtui::{

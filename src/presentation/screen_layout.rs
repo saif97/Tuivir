@@ -13,7 +13,7 @@ use super::render::{PaneChrome, pane_block, pane_title, visible_resource_range};
 /// Workspace, and between one Provider Workspace and the next.
 pub const PROVIDER_LABEL_GAP: u16 = 2;
 pub const PROVIDER_WORKSPACE_GAP: u16 = 3;
-/// Blank columns between one Detail View label and the next.
+/// Blank columns between one Detail View Tab label and the next.
 pub const DETAIL_VIEW_GAP: u16 = 2;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -35,7 +35,7 @@ pub struct ScreenLayout {
     pub overlay: Option<Rect>,
 }
 
-/// The Panes of the Active Workspace, and the rows and Detail Views inside them.
+/// The Panes of the Active Workspace, and the rows and Detail View Tabs inside them.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WorkspacePanes {
     pub resources: Rect,
@@ -45,10 +45,10 @@ pub struct WorkspacePanes {
     /// shows. Scrolling means a row's position is not its Resource index.
     pub resource_rows: Vec<Vec<(usize, Rect)>>,
     pub details: Rect,
-    /// The scrollable text area of the active Detail View, excluding its
+    /// The scrollable text area of the active Detail View Tab, excluding its
     /// summary, view strip, and border.
     pub detail_content: Rect,
-    /// One region per Detail View label, in the order they are drawn.
+    /// One region per Detail View Tab label, in the order they are drawn.
     pub detail_views: Vec<Rect>,
     /// The Pane Boundary the user drags: the two border columns that touch,
     /// the right of the Resource Panels and the left of the Details Pane.
@@ -303,7 +303,7 @@ pub fn active_target_label(state: &AppState) -> Option<String> {
         .map(|target| format!("Target: {target}"))
 }
 
-/// Builds one Detail View label exactly as the Details Pane draws it.
+/// Builds one Detail View Tab label exactly as the Details Pane draws it.
 pub fn detail_view_label(title: &str, selected: bool) -> String {
     if selected {
         format!("[ {title} ]")

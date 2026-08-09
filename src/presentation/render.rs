@@ -182,16 +182,18 @@ fn render_command_bar(state: &AppState, frame: &mut Frame<'_>, area: Rect) {
     let mut spans = state
         .command_bar
         .iter()
-        .flat_map(|hint| [
-            Span::styled(
-                format!(" {} ", hint.key),
-                Style::default()
-                    .fg(theme_colour(ThemeRole::Terminal))
-                    .bg(theme_colour(ThemeRole::Primary))
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(format!(" {}  ", hint.description)),
-        ])
+        .flat_map(|hint| {
+            [
+                Span::styled(
+                    format!(" {} ", hint.key),
+                    Style::default()
+                        .fg(theme_colour(ThemeRole::Terminal))
+                        .bg(theme_colour(ThemeRole::Primary))
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(format!(" {}  ", hint.description)),
+            ]
+        })
         .collect::<Vec<_>>();
     spans.push(Span::styled(
         " ? ",
@@ -352,7 +354,7 @@ fn render_resource_panel(
                 .find(|running| running.provider_id == *provider_id && running.target == target);
             let state = running.map_or_else(
                 || resource.state.map(resource_state_symbol).unwrap_or(" "),
-                |_| "⏳",
+                |_| "*",
             );
             let spans = vec![
                 Span::styled(
@@ -583,9 +585,12 @@ fn render_details_panel(
     });
     if let Some(running) = running {
         frame.render_widget(
-            Paragraph::new(format!("Running {} for {}…", running.command, running.resource_name))
-                .alignment(Alignment::Center)
-                .style(themed_style(ThemeRole::Warning).add_modifier(Modifier::BOLD)),
+            Paragraph::new(format!(
+                "Running {} for {}…",
+                running.command, running.resource_name
+            ))
+            .alignment(Alignment::Center)
+            .style(themed_style(ThemeRole::Warning).add_modifier(Modifier::BOLD)),
             rows[1],
         );
     } else if let Some(details) = view.and_then(|view| view.details) {
@@ -600,16 +605,16 @@ fn render_details_panel(
             .is_some_and(|selected| selected.id == detail_view.id);
         spans.push(detail_view_tab(&detail_view.title, selected));
     }
-    frame.render_widget(
-        Paragraph::new(Line::from(spans)),
-        rows[0],
-    );
+    frame.render_widget(Paragraph::new(Line::from(spans)), rows[0]);
 }
 
 fn detail_view_tab(title: &str, selected: bool) -> Span<'static> {
     let label = detail_view_label(title, selected);
     if selected {
-        Span::styled(label, themed_style(ThemeRole::Primary).add_modifier(Modifier::BOLD))
+        Span::styled(
+            label,
+            themed_style(ThemeRole::Primary).add_modifier(Modifier::BOLD),
+        )
     } else {
         Span::styled(label, themed_style(ThemeRole::Muted))
     }
@@ -657,7 +662,9 @@ fn render_detail_content(
 }
 
 fn detail_line(text: &str, line: u16, selection: Option<&DetailSelection>) -> Line<'static> {
-    let Some(selection) = selection else { return Line::from(text.to_owned()) };
+    let Some(selection) = selection else {
+        return Line::from(text.to_owned());
+    };
     let (start, end) = if selection.start <= selection.end {
         (selection.start, selection.end)
     } else {
@@ -666,10 +673,22 @@ fn detail_line(text: &str, line: u16, selection: Option<&DetailSelection>) -> Li
     if start == end || line < start.line || line > end.line {
         return Line::from(text.to_owned());
     }
-    let first = if line == start.line { start.column as usize } else { 0 };
-    let last = if line == end.line { end.column as usize } else { text.chars().count() };
+    let first = if line == start.line {
+        start.column as usize
+    } else {
+        0
+    };
+    let last = if line == end.line {
+        end.column as usize
+    } else {
+        text.chars().count()
+    };
     let before = text.chars().take(first).collect::<String>();
-    let selected = text.chars().skip(first).take(last.saturating_sub(first)).collect::<String>();
+    let selected = text
+        .chars()
+        .skip(first)
+        .take(last.saturating_sub(first))
+        .collect::<String>();
     let after = text.chars().skip(last).collect::<String>();
     Line::from(vec![
         Span::raw(before),

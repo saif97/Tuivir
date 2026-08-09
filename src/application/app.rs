@@ -269,7 +269,7 @@ impl App {
         &self.state
     }
 
-    /// Confirms that a debounced Detail View request still describes the
+    /// Confirms that a debounced Detail View Tab request still describes the
     /// visible load before the host starts Provider work for it.
     pub fn detail_request_is_current(&self, request: &ProviderRequest) -> bool {
         let ProviderRequest::LoadResourceDetails {
@@ -389,16 +389,20 @@ impl App {
 
     fn update_command_bar(&mut self) {
         let scope = self.active_scope();
-        let resource = self.state.active_workspace().and_then(|workspace| workspace.selected_resource());
-        let commands = self
-            .commands
-            .in_scope(scope)
-            .filter(|entry| match entry.command {
-                Command::Resource(command) => resource.is_some_and(|resource| resource.available_commands.contains(&command)),
-                _ => true,
-            })
-            .filter(|entry| entry.command != Command::ToggleHelp)
-            .collect::<Vec<_>>();
+        let resource = self
+            .state
+            .active_workspace()
+            .and_then(|workspace| workspace.selected_resource());
+        let commands =
+            self.commands
+                .in_scope(scope)
+                .filter(|entry| match entry.command {
+                    Command::Resource(command) => resource
+                        .is_some_and(|resource| resource.available_commands.contains(&command)),
+                    _ => true,
+                })
+                .filter(|entry| entry.command != Command::ToggleHelp)
+                .collect::<Vec<_>>();
         self.state.command_bar = commands
             .iter()
             .filter(|entry| matches!(entry.command, Command::Resource(_)))
@@ -408,10 +412,12 @@ impl App {
                     .filter(|entry| !matches!(entry.command, Command::Resource(_))),
             )
             .take(4)
-            .filter_map(|entry| entry.keys.first().map(|key| HelpEntry {
-                key: key.to_string(),
-                description: entry.description.to_owned(),
-            }))
+            .filter_map(|entry| {
+                entry.keys.first().map(|key| HelpEntry {
+                    key: key.to_string(),
+                    description: entry.description.to_owned(),
+                })
+            })
             .collect();
     }
 
@@ -548,11 +554,19 @@ impl App {
                 }
                 Vec::new()
             }
-            Command::ExtendDetailsSelectionAtEdge { above, column, visible_rows } => {
+            Command::ExtendDetailsSelectionAtEdge {
+                above,
+                column,
+                visible_rows,
+            } => {
                 if let Some(workspace) = self.state.active_workspace_mut() {
                     workspace.scroll_details(if above { -1 } else { 1 });
                     workspace.extend_detail_selection(
-                        if above { 0 } else { visible_rows.saturating_sub(1) },
+                        if above {
+                            0
+                        } else {
+                            visible_rows.saturating_sub(1)
+                        },
                         column,
                     );
                 }
