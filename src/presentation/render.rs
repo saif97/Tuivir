@@ -110,6 +110,7 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
     render_details_panel(
         provider.name(),
         workspace_view,
+        &state.running_commands,
         state.focused_pane == FocusedPane::Details,
         state.hints.focus_details.as_deref(),
         frame,
@@ -516,6 +517,7 @@ pub(super) fn pane_block(title: String, focused: bool, chrome: PaneChrome) -> Bl
 fn render_details_panel(
     provider_name: &str,
     view: Option<&WorkspaceView<'_>>,
+    running_commands: &[crate::application::RunningResourceCommand],
     focused: bool,
     details_hint: Option<&str>,
     frame: &mut Frame<'_>,
@@ -570,7 +572,23 @@ fn render_details_panel(
         );
         return;
     }
-    if let Some(details) = view.and_then(|view| view.details) {
+    let running = view.and_then(|view| {
+        let target = ResourceTarget::new(
+            view.focused_resource_panel?.clone(),
+            view.selected_resource?.id.clone(),
+        );
+        running_commands
+            .iter()
+            .find(|running| running.provider_id == *view.id && running.target == target)
+    });
+    if let Some(running) = running {
+        frame.render_widget(
+            Paragraph::new(format!("Running {} for {}…", running.command, running.resource_name))
+                .alignment(Alignment::Center)
+                .style(themed_style(ThemeRole::Warning).add_modifier(Modifier::BOLD)),
+            rows[1],
+        );
+    } else if let Some(details) = view.and_then(|view| view.details) {
         render_detail_content(provider_name, details, frame, rows[1]);
     }
     let overview_selected = view.is_some_and(|view| view.overview_selected);
