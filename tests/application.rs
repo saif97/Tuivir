@@ -31,7 +31,8 @@ use virtui::{
 
 mod common;
 use common::{
-    command_completed, command_request, detail_request, details_completed, ready_workspace,
+    command_completed, command_request, detail_request, details_completed, first_provider_detail,
+    ready_workspace,
     refresh_completed, refresh_request,
 };
 
@@ -2059,11 +2060,12 @@ fn settling_on_a_resource_does_not_load_snapshot_backed_overview() {
 #[test]
 fn a_detail_request_is_current_only_while_its_full_identity_remains_visible() {
     let mut app = App::new();
-    let request = detail_request(ready_workspace(
+    ready_workspace(
         &mut app,
         docker_discovery(),
         snapshot(&[("container-a", "api", "nginx:1.27")]),
-    ));
+    );
+    let request = first_provider_detail(&mut app);
 
     assert!(app.detail_request_is_current(&request));
 
@@ -2425,10 +2427,11 @@ fn selecting_an_image_routes_details_by_panel_and_resource() {
 fn stale_container_details_cannot_replace_selected_image_details() {
     let mut app = App::new();
     let initial = refresh_request(app.update(docker_discovery().into_event()));
-    let stale_container = detail_request(app.update(refresh_completed(
+    app.update(refresh_completed(
         initial,
         Ok(docker_multi_panel_snapshot()),
-    )));
+    ));
+    let stale_container = first_provider_detail(&mut app);
     let image_request = detail_request(app.invoke(Command::FocusResourcePanel(1)));
     app.update(details_completed(
         image_request,
@@ -2451,10 +2454,11 @@ fn stale_container_details_cannot_replace_selected_image_details() {
 fn the_detail_panel_reports_loading_and_then_the_providers_own_output() {
     let mut app = App::new();
     let initial = refresh_request(app.update(docker_discovery().into_event()));
-    let request = detail_request(app.update(refresh_completed(
+    app.update(refresh_completed(
         initial,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    )));
+    ));
+    let request = first_provider_detail(&mut app);
 
     let loading = render_to_text(app.state(), 100, 24);
     assert!(loading.contains("Loading Logs…"), "rendered:\n{loading}");
@@ -2571,13 +2575,14 @@ fn the_chosen_detail_view_survives_moving_to_another_resource() {
 fn a_late_result_for_the_previous_resource_cannot_replace_current_details() {
     let mut app = App::new();
     let initial = refresh_request(app.update(docker_discovery().into_event()));
-    let stale = detail_request(app.update(refresh_completed(
+    app.update(refresh_completed(
         initial,
         Ok(snapshot(&[
             ("container-a", "api", "nginx:1.27"),
             ("container-b", "worker", "alpine:3.21"),
         ])),
-    )));
+    ));
+    let stale = first_provider_detail(&mut app);
     let current = detail_request(app.invoke(Command::SelectNext));
     app.update(details_completed(
         current,
@@ -2600,10 +2605,11 @@ fn a_late_result_for_the_previous_resource_cannot_replace_current_details() {
 fn a_late_result_for_the_previous_detail_view_cannot_replace_current_details() {
     let mut app = App::new();
     let initial = refresh_request(app.update(docker_discovery().into_event()));
-    let stale = detail_request(app.update(refresh_completed(
+    app.update(refresh_completed(
         initial,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    )));
+    ));
+    let stale = first_provider_detail(&mut app);
     let current = detail_request(app.invoke(Command::NextDetailView));
     app.update(details_completed(
         current,
@@ -2624,17 +2630,19 @@ fn a_late_result_for_the_previous_detail_view_cannot_replace_current_details() {
 fn a_late_docker_detail_result_cannot_reach_the_active_incus_workspace() {
     let mut app = App::new();
     let docker_refresh = refresh_request(app.update(docker_discovery().into_event()));
-    let stale = detail_request(app.update(refresh_completed(
+    app.update(refresh_completed(
         docker_refresh,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    )));
+    ));
+    let stale = first_provider_detail(&mut app);
     app.update(incus_discovery().into_event());
     app.invoke(Command::FocusProviders);
     let incus_refresh = refresh_request(app.invoke(Command::NextWorkspace));
-    let incus_details = detail_request(app.update(refresh_completed(
+    app.update(refresh_completed(
         incus_refresh,
         Ok(incus_snapshot(&[("instance-a", "gateway", "Running")])),
-    )));
+    ));
+    let incus_details = first_provider_detail(&mut app);
     app.update(details_completed(
         incus_details,
         Ok(ResourceDetails::from_lines(["gateway is up"])),
