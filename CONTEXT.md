@@ -44,6 +44,10 @@ _Avoid_: Item, entity, provider object
 A provider-defined Pane containing one kind of Resource, such as Docker Containers or Images.
 _Avoid_: Resource pane, resource list
 
+**Volume**:
+An independently managed storage Resource, such as a Docker volume or an Incus custom storage volume. Storage owned as part of another Resource, a host path mounted into a Docker Sandbox, and a volume snapshot are not Volumes in Virtui.
+_Avoid_: Disk, mount, instance storage
+
 **Target Environment**:
 The environment already selected through a Provider's CLI configuration, such as a Docker context or an Incus remote and project. Some Providers do not select one.
 _Avoid_: Cluster, server, connection
@@ -73,7 +77,7 @@ An ongoing command shell attached to one Resource through a Detail View Tab. It 
 _Avoid_: Interactive Detail Session, shell panel, terminal tab
 
 **Resource State**:
-What a Provider reported a stateful Resource to be doing at the last refresh, in one vocabulary shared by every Provider: running, stopped, paused, transitioning, broken, or unknown. Each Provider Workspace maps its own status words into it, and an invoked Command carries it so Virtui never asks a Provider CLI for what it already knows. A stateless Resource has no Resource State; absence is not _unknown_. Only _stopped_ is positively determined; every other state, unknown included, means "not settled and stopped", so a Command that must treat those differently fails safe.
+What a Provider reported a stateful Resource to be doing at the last refresh, in one vocabulary shared by every Provider: running, stopped, paused, transitioning, broken, or unknown. Each Provider Workspace maps its own status words into it, and an invoked lifecycle Command carries it so Virtui never asks a Provider CLI for what it already knows. A stateless Resource has no Resource State; absence is not _unknown_. Only _stopped_ is positively determined; every other state, unknown included, means "not settled and stopped", so a Command that must treat those differently fails safe.
 _Avoid_: Status, run state, power state, phase
 
 **Interactive Shell**:
