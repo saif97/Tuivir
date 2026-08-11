@@ -87,7 +87,7 @@ pub trait ProviderWorkspace: Send + Sync {
         cli: &'a dyn CliRunner,
     ) -> Pin<Box<dyn Future<Output = Result<WorkspaceSnapshot, WorkspaceError>> + Send + 'a>>;
 
-    /// Runs one lifecycle Command against a Resource.
+    /// Runs one Command against a Resource.
     ///
     /// `state` is what the last refresh reported for that Resource, so a
     /// Command that must behave differently for a running Resource can do so
@@ -97,7 +97,7 @@ pub trait ProviderWorkspace: Send + Sync {
         cli: &'a dyn CliRunner,
         target: &'a ResourceTarget,
         command: ResourceCommand,
-        state: ResourceState,
+        state: Option<ResourceState>,
     ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>>;
 
     /// Loads one of the detail views this workspace declared for a Resource.

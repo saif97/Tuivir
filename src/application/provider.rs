@@ -70,7 +70,7 @@ pub enum ProviderRequest {
         command: ResourceCommand,
         /// What the last refresh reported for this Resource, carried here so
         /// the Provider Workspace never re-queries it while dispatching.
-        state: ResourceState,
+        state: Option<ResourceState>,
     },
     /// Loads one detail view for one Resource.
     ///

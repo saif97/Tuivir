@@ -218,7 +218,7 @@ impl ProviderWorkspace for DockerWorkspace {
         cli: &'a dyn CliRunner,
         target: &'a ResourceTarget,
         command: ResourceCommand,
-        state: ResourceState,
+        state: Option<ResourceState>,
     ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
             let panel_id = target.panel_id();
@@ -239,6 +239,11 @@ impl ProviderWorkspace for DockerWorkspace {
             // Docker removes a container plainly only from a stopped state; a
             // running, paused, or restarting one needs the force the user
             // already confirmed.
+            let Some(state) = state else {
+                return Err(WorkspaceError::new(format!(
+                    "Docker cannot {command} container {resource_id} without its last reported Resource State"
+                )));
+            };
             if command == ResourceCommand::Delete && state != ResourceState::Stopped {
                 args.push("--force");
             }

@@ -162,8 +162,10 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
         // before the single confirmation that authorises both. The wording
         // stays on the outcome: a paused or restarting Resource is not running,
         // but removing it still stops it.
-        if confirmation.state != ResourceState::Stopped {
-            lines.push(Line::from("It will be stopped and removed."));
+        match confirmation.state {
+            Some(ResourceState::Stopped) => {}
+            Some(_) => lines.push(Line::from("It will be stopped and removed.")),
+            None => lines.push(Line::from("It will be permanently removed.")),
         }
         lines.push(Line::from("Press y/Enter to confirm or n/Esc to cancel."));
         frame.render_widget(

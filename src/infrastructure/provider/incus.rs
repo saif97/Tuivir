@@ -139,7 +139,7 @@ impl ProviderWorkspace for IncusWorkspace {
         cli: &'a dyn CliRunner,
         target: &'a ResourceTarget,
         command: ResourceCommand,
-        state: ResourceState,
+        state: Option<ResourceState>,
     ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
             let panel_id = target.panel_id();
@@ -159,6 +159,11 @@ impl ProviderWorkspace for IncusWorkspace {
             let mut args = vec![verb];
             // Incus deletes an instance plainly only from a stopped state; a
             // running or frozen one needs the force the user already confirmed.
+            let Some(state) = state else {
+                return Err(WorkspaceError::new(format!(
+                    "Incus cannot {command} instance {resource_id} without its last reported Resource State"
+                )));
+            };
             if command == ResourceCommand::Delete && state != ResourceState::Stopped {
                 args.push("--force");
             }

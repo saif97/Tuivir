@@ -305,11 +305,16 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
         cli: &'a dyn CliRunner,
         target: &'a ResourceTarget,
         command: ResourceCommand,
-        _state: ResourceState,
+        _state: Option<ResourceState>,
     ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
             let panel_id = target.panel_id();
             let resource_id = target.resource_id();
+            if _state.is_none() {
+                return Err(WorkspaceError::new(format!(
+                    "Docker Sandbox cannot {command} sandbox {resource_id} without its last reported Resource State"
+                )));
+            }
             if panel_id.0 != SANDBOXES_PANEL_ID {
                 return Err(WorkspaceError::new(format!(
                     "Docker Sandbox has no {command} command for Resource Panel {panel_id}"
