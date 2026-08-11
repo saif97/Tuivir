@@ -1438,6 +1438,12 @@ fn deleting_a_stateless_resource_confirms_permanent_removal_before_dispatch() {
     let mut app = App::new();
     ready_workspace(&mut app, docker_discovery(), stateless_snapshot());
 
+    let workspace = render_to_text(app.state(), 100, 24);
+    assert!(
+        workspace.contains("cache · local"),
+        "rendered screen:\n{workspace}"
+    );
+
     let (_, delete_requests) = handle_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE),
@@ -1945,6 +1951,7 @@ fn stateless_snapshot() -> WorkspaceSnapshot {
             resources: vec![Resource {
                 id: ResourceId::new("cache-volume"),
                 name: "cache".to_owned(),
+                secondary_text: Some("local".to_owned()),
                 status: None,
                 state: None,
                 fields: Vec::new(),
@@ -1991,6 +1998,7 @@ fn container_snapshot(
                 .map(|(id, name, image)| Resource {
                     id: ResourceId((*id).to_owned()),
                     name: (*name).to_owned(),
+                    secondary_text: None,
                     status: Some(status.to_owned()),
                     state: Some(state),
                     fields: vec![("Image", (*image).to_owned())],
@@ -2022,6 +2030,7 @@ fn incus_snapshot(instances: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
                     Resource {
                         id: ResourceId((*id).to_owned()),
                         name: (*name).to_owned(),
+                        secondary_text: None,
                         status: Some((*status).to_owned()),
                         state: Some(if running {
                             ResourceState::Running
@@ -2065,6 +2074,7 @@ fn docker_multi_panel_snapshot() -> WorkspaceSnapshot {
                 resources: vec![Resource {
                     id: ResourceId::new("shared-id"),
                     name: "api".to_owned(),
+                    secondary_text: None,
                     status: Some("running".to_owned()),
                     state: Some(ResourceState::Running),
                     fields: vec![
@@ -2090,6 +2100,7 @@ fn docker_multi_panel_snapshot() -> WorkspaceSnapshot {
                 resources: vec![Resource {
                     id: ResourceId::new("shared-id"),
                     name: "nginx:1.27".to_owned(),
+                    secondary_text: None,
                     status: None,
                     state: None,
                     fields: vec![

@@ -358,7 +358,7 @@ fn render_resource_panel(
                 || resource.state.map(resource_state_symbol).unwrap_or(" "),
                 |_| "*",
             );
-            let spans = vec![
+            let mut spans = vec![
                 Span::styled(
                     state,
                     running.map_or_else(
@@ -373,6 +373,10 @@ fn render_resource_panel(
                 Span::raw(" "),
                 Span::raw(resource.name.as_str()),
             ];
+            if let Some(secondary_text) = &resource.secondary_text {
+                spans.push(Span::raw(" · "));
+                spans.push(Span::raw(secondary_text.as_str()));
+            }
             let style = selected.then(|| {
                 Style::default().bg(theme_colour(if focused {
                     ThemeRole::Selection

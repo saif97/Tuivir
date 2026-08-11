@@ -89,6 +89,8 @@ pub enum ProviderRequest {
 pub struct Resource {
     pub id: ResourceId,
     pub name: String,
+    /// Provider-defined text rendered inline after the Resource name.
+    pub secondary_text: Option<String>,
     /// Provider-defined status text shown next to the resource in the list.
     pub status: Option<String>,
     /// The provider-neutral reading of `status` that application policy uses.

@@ -146,6 +146,7 @@ impl ProviderWorkspace for DockerWorkspace {
                     Ok(Resource {
                         id: ResourceId::new(row.id),
                         name: row.names,
+                        secondary_text: None,
                         status: Some(row.state),
                         state: Some(state),
                         fields: vec![("Image", row.image), ("Status", row.status)],
@@ -179,6 +180,7 @@ impl ProviderWorkspace for DockerWorkspace {
                     Ok(Resource {
                         id: ResourceId::new(name.clone()),
                         name,
+                        secondary_text: None,
                         status: None,
                         state: None,
                         fields: vec![

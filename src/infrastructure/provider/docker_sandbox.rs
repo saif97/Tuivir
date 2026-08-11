@@ -276,6 +276,7 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
                     Resource {
                         id: ResourceId::new(&row.name),
                         name: row.name,
+                        secondary_text: None,
                         status: Some(row.status),
                         state: Some(state),
                         fields,

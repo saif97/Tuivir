@@ -187,6 +187,7 @@ fn running_container() -> WorkspaceSnapshot {
             resources: vec![Resource {
                 id: ResourceId::new("container-a"),
                 name: "api".to_owned(),
+                secondary_text: None,
                 status: Some("running".to_owned()),
                 state: Some(ResourceState::Running),
                 fields: vec![("Image", "nginx:1.27".to_owned())],
