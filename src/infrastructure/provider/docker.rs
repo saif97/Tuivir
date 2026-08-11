@@ -21,6 +21,7 @@ const IMAGE_REFRESH_HELP: &str =
     "Run `docker image ls` to verify access to the current Target Environment.";
 const CONTAINERS_PANEL_ID: &str = "containers";
 const IMAGES_PANEL_ID: &str = "images";
+const VOLUMES_PANEL_ID: &str = "volumes";
 const LOGS_VIEW_ID: &str = "logs";
 const STATS_VIEW_ID: &str = "stats";
 const INSPECT_VIEW_ID: &str = "inspect";
@@ -51,6 +52,20 @@ struct ImageRow {
     tag: String,
     #[serde(rename = "Size")]
     size: String,
+}
+
+#[derive(Deserialize)]
+struct VolumeRow {
+    #[serde(rename = "Driver")]
+    driver: String,
+    #[serde(rename = "Labels")]
+    labels: String,
+    #[serde(rename = "Mountpoint")]
+    mountpoint: String,
+    #[serde(rename = "Name")]
+    name: String,
+    #[serde(rename = "Scope")]
+    scope: String,
 }
 
 impl ProviderWorkspace for DockerWorkspace {
@@ -94,7 +109,7 @@ impl ProviderWorkspace for DockerWorkspace {
         Box::pin(async move {
             // Two independent listings, so they wait on Docker together rather
             // than one after the other.
-            let (containers, images) = tokio::try_join!(
+            let (containers, images, volumes) = tokio::try_join!(
                 async {
                     cli.run(ProcessSpec::new(
                         "docker",
@@ -124,6 +139,20 @@ impl ProviderWorkspace for DockerWorkspace {
                     .await
                     .map_err(|error| {
                         refresh_failure(error, "Docker could not list images", IMAGE_REFRESH_HELP)
+                    })
+                },
+                async {
+                    cli.run(ProcessSpec::new(
+                        "docker",
+                        &["volume", "ls", "--format", "{{json .}}"],
+                    ))
+                    .await
+                    .map_err(|error| {
+                        refresh_failure(
+                            error,
+                            "Docker could not list volumes",
+                            "Run `docker volume ls` to verify access to the current Target Environment.",
+                        )
                     })
                 },
             )?;
@@ -156,6 +185,37 @@ impl ProviderWorkspace for DockerWorkspace {
                     })
                 })
                 .collect::<Result<Vec<_>, WorkspaceError>>()?;
+
+            let mut volume_resources = volumes
+                .stdout
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .map(|line| {
+                    let row: VolumeRow = serde_json::from_str(line).map_err(|error| {
+                        refresh_error(
+                            format!("Docker returned malformed volume data: {error}"),
+                            "Run `docker volume ls` to verify access to the current Target Environment.",
+                        )
+                    })?;
+                    Ok(Resource {
+                        id: ResourceId::new(row.name.clone()),
+                        name: row.name,
+                        secondary_text: Some(row.driver.clone()),
+                        status: None,
+                        state: None,
+                        fields: vec![
+                            ("Driver", row.driver),
+                            ("Scope", row.scope),
+                            ("Mountpoint", row.mountpoint),
+                            ("Labels", row.labels),
+                        ],
+                        snapshot_details: Vec::new(),
+                        available_commands: &[ResourceCommand::Delete],
+                        shell: None,
+                    })
+                })
+                .collect::<Result<Vec<_>, WorkspaceError>>()?;
+            volume_resources.sort_by(|left, right| left.name.cmp(&right.name));
 
             let image_resources = images
                 .stdout
@@ -209,6 +269,12 @@ impl ProviderWorkspace for DockerWorkspace {
                         title: "Images".to_owned(),
                         detail_views: vec![DetailView::new(INSPECT_VIEW_ID, "Inspect")],
                         resources: image_resources,
+                    },
+                    ResourcePanel {
+                        id: ResourcePanelId::new(VOLUMES_PANEL_ID),
+                        title: "Volumes".to_owned(),
+                        detail_views: vec![DetailView::new(INSPECT_VIEW_ID, "Inspect")],
+                        resources: volume_resources,
                     },
                 ],
             })

@@ -35,6 +35,14 @@ fn image_ls() -> ProcessSpec {
     )
 }
 
+fn volume_ls() -> ProcessSpec {
+    ProcessSpec::new("docker", &["volume", "ls", "--format", "{{json .}}"])
+}
+
+fn empty_volume_ls() -> (ProcessSpec, Result<ProcessOutput, ProcessError>) {
+    (volume_ls(), success(""))
+}
+
 #[tokio::test]
 async fn docker_restart_generates_the_expected_cli_request() {
     let cli = FixtureCli::new([(
@@ -182,6 +190,7 @@ async fn docker_maps_every_container_state_into_the_shared_vocabulary() {
             success(include_str!("fixtures/docker/mixed-state-containers.jsonl")),
         ),
         (image_ls(), success("")),
+        empty_volume_ls(),
     ]);
 
     let snapshot = DockerWorkspace
@@ -226,6 +235,7 @@ async fn only_a_running_container_carries_an_interactive_shell() {
             success(include_str!("fixtures/docker/mixed-state-containers.jsonl")),
         ),
         (image_ls(), success("")),
+        empty_volume_ls(),
     ]);
 
     let snapshot = DockerWorkspace
@@ -264,6 +274,7 @@ async fn only_a_paused_container_offers_the_resume_command() {
             success(include_str!("fixtures/docker/mixed-state-containers.jsonl")),
         ),
         (image_ls(), success("")),
+        empty_volume_ls(),
     ]);
 
     let snapshot = DockerWorkspace
@@ -304,6 +315,7 @@ async fn the_containers_panel_declares_dockers_native_detail_views() {
             success(include_str!("fixtures/docker/containers.jsonl")),
         ),
         (image_ls(), success("")),
+        empty_volume_ls(),
     ]);
 
     let snapshot = DockerWorkspace
@@ -333,6 +345,7 @@ async fn docker_declares_images_after_containers_with_native_stateless_rows() {
             image_ls(),
             success(include_str!("fixtures/docker/images.jsonl")),
         ),
+        empty_volume_ls(),
     ]);
 
     let snapshot = DockerWorkspace
@@ -346,7 +359,11 @@ async fn docker_declares_images_after_containers_with_native_stateless_rows() {
             .iter()
             .map(|panel| (panel.id.0.as_str(), panel.title.as_str()))
             .collect::<Vec<_>>(),
-        [("containers", "Containers"), ("images", "Images")]
+        [
+            ("containers", "Containers"),
+            ("images", "Images"),
+            ("volumes", "Volumes"),
+        ]
     );
     let images = &snapshot.panels[1];
     assert_eq!(
@@ -377,6 +394,77 @@ async fn docker_declares_images_after_containers_with_native_stateless_rows() {
     );
 }
 
+#[tokio::test]
+async fn docker_declares_volumes_after_images_with_native_stateless_rows() {
+    let cli = FixtureCli::new([
+        (container_ls(), success("")),
+        (image_ls(), success("")),
+        (
+            volume_ls(),
+            success(include_str!("fixtures/docker/volumes.jsonl")),
+        ),
+    ]);
+
+    let snapshot = DockerWorkspace
+        .refresh(&cli)
+        .await
+        .expect("fixture lists Docker resources");
+
+    assert_eq!(
+        snapshot
+            .panels
+            .iter()
+            .map(|panel| (panel.id.0.as_str(), panel.title.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("containers", "Containers"),
+            ("images", "Images"),
+            ("volumes", "Volumes"),
+        ]
+    );
+    let volumes = &snapshot.panels[2];
+    assert_eq!(
+        volumes
+            .detail_views
+            .iter()
+            .map(|view| (view.id.0.as_str(), view.title.as_str()))
+            .collect::<Vec<_>>(),
+        [("inspect", "Inspect")]
+    );
+    assert_eq!(
+        volumes
+            .resources
+            .iter()
+            .map(|volume| (
+                volume.id.0.as_str(),
+                volume.name.as_str(),
+                volume.secondary_text.as_deref(),
+                volume.state,
+                volume.status.as_deref(),
+                volume.available_commands,
+            ))
+            .collect::<Vec<_>>(),
+        [
+            (
+                "anonymous-volume",
+                "anonymous-volume",
+                Some("local"),
+                None,
+                None,
+                &[ResourceCommand::Delete][..],
+            ),
+            (
+                "named-volume",
+                "named-volume",
+                Some("nfs"),
+                None,
+                None,
+                &[ResourceCommand::Delete][..],
+            ),
+        ]
+    );
+}
+
 /// Docker lists one row per tag, so a twice-tagged image repeats its digest.
 /// Identifying rows by the digest would make two Resources indistinguishable:
 /// both would draw as selected, and selection could never move past the first.
@@ -388,6 +476,7 @@ async fn images_sharing_a_digest_are_distinct_resources() {
             image_ls(),
             success(include_str!("fixtures/docker/images.jsonl")),
         ),
+        empty_volume_ls(),
     ]);
 
     let snapshot = DockerWorkspace
@@ -432,14 +521,18 @@ async fn images_sharing_a_digest_are_distinct_resources() {
 
 #[tokio::test]
 async fn docker_keeps_an_empty_images_panel() {
-    let cli = FixtureCli::new([(container_ls(), success("")), (image_ls(), success("\n"))]);
+    let cli = FixtureCli::new([
+        (container_ls(), success("")),
+        (image_ls(), success("\n")),
+        empty_volume_ls(),
+    ]);
 
     let snapshot = DockerWorkspace
         .refresh(&cli)
         .await
         .expect("empty image output is valid");
 
-    assert_eq!(snapshot.panels.len(), 2);
+    assert_eq!(snapshot.panels.len(), 3);
     assert!(snapshot.panels[1].resources.is_empty());
     assert_eq!(snapshot.panels[1].id, ResourcePanelId::new("images"));
 }
@@ -452,6 +545,7 @@ async fn malformed_image_output_becomes_an_actionable_workspace_error() {
             image_ls(),
             success(include_str!("fixtures/docker/malformed-images.jsonl")),
         ),
+        empty_volume_ls(),
     ]);
 
     let error = DockerWorkspace
@@ -762,6 +856,7 @@ async fn discovered_docker_workspace_renders_target_environment_and_containers()
             success(include_str!("fixtures/docker/containers.jsonl")),
         ),
         (image_ls(), success("")),
+        empty_volume_ls(),
     ]);
     let docker = DockerWorkspace;
 
@@ -813,6 +908,7 @@ async fn reachable_docker_without_containers_renders_a_distinct_empty_state() {
             success(""),
         ),
         (image_ls(), success("")),
+        empty_volume_ls(),
     ]);
     let docker = DockerWorkspace;
     let discovered = docker.discover(&cli).await.expect("Docker is installed");
@@ -996,6 +1092,7 @@ async fn malformed_docker_output_becomes_an_actionable_workspace_error() {
             success(include_str!("fixtures/docker/malformed-containers.jsonl")),
         ),
         (image_ls(), success("")),
+        empty_volume_ls(),
     ]);
     let docker = DockerWorkspace;
 
