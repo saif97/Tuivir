@@ -577,6 +577,32 @@ async fn image_inspect_is_routed_through_the_images_panel() {
     assert_eq!(details.lines, ["[{\"Id\":\"sha256:111\"}]"]);
 }
 
+#[tokio::test]
+async fn volume_inspect_and_plain_delete_are_routed_through_the_volumes_panel() {
+    let cli = FixtureCli::new([
+        (
+            ProcessSpec::new("docker", &["volume", "inspect", "named-volume"]),
+            success("[{\"Name\":\"named-volume\"}]\n"),
+        ),
+        (
+            ProcessSpec::new("docker", &["volume", "rm", "named-volume"]),
+            success("named-volume\n"),
+        ),
+    ]);
+    let target = resource_target("volumes", "named-volume");
+
+    let details = DockerWorkspace
+        .load_details(&cli, &target, &DetailViewId::new("inspect"))
+        .await
+        .expect("Docker volume inspect loads");
+    assert_eq!(details.lines, ["[{\"Name\":\"named-volume\"}]"]);
+
+    DockerWorkspace
+        .execute_command(&cli, &target, ResourceCommand::Delete, None)
+        .await
+        .expect("Docker removes a stateless volume without force");
+}
+
 /// Each declared view runs exactly one Docker command. The fixture answers one
 /// request and panics on any other, so a view that loaded more than the one on
 /// screen would fail here.

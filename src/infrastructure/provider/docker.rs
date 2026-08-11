@@ -291,6 +291,21 @@ impl ProviderWorkspace for DockerWorkspace {
         Box::pin(async move {
             let panel_id = target.panel_id();
             let resource_id = target.resource_id();
+            if panel_id.0 == VOLUMES_PANEL_ID && command == ResourceCommand::Delete {
+                cli.run(ProcessSpec::new(
+                    "docker",
+                    &["volume", "rm", resource_id.0.as_str()],
+                ))
+                .await
+                .map_err(|error| {
+                    WorkspaceError::new(provider_cli_error(
+                        PROVIDER_NAME,
+                        &error,
+                        &format!("Docker could not {command} volume {resource_id}"),
+                    ))
+                })?;
+                return Ok(());
+            }
             if panel_id.0 != CONTAINERS_PANEL_ID {
                 return Err(WorkspaceError::new(format!(
                     "Docker has no {command} command for Resource Panel {panel_id}"
@@ -343,6 +358,10 @@ impl ProviderWorkspace for DockerWorkspace {
                 IMAGES_PANEL_ID if view_id.0 == INSPECT_VIEW_ID => (
                     "image",
                     Some(vec!["image", "inspect", resource_id.0.as_str()]),
+                ),
+                VOLUMES_PANEL_ID if view_id.0 == INSPECT_VIEW_ID => (
+                    "volume",
+                    Some(vec!["volume", "inspect", resource_id.0.as_str()]),
                 ),
                 _ => (panel_id.0.as_str(), None),
             };
