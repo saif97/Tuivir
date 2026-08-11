@@ -9,7 +9,7 @@ use crate::{
         DetailView, DetailViewId, Provider, ProviderDiscovery, ProviderId, ProviderWorkspace,
         Resource, ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourcePanelId,
         ResourceState, ResourceTarget, TargetEnvironment, WorkspaceError, WorkspaceSnapshot,
-        provider_cli_error,
+        provider_cli_error, require_resource_state,
     },
 };
 
@@ -109,6 +109,7 @@ impl ProviderWorkspace for IncusWorkspace {
                     Resource {
                         id: ResourceId::new(&row.name),
                         name: row.name,
+                        secondary_text: None,
                         status: Some(row.status),
                         state: Some(state),
                         fields: vec![
@@ -139,7 +140,7 @@ impl ProviderWorkspace for IncusWorkspace {
         cli: &'a dyn CliRunner,
         target: &'a ResourceTarget,
         command: ResourceCommand,
-        state: ResourceState,
+        state: Option<ResourceState>,
     ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
             let panel_id = target.panel_id();
@@ -159,6 +160,8 @@ impl ProviderWorkspace for IncusWorkspace {
             let mut args = vec![verb];
             // Incus deletes an instance plainly only from a stopped state; a
             // running or frozen one needs the force the user already confirmed.
+            let state =
+                require_resource_state(state, PROVIDER_NAME, "instance", command, resource_id)?;
             if command == ResourceCommand::Delete && state != ResourceState::Stopped {
                 args.push("--force");
             }

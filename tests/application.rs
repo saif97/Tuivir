@@ -645,7 +645,7 @@ fn resume_key_dispatches_for_a_paused_container_and_carries_its_state() {
             provider_id,
             target,
             command: ResourceCommand::Resume,
-            state: ResourceState::Paused,
+            state: Some(ResourceState::Paused),
             ..
         }] if provider_id == &ProviderId::new("docker")
             && target == &ResourceTarget::new(
@@ -1434,6 +1434,73 @@ fn delete_requires_target_identifying_confirmation_before_dispatch() {
 }
 
 #[test]
+fn deleting_a_stateless_resource_confirms_permanent_removal_before_dispatch() {
+    let mut app = App::new();
+    ready_workspace(&mut app, docker_discovery(), stateless_snapshot());
+
+    let workspace = render_to_text(app.state(), 100, 24);
+    assert!(
+        workspace.contains("cache · local"),
+        "rendered screen:\n{workspace}"
+    );
+
+    let (_, delete_requests) = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE),
+    );
+    assert!(
+        delete_requests.is_empty(),
+        "no provider process runs before confirmation"
+    );
+
+    let confirmation = render_to_text(app.state(), 100, 24);
+    assert!(
+        confirmation.contains("Delete Docker resource cache (cache-volume)?"),
+        "rendered screen:\n{confirmation}"
+    );
+    assert!(
+        confirmation.contains("It will be permanently removed."),
+        "rendered screen:\n{confirmation}"
+    );
+    assert!(
+        !confirmation.contains("It will be stopped and removed."),
+        "rendered screen:\n{confirmation}"
+    );
+
+    let (_, confirmed_requests) = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE),
+    );
+    assert!(matches!(
+        confirmed_requests.as_slice(),
+        [ProviderRequest::ExecuteResourceCommand {
+            provider_id,
+            target,
+            command: ResourceCommand::Delete,
+            state: None,
+            ..
+        }] if provider_id == &ProviderId::new("docker")
+            && target == &ResourceTarget::new(
+                ResourcePanelId::new("volumes"),
+                ResourceId::new("cache-volume"),
+            )
+    ));
+}
+
+#[test]
+fn cancelling_a_stateless_resource_deletion_dispatches_nothing() {
+    let mut app = App::new();
+    ready_workspace(&mut app, docker_discovery(), stateless_snapshot());
+
+    assert!(
+        app.invoke(Command::Resource(ResourceCommand::Delete))
+            .is_empty()
+    );
+    assert!(app.invoke(Command::Cancel).is_empty());
+    assert!(app.state().confirmation.is_none());
+}
+
+#[test]
 fn a_delete_confirmation_is_a_raised_warning_surface() {
     let mut app = App::new();
     ready_workspace(
@@ -1528,7 +1595,7 @@ fn confirming_a_running_resource_warns_it_is_stopped_and_dispatches_its_state() 
         confirmed_requests.as_slice(),
         [ProviderRequest::ExecuteResourceCommand {
             command: ResourceCommand::Delete,
-            state: ResourceState::Running,
+            state: Some(ResourceState::Running),
             ..
         }]
     ));
@@ -1567,7 +1634,7 @@ fn confirming_a_paused_resource_warns_it_is_stopped_and_dispatches_its_state() {
         confirmed_requests.as_slice(),
         [ProviderRequest::ExecuteResourceCommand {
             command: ResourceCommand::Delete,
-            state: ResourceState::Paused,
+            state: Some(ResourceState::Paused),
             ..
         }]
     ));
@@ -1604,7 +1671,7 @@ fn confirming_a_stopped_resource_promises_no_stop_and_dispatches_its_state() {
         confirmed_requests.as_slice(),
         [ProviderRequest::ExecuteResourceCommand {
             command: ResourceCommand::Delete,
-            state: ResourceState::Stopped,
+            state: Some(ResourceState::Stopped),
             ..
         }]
     ));
@@ -1888,6 +1955,27 @@ fn snapshot(containers: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
     container_snapshot(containers, ResourceState::Running)
 }
 
+fn stateless_snapshot() -> WorkspaceSnapshot {
+    WorkspaceSnapshot {
+        panels: vec![ResourcePanel {
+            id: ResourcePanelId::new("volumes"),
+            title: "Volumes".to_owned(),
+            detail_views: Vec::new(),
+            resources: vec![Resource {
+                id: ResourceId::new("cache-volume"),
+                name: "cache".to_owned(),
+                secondary_text: Some("local".to_owned()),
+                status: None,
+                state: None,
+                fields: Vec::new(),
+                snapshot_details: Vec::new(),
+                available_commands: &[ResourceCommand::Delete],
+                shell: None,
+            }],
+        }],
+    }
+}
+
 fn stopped_snapshot(containers: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
     container_snapshot(containers, ResourceState::Stopped)
 }
@@ -1923,6 +2011,7 @@ fn container_snapshot(
                 .map(|(id, name, image)| Resource {
                     id: ResourceId((*id).to_owned()),
                     name: (*name).to_owned(),
+                    secondary_text: None,
                     status: Some(status.to_owned()),
                     state: Some(state),
                     fields: vec![("Image", (*image).to_owned())],
@@ -1954,6 +2043,7 @@ fn incus_snapshot(instances: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
                     Resource {
                         id: ResourceId((*id).to_owned()),
                         name: (*name).to_owned(),
+                        secondary_text: None,
                         status: Some((*status).to_owned()),
                         state: Some(if running {
                             ResourceState::Running
@@ -1997,6 +2087,7 @@ fn docker_multi_panel_snapshot() -> WorkspaceSnapshot {
                 resources: vec![Resource {
                     id: ResourceId::new("shared-id"),
                     name: "api".to_owned(),
+                    secondary_text: None,
                     status: Some("running".to_owned()),
                     state: Some(ResourceState::Running),
                     fields: vec![
@@ -2022,6 +2113,7 @@ fn docker_multi_panel_snapshot() -> WorkspaceSnapshot {
                 resources: vec![Resource {
                     id: ResourceId::new("shared-id"),
                     name: "nginx:1.27".to_owned(),
+                    secondary_text: None,
                     status: None,
                     state: None,
                     fields: vec![

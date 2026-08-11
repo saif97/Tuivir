@@ -12,6 +12,7 @@ fn resource(id: &str, name: &str) -> Resource {
     Resource {
         id: ResourceId::new(id),
         name: name.to_owned(),
+        secondary_text: None,
         status: None,
         state: None,
         fields: Vec::new(),

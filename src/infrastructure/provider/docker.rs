@@ -9,7 +9,7 @@ use crate::{
         DetailView, DetailViewId, Provider, ProviderDiscovery, ProviderId, ProviderWorkspace,
         Resource, ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourcePanelId,
         ResourceState, ResourceTarget, TargetEnvironment, WorkspaceError, WorkspaceSnapshot,
-        provider_cli_error,
+        provider_cli_error, require_resource_state,
     },
 };
 
@@ -146,6 +146,7 @@ impl ProviderWorkspace for DockerWorkspace {
                     Ok(Resource {
                         id: ResourceId::new(row.id),
                         name: row.names,
+                        secondary_text: None,
                         status: Some(row.state),
                         state: Some(state),
                         fields: vec![("Image", row.image), ("Status", row.status)],
@@ -179,6 +180,7 @@ impl ProviderWorkspace for DockerWorkspace {
                     Ok(Resource {
                         id: ResourceId::new(name.clone()),
                         name,
+                        secondary_text: None,
                         status: None,
                         state: None,
                         fields: vec![
@@ -218,7 +220,7 @@ impl ProviderWorkspace for DockerWorkspace {
         cli: &'a dyn CliRunner,
         target: &'a ResourceTarget,
         command: ResourceCommand,
-        state: ResourceState,
+        state: Option<ResourceState>,
     ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
             let panel_id = target.panel_id();
@@ -239,6 +241,8 @@ impl ProviderWorkspace for DockerWorkspace {
             // Docker removes a container plainly only from a stopped state; a
             // running, paused, or restarting one needs the force the user
             // already confirmed.
+            let state =
+                require_resource_state(state, PROVIDER_NAME, "container", command, resource_id)?;
             if command == ResourceCommand::Delete && state != ResourceState::Stopped {
                 args.push("--force");
             }

@@ -70,7 +70,7 @@ pub enum ProviderRequest {
         command: ResourceCommand,
         /// What the last refresh reported for this Resource, carried here so
         /// the Provider Workspace never re-queries it while dispatching.
-        state: ResourceState,
+        state: Option<ResourceState>,
     },
     /// Loads one detail view for one Resource.
     ///
@@ -89,6 +89,8 @@ pub enum ProviderRequest {
 pub struct Resource {
     pub id: ResourceId,
     pub name: String,
+    /// Provider-defined text rendered inline after the Resource name.
+    pub secondary_text: Option<String>,
     /// Provider-defined status text shown next to the resource in the list.
     pub status: Option<String>,
     /// The provider-neutral reading of `status` that application policy uses.

@@ -162,8 +162,10 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
         // before the single confirmation that authorises both. The wording
         // stays on the outcome: a paused or restarting Resource is not running,
         // but removing it still stops it.
-        if confirmation.state != ResourceState::Stopped {
-            lines.push(Line::from("It will be stopped and removed."));
+        match confirmation.state {
+            Some(ResourceState::Stopped) => {}
+            Some(_) => lines.push(Line::from("It will be stopped and removed.")),
+            None => lines.push(Line::from("It will be permanently removed.")),
         }
         lines.push(Line::from("Press y/Enter to confirm or n/Esc to cancel."));
         frame.render_widget(
@@ -356,7 +358,7 @@ fn render_resource_panel(
                 || resource.state.map(resource_state_symbol).unwrap_or(" "),
                 |_| "*",
             );
-            let spans = vec![
+            let mut spans = vec![
                 Span::styled(
                     state,
                     running.map_or_else(
@@ -371,6 +373,10 @@ fn render_resource_panel(
                 Span::raw(" "),
                 Span::raw(resource.name.as_str()),
             ];
+            if let Some(secondary_text) = &resource.secondary_text {
+                spans.push(Span::raw(" · "));
+                spans.push(Span::raw(secondary_text.as_str()));
+            }
             let style = selected.then(|| {
                 Style::default().bg(theme_colour(if focused {
                     ThemeRole::Selection

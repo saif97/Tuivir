@@ -208,7 +208,7 @@ async fn starting_a_sandbox_generates_the_expected_cli_request() {
             &cli,
             &resource_target("sandboxes", "shell-dotfiles"),
             ResourceCommand::Start,
-            ResourceState::Stopped,
+            Some(ResourceState::Stopped),
         )
         .await
         .expect("Docker Sandbox start succeeds");
@@ -226,7 +226,7 @@ async fn stopping_a_sandbox_generates_the_expected_cli_request() {
             &cli,
             &resource_target("sandboxes", "claude-virtui"),
             ResourceCommand::Stop,
-            ResourceState::Running,
+            Some(ResourceState::Running),
         )
         .await
         .expect("Docker Sandbox stop succeeds");
@@ -256,7 +256,7 @@ async fn deleting_a_sandbox_always_forces_regardless_of_state() {
                 &cli,
                 &resource_target("sandboxes", "claude-virtui"),
                 ResourceCommand::Delete,
-                state,
+                Some(state),
             )
             .await
             .unwrap_or_else(|error| panic!("delete from {state:?} succeeds: {error:?}"));
@@ -276,7 +276,7 @@ async fn a_command_sbx_cannot_perform_is_refused_without_running_anything() {
                 &cli,
                 &resource_target("sandboxes", "claude-virtui"),
                 command,
-                ResourceState::Running,
+                Some(ResourceState::Running),
             )
             .await
             .unwrap_err();
@@ -621,7 +621,7 @@ async fn a_failed_command_reports_what_sbx_wrote_to_stderr() {
             &cli,
             &resource_target("sandboxes", "claude-virtui"),
             ResourceCommand::Stop,
-            ResourceState::Running,
+            Some(ResourceState::Running),
         )
         .await
         .expect_err("a non-zero exit is never a success");
@@ -647,7 +647,7 @@ async fn a_silent_command_failure_names_the_provider_command_and_sandbox() {
             &cli,
             &resource_target("sandboxes", "claude-virtui"),
             ResourceCommand::Delete,
-            ResourceState::Running,
+            Some(ResourceState::Running),
         )
         .await
         .expect_err("a non-zero exit is never a success");

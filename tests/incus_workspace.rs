@@ -77,7 +77,7 @@ async fn incus_start_generates_the_expected_cli_request() {
             &cli,
             &resource_target("instances", "instance-a"),
             ResourceCommand::Start,
-            ResourceState::Stopped,
+            Some(ResourceState::Stopped),
         )
         .await
         .expect("Incus start succeeds");
@@ -95,7 +95,7 @@ async fn incus_stop_generates_the_expected_cli_request() {
             &cli,
             &resource_target("instances", "instance-a"),
             ResourceCommand::Stop,
-            ResourceState::Running,
+            Some(ResourceState::Running),
         )
         .await
         .expect("Incus stop succeeds");
@@ -113,7 +113,7 @@ async fn incus_restart_generates_the_expected_cli_request() {
             &cli,
             &resource_target("instances", "instance-a"),
             ResourceCommand::Restart,
-            ResourceState::Running,
+            Some(ResourceState::Running),
         )
         .await
         .expect("Incus restart succeeds");
@@ -131,7 +131,7 @@ async fn incus_resume_generates_the_expected_cli_request() {
             &cli,
             &resource_target("instances", "instance-a"),
             ResourceCommand::Resume,
-            ResourceState::Paused,
+            Some(ResourceState::Paused),
         )
         .await
         .expect("Incus resume succeeds");
@@ -149,7 +149,7 @@ async fn deleting_a_stopped_instance_generates_the_expected_cli_request() {
             &cli,
             &resource_target("instances", "instance-a"),
             ResourceCommand::Delete,
-            ResourceState::Stopped,
+            Some(ResourceState::Stopped),
         )
         .await
         .expect("Incus delete succeeds");
@@ -175,7 +175,7 @@ async fn deleting_an_instance_that_is_not_stopped_forces_removal() {
                 &cli,
                 &resource_target("instances", "instance-a"),
                 ResourceCommand::Delete,
-                state,
+                Some(state),
             )
             .await
             .unwrap_or_else(|error| panic!("force delete from {state:?} succeeds: {error:?}"));
@@ -482,7 +482,7 @@ async fn deleting_a_running_instance_forces_removal_without_a_second_query() {
             &cli,
             &resource_target("instances", "instance-a"),
             ResourceCommand::Delete,
-            ResourceState::Running,
+            Some(ResourceState::Running),
         )
         .await
         .expect("Incus force delete succeeds");
@@ -703,7 +703,7 @@ async fn a_silent_command_failure_names_the_operation_and_instance() {
             &cli,
             &resource_target("instances", "instance-a"),
             ResourceCommand::Restart,
-            ResourceState::Running,
+            Some(ResourceState::Running),
         )
         .await
         .expect_err("a non-zero exit is never a successful command");
@@ -723,7 +723,7 @@ async fn a_failed_command_reports_what_incus_wrote_to_stderr() {
             &cli,
             &resource_target("instances", "instance-a"),
             ResourceCommand::Delete,
-            ResourceState::Stopped,
+            Some(ResourceState::Stopped),
         )
         .await
         .expect_err("a non-zero exit is never a successful command");
@@ -748,7 +748,7 @@ async fn an_incus_cli_that_cannot_be_started_names_incus_in_the_error() {
             &cli,
             &resource_target("instances", "instance-a"),
             ResourceCommand::Stop,
-            ResourceState::Running,
+            Some(ResourceState::Running),
         )
         .await
         .expect_err("a CLI that never started is never a successful command");

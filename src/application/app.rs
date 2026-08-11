@@ -220,7 +220,7 @@ pub struct ResourceCommandInvocation {
     pub command: ResourceCommand,
     /// What the Resource was doing when the Command was invoked, so the prompt
     /// can say what confirming will really do and the request can carry it on.
-    pub state: ResourceState,
+    pub state: Option<ResourceState>,
 }
 
 pub struct App {
@@ -858,16 +858,13 @@ impl App {
         let provider_id = provider.id().clone();
         let provider_name = provider.name().to_owned();
         let resource_name = resource.name.clone();
-        let Some(state) = resource.state else {
-            return Vec::new();
-        };
         let target = ResourceCommandInvocation {
             provider_id,
             provider_name,
             target,
             resource_name,
             command,
-            state,
+            state: resource.state,
         };
         if command == ResourceCommand::Delete {
             self.state.confirmation = Some(target);
