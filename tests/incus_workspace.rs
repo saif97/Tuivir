@@ -17,6 +17,32 @@ use common::{
     success,
 };
 
+fn instance_ls() -> ProcessSpec {
+    ProcessSpec::new("incus", &["list", "--format=json"])
+}
+
+fn storage_ls() -> ProcessSpec {
+    ProcessSpec::new("incus", &["storage", "list", "--format=json"])
+}
+
+fn empty_storage_ls() -> (ProcessSpec, Result<ProcessOutput, ProcessError>) {
+    (storage_ls(), success("[]"))
+}
+
+fn storage_volume_ls(pool: &str) -> ProcessSpec {
+    ProcessSpec::new(
+        "incus",
+        &[
+            "storage",
+            "volume",
+            "list",
+            pool,
+            "type=custom",
+            "--format=json",
+        ],
+    )
+}
+
 struct ConcurrentProbeCli {
     probes: Arc<Barrier>,
 }
@@ -186,10 +212,13 @@ async fn deleting_an_instance_that_is_not_stopped_forces_removal() {
 /// Docker's names for them.
 #[tokio::test]
 async fn the_instances_panel_declares_incuss_native_detail_views() {
-    let cli = FixtureCli::new([(
-        ProcessSpec::new("incus", &["list", "--format=json"]),
-        success(include_str!("fixtures/incus/instances.json")),
-    )]);
+    let cli = FixtureCli::new([
+        (
+            instance_ls(),
+            success(include_str!("fixtures/incus/instances.json")),
+        ),
+        empty_storage_ls(),
+    ]);
 
     let snapshot = IncusWorkspace
         .refresh(&cli)
@@ -209,6 +238,85 @@ async fn the_instances_panel_declares_incuss_native_detail_views() {
             ("console-log", "Console Log")
         ]
     );
+}
+
+#[tokio::test]
+async fn incus_declares_custom_volumes_from_every_pool_after_instances() {
+    let cli = FixtureCli::new([
+        (instance_ls(), success("[]")),
+        (
+            storage_ls(),
+            success(include_str!("fixtures/incus/storage-pools.json")),
+        ),
+        (
+            storage_volume_ls("archive"),
+            success(include_str!("fixtures/incus/archive-volumes.json")),
+        ),
+        (
+            storage_volume_ls("default"),
+            success(include_str!("fixtures/incus/default-volumes.json")),
+        ),
+    ]);
+
+    let snapshot = IncusWorkspace
+        .refresh(&cli)
+        .await
+        .expect("fixture lists Incus custom volumes");
+
+    assert_eq!(
+        snapshot
+            .panels
+            .iter()
+            .map(|panel| (panel.id.0.as_str(), panel.title.as_str()))
+            .collect::<Vec<_>>(),
+        [("instances", "Instances"), ("volumes", "Volumes")]
+    );
+    let volumes = &snapshot.panels[1];
+    assert_eq!(
+        volumes
+            .detail_views
+            .iter()
+            .map(|view| (view.id.0.as_str(), view.title.as_str()))
+            .collect::<Vec<_>>(),
+        [("info", "Info"), ("config", "Config")]
+    );
+    assert_eq!(
+        volumes
+            .resources
+            .iter()
+            .map(|volume| (
+                volume.name.as_str(),
+                volume.secondary_text.as_deref(),
+                volume.state,
+                volume.status.as_deref(),
+                volume.available_commands,
+            ))
+            .collect::<Vec<_>>(),
+        [
+            (
+                "cache",
+                Some("archive"),
+                None,
+                None,
+                &[ResourceCommand::Delete][..]
+            ),
+            (
+                "cache",
+                Some("default"),
+                None,
+                None,
+                &[ResourceCommand::Delete][..]
+            ),
+            (
+                "data",
+                Some("default"),
+                None,
+                None,
+                &[ResourceCommand::Delete][..]
+            ),
+        ]
+    );
+    assert_ne!(volumes.resources[0].id, volumes.resources[1].id);
 }
 
 /// Each declared view runs exactly one Incus command. The fixture answers one
@@ -359,10 +467,13 @@ async fn a_silent_detail_failure_names_the_view_and_instance() {
 
 #[tokio::test]
 async fn incus_maps_every_instance_status_into_the_shared_vocabulary() {
-    let cli = FixtureCli::new([(
-        ProcessSpec::new("incus", &["list", "--format=json"]),
-        success(include_str!("fixtures/incus/mixed-state-instances.json")),
-    )]);
+    let cli = FixtureCli::new([
+        (
+            instance_ls(),
+            success(include_str!("fixtures/incus/mixed-state-instances.json")),
+        ),
+        empty_storage_ls(),
+    ]);
 
     let snapshot = IncusWorkspace
         .refresh(&cli)
@@ -402,10 +513,13 @@ async fn incus_maps_every_instance_status_into_the_shared_vocabulary() {
 /// forces.
 #[tokio::test]
 async fn only_a_running_instance_carries_an_interactive_shell() {
-    let cli = FixtureCli::new([(
-        ProcessSpec::new("incus", &["list", "--format=json"]),
-        success(include_str!("fixtures/incus/mixed-state-instances.json")),
-    )]);
+    let cli = FixtureCli::new([
+        (
+            instance_ls(),
+            success(include_str!("fixtures/incus/mixed-state-instances.json")),
+        ),
+        empty_storage_ls(),
+    ]);
 
     let snapshot = IncusWorkspace
         .refresh(&cli)
@@ -434,10 +548,13 @@ async fn only_a_running_instance_carries_an_interactive_shell() {
 /// may offer the Command that runs it.
 #[tokio::test]
 async fn only_a_frozen_instance_offers_the_resume_command() {
-    let cli = FixtureCli::new([(
-        ProcessSpec::new("incus", &["list", "--format=json"]),
-        success(include_str!("fixtures/incus/mixed-state-instances.json")),
-    )]);
+    let cli = FixtureCli::new([
+        (
+            instance_ls(),
+            success(include_str!("fixtures/incus/mixed-state-instances.json")),
+        ),
+        empty_storage_ls(),
+    ]);
 
     let snapshot = IncusWorkspace
         .refresh(&cli)
@@ -500,9 +617,10 @@ async fn discovered_incus_workspace_renders_target_environment_and_instances() {
             success("production\n"),
         ),
         (
-            ProcessSpec::new("incus", &["list", "--format=json"]),
+            instance_ls(),
             success(include_str!("fixtures/incus/instances.json")),
         ),
+        empty_storage_ls(),
     ]);
     let incus = IncusWorkspace;
 
@@ -541,10 +659,8 @@ async fn reachable_incus_without_instances_renders_a_distinct_empty_state() {
             ProcessSpec::new("incus", &["project", "get-current"]),
             success("default\n"),
         ),
-        (
-            ProcessSpec::new("incus", &["list", "--format=json"]),
-            success("[]"),
-        ),
+        (instance_ls(), success("[]")),
+        empty_storage_ls(),
     ]);
     let incus = IncusWorkspace;
     let discovered = incus.discover(&cli).await.expect("Incus is installed");
