@@ -3,8 +3,8 @@ use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
 use tokio::sync::Barrier;
 
 use virtui::{
-    application::{App, InteractiveShellProcess, ResourceCommand},
-    domain::{DetailViewId, ResourceState, TargetEnvironment},
+    application::{App, Command, InteractiveShellProcess, ProviderRequest, ResourceCommand},
+    domain::{DetailViewId, ProviderId, ResourceState, TargetEnvironment},
     infrastructure::process::{CliRunner, ProcessError, ProcessOutput, ProcessSpec},
     infrastructure::provider::{IncusWorkspace, ProviderWorkspace},
     infrastructure::runtime::ProviderRuntime,
@@ -13,8 +13,8 @@ use virtui::{
 
 mod common;
 use common::{
-    FixtureCli, failure, failure_on_stdout, refresh_completed, resource_target, silent_failure,
-    success,
+    FixtureCli, command_completed, failure, failure_on_stdout, refresh_completed, resource_target,
+    silent_failure, success,
 };
 
 fn instance_ls() -> ProcessSpec {
@@ -382,6 +382,168 @@ async fn volume_details_and_plain_delete_use_the_selected_pool_and_name() {
         .execute_command(&cli, &target, ResourceCommand::Delete, None)
         .await
         .expect("Incus deletes the custom Volume without force");
+}
+
+#[tokio::test]
+async fn deleting_an_incus_volume_confirms_pool_and_refreshes_the_workspace() {
+    let cli = FixtureCli::new([
+        (
+            ProcessSpec::new("incus", &["remote", "get-default"]),
+            success("local\n"),
+        ),
+        (
+            ProcessSpec::new("incus", &["project", "get-current"]),
+            success("default\n"),
+        ),
+        (instance_ls(), success("[]")),
+        (
+            storage_ls(),
+            success(include_str!("fixtures/incus/storage-pools.json")),
+        ),
+        (
+            storage_volume_ls("archive"),
+            success(include_str!("fixtures/incus/archive-volumes.json")),
+        ),
+        (
+            storage_volume_ls("default"),
+            success(include_str!("fixtures/incus/default-volumes.json")),
+        ),
+        (
+            ProcessSpec::new(
+                "incus",
+                &["storage", "volume", "delete", "archive", "cache"],
+            ),
+            success(""),
+        ),
+        (instance_ls(), success("[]")),
+        (
+            storage_ls(),
+            success(include_str!("fixtures/incus/storage-pools.json")),
+        ),
+        (storage_volume_ls("archive"), success("[]")),
+        (storage_volume_ls("default"), success("[]")),
+    ]);
+    let incus = IncusWorkspace;
+    let discovered = incus.discover(&cli).await.expect("Incus is installed");
+    let mut app = App::new();
+    let refresh = app
+        .update(discovered.into_event())
+        .into_iter()
+        .next()
+        .expect("initial refresh");
+    app.update(refresh_completed(refresh, incus.refresh(&cli).await));
+    app.invoke(Command::FocusResourcePanel(1));
+
+    assert!(
+        app.invoke(Command::Resource(ResourceCommand::Delete))
+            .is_empty()
+    );
+    assert!(app.invoke(Command::Cancel).is_empty());
+    assert!(
+        app.invoke(Command::Resource(ResourceCommand::Delete))
+            .is_empty()
+    );
+    let confirmation = render_to_text(app.state(), 100, 24);
+    assert!(
+        confirmation.contains("cache (archive/cache)"),
+        "{confirmation}"
+    );
+    assert!(
+        confirmation.contains("permanently removed"),
+        "{confirmation}"
+    );
+
+    let deletion = app
+        .invoke(Command::Confirm)
+        .into_iter()
+        .next()
+        .expect("confirmation dispatches deletion");
+    let ProviderRequest::ExecuteResourceCommand {
+        request_id,
+        provider_id,
+        target,
+        command,
+        state,
+    } = deletion
+    else {
+        panic!("expected Incus Volume deletion request");
+    };
+    assert_eq!(provider_id, ProviderId::new("incus"));
+    assert_eq!(state, None);
+    incus
+        .execute_command(&cli, &target, command, state)
+        .await
+        .expect("Incus Volume deletion succeeds");
+    let follow_up = app.update(command_completed(
+        ProviderRequest::ExecuteResourceCommand {
+            request_id,
+            provider_id,
+            target,
+            command,
+            state,
+        },
+        Ok(()),
+    ));
+    let refresh = follow_up
+        .into_iter()
+        .next()
+        .expect("successful deletion refreshes Incus");
+    app.update(refresh_completed(refresh, incus.refresh(&cli).await));
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(!screen.contains("cache · archive"), "{screen}");
+}
+
+#[tokio::test]
+async fn incus_volume_refresh_failures_are_actionable_and_atomic() {
+    let pool_failure = FixtureCli::new([
+        (instance_ls(), success("[]")),
+        (storage_ls(), failure("Error: storage access denied")),
+    ]);
+    let error = IncusWorkspace
+        .refresh(&pool_failure)
+        .await
+        .expect_err("a failed pool listing cannot produce a partial snapshot");
+    assert!(error.message.contains("Error: storage access denied"));
+    assert!(error.message.contains("incus storage volume list"));
+
+    let volume_failure = FixtureCli::new([
+        (instance_ls(), success("[]")),
+        (storage_ls(), success("[{\"name\":\"default\"}]")),
+        (
+            storage_volume_ls("default"),
+            failure("Error: failed to list storage volumes"),
+        ),
+    ]);
+    let error = IncusWorkspace
+        .refresh(&volume_failure)
+        .await
+        .expect_err("a failed Volume listing cannot produce a partial snapshot");
+    assert!(
+        error
+            .message
+            .contains("Error: failed to list storage volumes")
+    );
+    assert!(error.message.contains("incus storage volume list"));
+}
+
+#[tokio::test]
+async fn an_incus_volume_deletion_refusal_preserves_the_native_diagnostic() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("incus", &["storage", "volume", "delete", "default", "data"]),
+        failure("Error: Storage volume is still in use"),
+    )]);
+
+    let error = IncusWorkspace
+        .execute_command(
+            &cli,
+            &resource_target("volumes", "default/data"),
+            ResourceCommand::Delete,
+            None,
+        )
+        .await
+        .expect_err("Incus retains its in-use safety boundary");
+
+    assert_eq!(error.message, "Error: Storage volume is still in use");
 }
 
 #[tokio::test]
