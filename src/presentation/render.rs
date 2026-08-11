@@ -12,7 +12,7 @@ use crate::application::{AppState, DetailSelection, FocusedPane};
 use crate::application::{
     DetailContent, ResourceDetailsView, ResourcePanelView, WorkspacePresentation, WorkspaceView,
 };
-use crate::domain::ResourceState;
+use crate::domain::{ResourceState, ResourceTarget};
 
 use super::screen_layout::{
     DETAIL_VIEW_GAP, ScreenLayout, active_target_label, command_error_area, confirmation_area,
@@ -28,6 +28,8 @@ enum ThemeRole {
     Muted,
     Warning,
     Error,
+    Selection,
+    InactiveSelection,
     Terminal,
     RaisedSurface,
 }
@@ -46,6 +48,8 @@ fn theme_colour(role: ThemeRole) -> Color {
         ThemeRole::Muted => Color::DarkGray,
         ThemeRole::Warning => Color::Yellow,
         ThemeRole::Error => Color::Red,
+        ThemeRole::Selection => Color::Blue,
+        ThemeRole::InactiveSelection => Color::DarkGray,
         ThemeRole::Terminal => Color::Reset,
         ThemeRole::RaisedSurface => Color::Black,
     }
@@ -78,7 +82,7 @@ pub fn render(state: &AppState, frame: &mut Frame<'_>) {
 /// what the user clicks is what they see.
 pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &ScreenLayout) {
     render_provider_bar(state, frame, layout);
-    render_running_command_status(state, frame, layout.status);
+    render_command_bar(state, frame, layout.status);
 
     let (Some(provider), Some(panes)) = (state.active_workspace(), layout.panes.as_ref()) else {
         frame.render_widget(
@@ -99,12 +103,14 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
         &presentation,
         matches!(&state.focused_pane, FocusedPane::Resources),
         &state.hints.focus_resource_panels,
+        &state.running_commands,
         frame,
         columns[0],
     );
     render_details_panel(
         provider.name(),
         workspace_view,
+        &state.running_commands,
         state.focused_pane == FocusedPane::Details,
         state.hints.focus_details.as_deref(),
         frame,
@@ -172,28 +178,32 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
 /// Each entry names the Provider, Resource, and Command it was dispatched for,
 /// so the status identifies its target even while another Provider Workspace
 /// is active.
-fn render_running_command_status(state: &AppState, frame: &mut Frame<'_>, area: Rect) {
-    if state.running_commands.is_empty() {
-        return;
-    }
-    let status = state
-        .running_commands
+fn render_command_bar(state: &AppState, frame: &mut Frame<'_>, area: Rect) {
+    let mut spans = state
+        .command_bar
         .iter()
-        .map(|running| {
-            format!(
-                "Running {} {} for {} ({})…",
-                running.provider_name, running.command, running.resource_name, running.target
-            )
+        .flat_map(|hint| {
+            [
+                Span::styled(
+                    format!(" {} ", hint.key),
+                    Style::default()
+                        .fg(theme_colour(ThemeRole::Terminal))
+                        .bg(theme_colour(ThemeRole::Primary))
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(format!(" {}  ", hint.description)),
+            ]
         })
-        .collect::<Vec<_>>()
-        .join("   ");
-    frame.render_widget(
-        Paragraph::new(Line::styled(
-            status,
-            themed_style(ThemeRole::Warning).add_modifier(Modifier::BOLD),
-        )),
-        area,
-    );
+        .collect::<Vec<_>>();
+    spans.push(Span::styled(
+        " ? ",
+        Style::default()
+            .fg(theme_colour(ThemeRole::Terminal))
+            .bg(theme_colour(ThemeRole::Primary))
+            .add_modifier(Modifier::BOLD),
+    ));
+    spans.push(Span::raw(" all commands"));
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 fn render_provider_bar(state: &AppState, frame: &mut Frame<'_>, layout: &ScreenLayout) {
@@ -234,6 +244,7 @@ fn render_workspace_panel(
     presentation: &WorkspacePresentation<'_>,
     resource_focus: bool,
     resource_hints: &[Option<String>],
+    running_commands: &[crate::application::RunningResourceCommand],
     frame: &mut Frame<'_>,
     area: Rect,
 ) {
@@ -304,6 +315,8 @@ fn render_workspace_panel(
                 render_resource_panel(
                     &panel,
                     resource_hints.get(index).and_then(Option::as_deref),
+                    view.id,
+                    running_commands,
                     focused,
                     frame,
                     area,
@@ -316,6 +329,8 @@ fn render_workspace_panel(
 fn render_resource_panel(
     view: &ResourcePanelView<'_>,
     resources_hint: Option<&str>,
+    provider_id: &crate::domain::ProviderId,
+    running_commands: &[crate::application::RunningResourceCommand],
     focused: bool,
     frame: &mut Frame<'_>,
     area: Rect,
@@ -324,35 +339,46 @@ fn render_resource_panel(
     let viewport_height = area.height.saturating_sub(2) as usize;
     let visible =
         visible_resource_range(view.selected_index, viewport_height, panel.resources.len());
-    // A row names its Resource and, where the Resource has one, says what it is
-    // doing. Everything else a Provider reported is in the Details pane, so a
-    // row never has to compete for width with it.
+    // A row starts with the Resource State symbol, leaving the Resource name
+    // easy to scan without repeating Provider-specific status text.
     let mut items = panel
         .resources
-        .get(visible)
+        .get(visible.clone())
         .unwrap_or_default()
         .iter()
         .map(|resource| {
-            let marker = if view.selected_resource == Some(&resource.id) {
-                ">"
-            } else {
-                " "
-            };
-            let mut spans = vec![
-                Span::raw(marker),
+            let selected = view.selected_resource == Some(&resource.id);
+            let target = ResourceTarget::new(panel.id.clone(), resource.id.clone());
+            let running = running_commands
+                .iter()
+                .find(|running| running.provider_id == *provider_id && running.target == target);
+            let state = running.map_or_else(
+                || resource.state.map(resource_state_symbol).unwrap_or(" "),
+                |_| "*",
+            );
+            let spans = vec![
+                Span::styled(
+                    state,
+                    running.map_or_else(
+                        || {
+                            resource
+                                .state
+                                .map_or_else(Style::default, resource_state_style)
+                        },
+                        |_| themed_style(ThemeRole::Warning),
+                    ),
+                ),
                 Span::raw(" "),
                 Span::raw(resource.name.as_str()),
             ];
-            if let Some(status) = &resource.status {
-                spans.push(Span::raw("  "));
-                spans.push(Span::styled(
-                    status.as_str(),
-                    resource
-                        .state
-                        .map_or_else(Style::default, resource_state_style),
-                ));
-            }
-            ListItem::new(Line::from(spans))
+            let style = selected.then(|| {
+                Style::default().bg(theme_colour(if focused {
+                    ThemeRole::Selection
+                } else {
+                    ThemeRole::InactiveSelection
+                }))
+            });
+            ListItem::new(Line::from(spans)).style(style.unwrap_or_default())
         })
         .collect::<Vec<_>>();
     if items.is_empty() {
@@ -363,12 +389,61 @@ fn render_resource_panel(
     }
     frame.render_widget(
         List::new(items).block(pane_block(
-            pane_title(resources_hint, &panel.title, focused),
+            pane_title(
+                resources_hint,
+                &format!("{} ({})", panel.title, panel.resources.len()),
+                focused,
+            ),
             focused,
             PaneChrome::Resource,
         )),
         area,
     );
+    render_resource_scrollbar(visible, viewport_height, panel.resources.len(), frame, area);
+}
+
+fn render_resource_scrollbar(
+    visible: std::ops::Range<usize>,
+    viewport_height: usize,
+    resource_count: usize,
+    frame: &mut Frame<'_>,
+    area: Rect,
+) {
+    if resource_count <= viewport_height || viewport_height == 0 || area.width < 2 {
+        return;
+    }
+    let thumb_height = (viewport_height * viewport_height / resource_count).max(1);
+    let thumb_start = visible.start * viewport_height / resource_count;
+    let lines = (0..viewport_height).map(|row| {
+        Line::styled(
+            if (thumb_start..thumb_start + thumb_height).contains(&row) {
+                "█"
+            } else {
+                "░"
+            },
+            themed_style(ThemeRole::Muted),
+        )
+    });
+    frame.render_widget(
+        Paragraph::new(lines.collect::<Vec<_>>()),
+        Rect::new(
+            area.x + area.width - 2,
+            area.y + 1,
+            1,
+            area.height.saturating_sub(2),
+        ),
+    );
+}
+
+fn resource_state_symbol(state: ResourceState) -> &'static str {
+    match state {
+        ResourceState::Running => "●",
+        ResourceState::Stopped => "○",
+        ResourceState::Paused => "‖",
+        ResourceState::Transitioning => "↻",
+        ResourceState::Broken => "✕",
+        ResourceState::Unknown => "?",
+    }
 }
 
 pub(super) fn visible_resource_range(
@@ -444,6 +519,7 @@ pub(super) fn pane_block(title: String, focused: bool, chrome: PaneChrome) -> Bl
 fn render_details_panel(
     provider_name: &str,
     view: Option<&WorkspaceView<'_>>,
+    running_commands: &[crate::application::RunningResourceCommand],
     focused: bool,
     details_hint: Option<&str>,
     frame: &mut Frame<'_>,
@@ -482,46 +558,66 @@ fn render_details_panel(
     frame.render_widget(block, area);
 
     let views = view.map_or(&[][..], |view| view.detail_views);
-    // The view strip is a control, not another summary field, so it gets a
-    // blank line to sit behind rather than running straight into the fields.
+    let has_detail_tabs = view.is_some_and(|view| view.selected_resource.is_some());
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(summary.len() as u16),
-            Constraint::Length(u16::from(!views.is_empty()) * 2),
+            Constraint::Length(u16::from(has_detail_tabs)),
             Constraint::Min(0),
         ])
         .split(inner);
-    frame.render_widget(
-        Paragraph::new(summary).wrap(ratatui::widgets::Wrap { trim: true }),
-        rows[0],
-    );
 
-    if views.is_empty() {
+    if !has_detail_tabs {
+        frame.render_widget(
+            Paragraph::new(summary).wrap(ratatui::widgets::Wrap { trim: true }),
+            rows[1],
+        );
         return;
     }
-    if let Some(details) = view.and_then(|view| view.details) {
-        render_detail_content(provider_name, details, frame, rows[2]);
+    let running = view.and_then(|view| {
+        let target = ResourceTarget::new(
+            view.focused_resource_panel?.clone(),
+            view.selected_resource?.id.clone(),
+        );
+        running_commands
+            .iter()
+            .find(|running| running.provider_id == *view.id && running.target == target)
+    });
+    if let Some(running) = running {
+        frame.render_widget(
+            Paragraph::new(format!(
+                "Running {} for {}…",
+                running.command, running.resource_name
+            ))
+            .alignment(Alignment::Center)
+            .style(themed_style(ThemeRole::Warning).add_modifier(Modifier::BOLD)),
+            rows[1],
+        );
+    } else if let Some(details) = view.and_then(|view| view.details) {
+        render_detail_content(provider_name, details, frame, rows[1]);
     }
-    let mut spans = Vec::new();
+    let overview_selected = view.is_some_and(|view| view.overview_selected);
+    let mut spans = vec![detail_view_tab("Overview", overview_selected)];
     for detail_view in views {
-        if !spans.is_empty() {
-            spans.push(Span::raw(gap(DETAIL_VIEW_GAP)));
-        }
+        spans.push(Span::raw(gap(DETAIL_VIEW_GAP)));
         let selected = view
             .and_then(|workspace| workspace.selected_detail_view)
             .is_some_and(|selected| selected.id == detail_view.id);
-        let label = detail_view_label(&detail_view.title, selected);
-        spans.push(if selected {
-            Span::styled(label, Style::default().add_modifier(Modifier::BOLD))
-        } else {
-            Span::raw(label)
-        });
+        spans.push(detail_view_tab(&detail_view.title, selected));
     }
-    frame.render_widget(
-        Paragraph::new(vec![Line::default(), Line::from(spans)]),
-        rows[1],
-    );
+    frame.render_widget(Paragraph::new(Line::from(spans)), rows[0]);
+}
+
+fn detail_view_tab(title: &str, selected: bool) -> Span<'static> {
+    let label = detail_view_label(title, selected);
+    if selected {
+        Span::styled(
+            label,
+            themed_style(ThemeRole::Primary).add_modifier(Modifier::BOLD),
+        )
+    } else {
+        Span::styled(label, themed_style(ThemeRole::Muted))
+    }
 }
 
 /// Draws the loaded detail view, or what is happening to it.
@@ -566,7 +662,9 @@ fn render_detail_content(
 }
 
 fn detail_line(text: &str, line: u16, selection: Option<&DetailSelection>) -> Line<'static> {
-    let Some(selection) = selection else { return Line::from(text.to_owned()) };
+    let Some(selection) = selection else {
+        return Line::from(text.to_owned());
+    };
     let (start, end) = if selection.start <= selection.end {
         (selection.start, selection.end)
     } else {
@@ -575,10 +673,22 @@ fn detail_line(text: &str, line: u16, selection: Option<&DetailSelection>) -> Li
     if start == end || line < start.line || line > end.line {
         return Line::from(text.to_owned());
     }
-    let first = if line == start.line { start.column as usize } else { 0 };
-    let last = if line == end.line { end.column as usize } else { text.chars().count() };
+    let first = if line == start.line {
+        start.column as usize
+    } else {
+        0
+    };
+    let last = if line == end.line {
+        end.column as usize
+    } else {
+        text.chars().count()
+    };
     let before = text.chars().take(first).collect::<String>();
-    let selected = text.chars().skip(first).take(last.saturating_sub(first)).collect::<String>();
+    let selected = text
+        .chars()
+        .skip(first)
+        .take(last.saturating_sub(first))
+        .collect::<String>();
     let after = text.chars().skip(last).collect::<String>();
     Line::from(vec![
         Span::raw(before),

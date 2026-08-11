@@ -524,10 +524,10 @@ async fn discovered_incus_workspace_renders_target_environment_and_instances() {
     assert!(screen.contains("Target: local / production"));
     assert!(screen.contains("Instances"));
     assert!(screen.contains("api"));
-    assert!(screen.contains("Running"));
+    assert!(screen.contains("● api"));
     assert!(screen.contains("Type: container"));
     assert!(screen.contains("database"));
-    assert!(screen.contains("Stopped"));
+    assert!(screen.contains("○ database"));
 }
 
 #[tokio::test]

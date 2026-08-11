@@ -13,7 +13,7 @@ use super::render::{PaneChrome, pane_block, pane_title, visible_resource_range};
 /// Workspace, and between one Provider Workspace and the next.
 pub const PROVIDER_LABEL_GAP: u16 = 2;
 pub const PROVIDER_WORKSPACE_GAP: u16 = 3;
-/// Blank columns between one Detail View label and the next.
+/// Blank columns between one Detail View Tab label and the next.
 pub const DETAIL_VIEW_GAP: u16 = 2;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -35,7 +35,7 @@ pub struct ScreenLayout {
     pub overlay: Option<Rect>,
 }
 
-/// The Panes of the Active Workspace, and the rows and Detail Views inside them.
+/// The Panes of the Active Workspace, and the rows and Detail View Tabs inside them.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WorkspacePanes {
     pub resources: Rect,
@@ -45,10 +45,10 @@ pub struct WorkspacePanes {
     /// shows. Scrolling means a row's position is not its Resource index.
     pub resource_rows: Vec<Vec<(usize, Rect)>>,
     pub details: Rect,
-    /// The scrollable text area of the active Detail View, excluding its
+    /// The scrollable text area of the active Detail View Tab, excluding its
     /// summary, view strip, and border.
     pub detail_content: Rect,
-    /// One region per Detail View label, in the order they are drawn.
+    /// One region per Detail View Tab label, in the order they are drawn.
     pub detail_views: Vec<Rect>,
     /// The Pane Boundary the user drags: the two border columns that touch,
     /// the right of the Resource Panels and the left of the Details Pane.
@@ -62,7 +62,7 @@ impl ScreenLayout {
             .constraints([
                 Constraint::Length(1),
                 Constraint::Min(1),
-                Constraint::Length(u16::from(!state.running_commands.is_empty())),
+                Constraint::Length(1),
             ])
             .split(area);
         let (provider_bar, workspace, status) = (bands[0], bands[1], bands[2]);
@@ -229,30 +229,29 @@ fn measure_panes(state: &AppState, workspace: Rect) -> Option<WorkspacePanes> {
         PaneChrome::Details,
     )
     .inner(details);
-    let summary_len = view
-        .selected_resource
-        .map_or(1, |resource| 1 + resource.fields.len()) as u16;
+    let has_detail_tabs = view.selected_resource.is_some();
     let detail_rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(summary_len),
-            Constraint::Length(u16::from(!view.detail_views.is_empty()) * 2),
+            Constraint::Length(u16::from(has_detail_tabs)),
             Constraint::Min(0),
         ])
         .split(inner);
 
     let mut detail_views = Vec::new();
-    let mut tab_x = detail_rows[1].x;
-    for (index, detail) in view.detail_views.iter().enumerate() {
-        if index > 0 {
-            tab_x += DETAIL_VIEW_GAP;
-        }
+    let mut tab_x = detail_rows[0].x;
+    if has_detail_tabs {
+        let overview_width = label_width(&detail_view_label("Overview", view.overview_selected));
+        detail_views.push(Rect::new(tab_x, detail_rows[0].y, overview_width, 1));
+        tab_x = tab_x.saturating_add(overview_width + DETAIL_VIEW_GAP);
+    }
+    for detail in view.detail_views {
         let selected = view
             .selected_detail_view
             .is_some_and(|selected| selected.id == detail.id);
         let width = label_width(&detail_view_label(&detail.title, selected));
-        detail_views.push(Rect::new(tab_x, detail_rows[1].y + 1, width, 1));
-        tab_x = tab_x.saturating_add(width);
+        detail_views.push(Rect::new(tab_x, detail_rows[0].y, width, 1));
+        tab_x = tab_x.saturating_add(width + DETAIL_VIEW_GAP);
     }
 
     Some(WorkspacePanes {
@@ -260,7 +259,7 @@ fn measure_panes(state: &AppState, workspace: Rect) -> Option<WorkspacePanes> {
         resource_panels,
         resource_rows,
         details,
-        detail_content: detail_rows[2],
+        detail_content: detail_rows[1],
         detail_views,
         pane_boundary,
     })
@@ -304,7 +303,7 @@ pub fn active_target_label(state: &AppState) -> Option<String> {
         .map(|target| format!("Target: {target}"))
 }
 
-/// Builds one Detail View label exactly as the Details Pane draws it.
+/// Builds one Detail View Tab label exactly as the Details Pane draws it.
 pub fn detail_view_label(title: &str, selected: bool) -> String {
     if selected {
         format!("[ {title} ]")

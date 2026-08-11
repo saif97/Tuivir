@@ -76,7 +76,7 @@ enum ShellControl {
 
 const DETAIL_DISPATCH_QUIET_PERIOD: Duration = Duration::from_millis(75);
 
-/// Host-owned dispatch timing for Detail View loads.
+/// Host-owned dispatch timing for Detail View Tab loads.
 ///
 /// Application request identity still decides which completion is valid; this
 /// queue prevents superseded Provider work from starting in the first place.
@@ -96,7 +96,8 @@ struct Osc52Clipboard<W>(W);
 
 impl<W: Write> Clipboard for Osc52Clipboard<W> {
     fn copy(&mut self, text: &str) -> io::Result<()> {
-        const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        const TABLE: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
         let bytes = text.as_bytes();
         let mut encoded = String::with_capacity(bytes.len().div_ceil(3) * 4);
         for chunk in bytes.chunks(3) {
@@ -105,8 +106,16 @@ impl<W: Write> Clipboard for Osc52Clipboard<W> {
                 | u32::from(*chunk.get(2).unwrap_or(&0));
             encoded.push(TABLE[(bits >> 18) as usize & 63] as char);
             encoded.push(TABLE[(bits >> 12) as usize & 63] as char);
-            encoded.push(if chunk.len() > 1 { TABLE[(bits >> 6) as usize & 63] as char } else { '=' });
-            encoded.push(if chunk.len() > 2 { TABLE[bits as usize & 63] as char } else { '=' });
+            encoded.push(if chunk.len() > 1 {
+                TABLE[(bits >> 6) as usize & 63] as char
+            } else {
+                '='
+            });
+            encoded.push(if chunk.len() > 2 {
+                TABLE[bits as usize & 63] as char
+            } else {
+                '='
+            });
         }
         write!(self.0, "\x1b]52;c;{encoded}\x07")?;
         self.0.flush()
@@ -114,7 +123,9 @@ impl<W: Write> Clipboard for Osc52Clipboard<W> {
 }
 
 fn copy_pending_details(app: &mut App, clipboard: &mut dyn Clipboard) {
-    let Some(text) = app.take_pending_details_copy() else { return };
+    let Some(text) = app.take_pending_details_copy() else {
+        return;
+    };
     if let Err(error) = clipboard.copy(&text) {
         app.report_details_copy_failure(error.to_string());
     }

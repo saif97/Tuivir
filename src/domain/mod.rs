@@ -197,7 +197,7 @@ impl fmt::Display for ResourceTarget {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-/// Identifies one Detail View a Provider Workspace offers for its Resources.
+/// Identifies one Detail View Tab a Provider Workspace offers for its Resources.
 pub struct DetailViewId(pub String);
 
 impl DetailViewId {

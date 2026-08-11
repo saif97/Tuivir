@@ -12,7 +12,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use super::{Clipboard, DetailDispatchQueue, Osc52Clipboard, ShellTerminal, handle_key, handle_mouse, open_pending_shell};
+use super::{
+    Clipboard, DetailDispatchQueue, Osc52Clipboard, ShellTerminal, handle_key, handle_mouse,
+    open_pending_shell,
+};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use virtui::{
@@ -357,11 +360,10 @@ fn a_whole_drag_gesture_resizes_the_panes_and_then_lets_go() {
     );
 }
 
-/// A clicked Resource must load like a keyboard-selected one. Selecting without
-/// loading is the failure this guards: the Detail View would look activated and
-/// stay empty until an unrelated refresh happened along.
+/// A clicked Resource starts on its snapshot-backed Overview, so selecting it
+/// never asks the Provider to load a hidden Detail View Tab.
 #[test]
-fn clicking_a_resource_row_selects_it_and_asks_for_its_details() {
+fn clicking_a_resource_row_selects_it_without_loading_hidden_details() {
     let mut app = app_on_workspace(two_containers());
     let layout = ScreenLayout::measure(app.state(), Rect::new(0, 0, 80, 24));
     let panes = layout.panes.as_ref().expect("a Workspace is active");
@@ -374,12 +376,8 @@ fn clicking_a_resource_row_selects_it_and_asks_for_its_details() {
         virtui::application::FocusedPane::Resources,
         "clicking a Resource focuses the Panel holding it"
     );
-    assert!(
-        requests
-            .iter()
-            .any(|request| matches!(request, ProviderRequest::LoadResourceDetails { .. })),
-        "the click asks for the Detail View, got {requests:?}"
-    );
+    assert!(requests.is_empty(), "unexpected requests: {requests:?}");
+    assert!(render_to_text(app.state(), 80, 24).contains("[ Overview ]"));
 }
 
 #[test]

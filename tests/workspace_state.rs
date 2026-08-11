@@ -100,10 +100,8 @@ fn reconciling_the_first_snapshot_projects_one_coherent_workspace_view() {
             .map(|resource| resource.name.as_str()),
         Some("api")
     );
-    assert_eq!(
-        view.selected_detail_view.map(|view| view.title.as_str()),
-        Some("Logs")
-    );
+    assert!(view.overview_selected);
+    assert!(view.selected_detail_view.is_none());
 }
 
 #[test]
@@ -126,10 +124,8 @@ fn focusing_a_resource_panel_restores_that_panels_selection_and_detail_view() {
             .map(|resource| resource.name.as_str()),
         Some("alpine")
     );
-    assert_eq!(
-        view.selected_detail_view.map(|view| view.title.as_str()),
-        Some("Inspect")
-    );
+    assert!(view.overview_selected);
+    assert!(view.selected_detail_view.is_none());
     assert!(!workspace.focus_resource_panel(&ResourcePanelId::new("missing")));
 }
 
@@ -197,6 +193,7 @@ fn a_detail_result_is_accepted_only_for_the_still_visible_resource_and_view() {
         .push(resource("container-b", "worker"));
     let mut workspace = workspace();
     workspace.reconcile_snapshot(snapshot);
+    workspace.move_detail_view(1);
     let stale = workspace
         .start_visible_detail_load(ProviderRequestId::new(1))
         .expect("the selected Resource offers Logs");
@@ -232,6 +229,7 @@ fn a_detail_result_is_accepted_only_for_the_still_visible_resource_and_view() {
 fn scrolling_details_clamps_to_the_visible_detail_content() {
     let mut workspace = workspace();
     workspace.reconcile_snapshot(snapshot());
+    workspace.move_detail_view(1);
     let load = workspace
         .start_visible_detail_load(ProviderRequestId::new(1))
         .expect("the selected Resource offers Logs");
@@ -263,6 +261,7 @@ fn navigation_itself_refuses_the_detail_result_for_the_resource_left_behind() {
         .push(resource("container-b", "worker"));
     let mut workspace = workspace();
     workspace.reconcile_snapshot(snapshot);
+    workspace.move_detail_view(1);
     let stale = workspace
         .start_visible_detail_load(ProviderRequestId::new(1))
         .expect("the selected Resource offers Logs");
@@ -301,8 +300,6 @@ fn recovery_from_a_refresh_error_restores_still_valid_navigation() {
             .map(|resource| resource.name.as_str()),
         Some("alpine")
     );
-    assert_eq!(
-        view.selected_detail_view.map(|view| view.title.as_str()),
-        Some("Inspect")
-    );
+    assert!(view.overview_selected);
+    assert!(view.selected_detail_view.is_none());
 }

@@ -178,6 +178,12 @@ pub fn detail_request(requests: Vec<ProviderRequest>) -> ProviderRequest {
         .expect("detail load request")
 }
 
+/// Enters the first Provider-backed Detail View Tab from snapshot-backed
+/// Overview, returning the Provider work that selection starts.
+pub fn first_provider_detail(app: &mut App) -> ProviderRequest {
+    detail_request(app.invoke(virtui::application::Command::NextDetailView))
+}
+
 /// Constructs the completion matching a detail-load request.
 pub fn details_completed(
     request: ProviderRequest,
