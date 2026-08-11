@@ -1,5 +1,5 @@
 use virtui::{
-    application::{App, InteractiveShellProcess, Resource, ResourceCommand},
+    application::{App, Command, InteractiveShellProcess, Resource, ResourceCommand},
     domain::{DetailViewId, ResourceId, ResourcePanelId, ResourceState, ResourceTarget},
     infrastructure::{
         process::{ProcessError, ProcessOutput, ProcessSpec},
@@ -10,8 +10,8 @@ use virtui::{
 
 mod common;
 use common::{
-    FixtureCli, failure, failure_on_stdout, refresh_completed, resource_target, silent_failure,
-    success,
+    FixtureCli, command_completed, failure, failure_on_stdout, refresh_completed, resource_target,
+    silent_failure, success,
 };
 
 fn container_ls() -> ProcessSpec {
@@ -620,6 +620,84 @@ async fn volume_inspect_and_plain_delete_are_routed_through_the_volumes_panel() 
         .execute_command(&cli, &target, ResourceCommand::Delete, None)
         .await
         .expect("Docker removes a stateless volume without force");
+}
+
+#[tokio::test]
+async fn deleting_a_volume_through_the_workspace_refreshes_its_panel() {
+    let cli = FixtureCli::new([
+        (
+            ProcessSpec::new("docker", &["context", "show"]),
+            success("default\n"),
+        ),
+        (container_ls(), success("")),
+        (image_ls(), success("")),
+        (
+            volume_ls(),
+            success(include_str!("fixtures/docker/volumes.jsonl")),
+        ),
+        (
+            ProcessSpec::new("docker", &["volume", "rm", "anonymous-volume"]),
+            success("anonymous-volume\n"),
+        ),
+        (container_ls(), success("")),
+        (image_ls(), success("")),
+        (volume_ls(), success("")),
+    ]);
+    let docker = DockerWorkspace;
+    let discovered = docker.discover(&cli).await.expect("Docker is installed");
+    let mut app = App::new();
+    let refresh = app
+        .update(discovered.into_event())
+        .into_iter()
+        .next()
+        .expect("initial refresh");
+    app.update(refresh_completed(refresh, docker.refresh(&cli).await));
+    assert!(render_to_text(app.state(), 100, 24).contains("anonymous-volume · local"));
+
+    app.invoke(Command::FocusResourcePanel(2));
+    assert!(
+        app.invoke(Command::Resource(ResourceCommand::Delete))
+            .is_empty()
+    );
+    let confirmation = render_to_text(app.state(), 100, 24);
+    assert!(confirmation.contains("anonymous-volume"));
+    assert!(confirmation.contains("permanently removed"));
+
+    let deletion = app
+        .invoke(Command::Confirm)
+        .into_iter()
+        .next()
+        .expect("confirmation dispatches deletion");
+    let (request_id, provider_id, target, command, state) = match deletion {
+        virtui::application::ProviderRequest::ExecuteResourceCommand {
+            request_id,
+            provider_id,
+            target,
+            command,
+            state,
+        } => (request_id, provider_id, target, command, state),
+        other => panic!("expected deletion request, got {other:?}"),
+    };
+    docker
+        .execute_command(&cli, &target, command, state)
+        .await
+        .expect("volume deletion succeeds");
+    let follow_up = app.update(command_completed(
+        virtui::application::ProviderRequest::ExecuteResourceCommand {
+            request_id,
+            provider_id,
+            target,
+            command,
+            state,
+        },
+        Ok(()),
+    ));
+    let refresh = follow_up
+        .into_iter()
+        .next()
+        .expect("deletion refreshes workspace");
+    app.update(refresh_completed(refresh, docker.refresh(&cli).await));
+    assert!(!render_to_text(app.state(), 100, 24).contains("anonymous-volume"));
 }
 
 /// Each declared view runs exactly one Docker command. The fixture answers one
