@@ -504,7 +504,8 @@ async fn incus_volume_refresh_failures_are_actionable_and_atomic() {
         .await
         .expect_err("a failed pool listing cannot produce a partial snapshot");
     assert!(error.message.contains("Error: storage access denied"));
-    assert!(error.message.contains("incus storage volume list"));
+    assert!(error.message.contains("incus storage list"));
+    assert!(!error.message.contains("<pool>"));
 
     let volume_failure = FixtureCli::new([
         (instance_ls(), success("[]")),
