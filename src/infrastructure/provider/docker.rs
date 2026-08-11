@@ -19,6 +19,8 @@ const CONTAINER_REFRESH_HELP: &str =
     "Run `docker container ls --all` to verify access to the current Target Environment.";
 const IMAGE_REFRESH_HELP: &str =
     "Run `docker image ls` to verify access to the current Target Environment.";
+const VOLUME_REFRESH_HELP: &str =
+    "Run `docker volume ls` to verify access to the current Target Environment.";
 const CONTAINERS_PANEL_ID: &str = "containers";
 const IMAGES_PANEL_ID: &str = "images";
 const VOLUMES_PANEL_ID: &str = "volumes";
@@ -107,8 +109,8 @@ impl ProviderWorkspace for DockerWorkspace {
         cli: &'a dyn CliRunner,
     ) -> Pin<Box<dyn Future<Output = Result<WorkspaceSnapshot, WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
-            // Two independent listings, so they wait on Docker together rather
-            // than one after the other.
+            // Independent listings wait on Docker together rather than one
+            // after the other.
             let (containers, images, volumes) = tokio::try_join!(
                 async {
                     cli.run(ProcessSpec::new(
@@ -148,11 +150,7 @@ impl ProviderWorkspace for DockerWorkspace {
                     ))
                     .await
                     .map_err(|error| {
-                        refresh_failure(
-                            error,
-                            "Docker could not list volumes",
-                            "Run `docker volume ls` to verify access to the current Target Environment.",
-                        )
+                        refresh_failure(error, "Docker could not list volumes", VOLUME_REFRESH_HELP)
                     })
                 },
             )?;
@@ -194,7 +192,7 @@ impl ProviderWorkspace for DockerWorkspace {
                     let row: VolumeRow = serde_json::from_str(line).map_err(|error| {
                         refresh_error(
                             format!("Docker returned malformed volume data: {error}"),
-                            "Run `docker volume ls` to verify access to the current Target Environment.",
+                            VOLUME_REFRESH_HELP,
                         )
                     })?;
                     Ok(Resource {

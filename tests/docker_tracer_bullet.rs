@@ -535,6 +535,25 @@ async fn docker_keeps_an_empty_images_panel() {
     assert_eq!(snapshot.panels.len(), 3);
     assert!(snapshot.panels[1].resources.is_empty());
     assert_eq!(snapshot.panels[1].id, ResourcePanelId::new("images"));
+    assert!(snapshot.panels[2].resources.is_empty());
+    assert_eq!(snapshot.panels[2].id, ResourcePanelId::new("volumes"));
+}
+
+#[tokio::test]
+async fn malformed_volume_output_becomes_an_actionable_workspace_error() {
+    let cli = FixtureCli::new([
+        (container_ls(), success("")),
+        (image_ls(), success("")),
+        (volume_ls(), success("not a Docker volume row\n")),
+    ]);
+
+    let error = DockerWorkspace
+        .refresh(&cli)
+        .await
+        .expect_err("malformed volume output cannot become Resources");
+
+    assert!(error.message.contains("malformed volume data"));
+    assert!(error.message.contains("docker volume ls"));
 }
 
 #[tokio::test]

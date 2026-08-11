@@ -278,11 +278,14 @@ impl CliRunner for DelayedCli {
         command: ProcessSpec,
     ) -> Pin<Box<dyn Future<Output = Result<ProcessOutput, ProcessError>> + Send + 'a>> {
         Box::pin(async move {
-            if command
-                == ProcessSpec::new(
+            if [
+                ProcessSpec::new(
                     "docker",
                     &["image", "ls", "--no-trunc", "--format", "{{json .}}"],
-                )
+                ),
+                ProcessSpec::new("docker", &["volume", "ls", "--format", "{{json .}}"]),
+            ]
+            .contains(&command)
             {
                 return Ok(ProcessOutput {
                     stdout: String::new(),
