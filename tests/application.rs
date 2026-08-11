@@ -1488,6 +1488,19 @@ fn deleting_a_stateless_resource_confirms_permanent_removal_before_dispatch() {
 }
 
 #[test]
+fn cancelling_a_stateless_resource_deletion_dispatches_nothing() {
+    let mut app = App::new();
+    ready_workspace(&mut app, docker_discovery(), stateless_snapshot());
+
+    assert!(
+        app.invoke(Command::Resource(ResourceCommand::Delete))
+            .is_empty()
+    );
+    assert!(app.invoke(Command::Cancel).is_empty());
+    assert!(app.state().confirmation.is_none());
+}
+
+#[test]
 fn a_delete_confirmation_is_a_raised_warning_surface() {
     let mut app = App::new();
     ready_workspace(
