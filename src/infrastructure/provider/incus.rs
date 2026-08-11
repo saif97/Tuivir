@@ -251,6 +251,22 @@ impl ProviderWorkspace for IncusWorkspace {
         Box::pin(async move {
             let panel_id = target.panel_id();
             let resource_id = target.resource_id();
+            if panel_id.0 == VOLUMES_PANEL_ID && command == ResourceCommand::Delete {
+                let (pool, name) = volume_address(resource_id)?;
+                cli.run(ProcessSpec::new(
+                    "incus",
+                    &["storage", "volume", "delete", pool, name],
+                ))
+                .await
+                .map_err(|error| {
+                    WorkspaceError::new(provider_cli_error(
+                        PROVIDER_NAME,
+                        &error,
+                        &format!("Incus could not delete Volume {name} in pool {pool}"),
+                    ))
+                })?;
+                return Ok(());
+            }
             if panel_id.0 != INSTANCES_PANEL_ID {
                 return Err(WorkspaceError::new(format!(
                     "Incus has no {command} command for Resource Panel {panel_id}"
@@ -294,6 +310,34 @@ impl ProviderWorkspace for IncusWorkspace {
         Box::pin(async move {
             let panel_id = target.panel_id();
             let resource_id = target.resource_id();
+            if panel_id.0 == VOLUMES_PANEL_ID {
+                let (pool, name) = volume_address(resource_id)?;
+                let operation = match view_id.0.as_str() {
+                    INFO_VIEW_ID => "info",
+                    CONFIG_VIEW_ID => "show",
+                    _ => {
+                        return Err(WorkspaceError::new(format!(
+                            "Incus has no {view_id} view for Volume {name} in pool {pool}"
+                        )));
+                    }
+                };
+                let output = cli
+                    .run(ProcessSpec::new(
+                        "incus",
+                        &["storage", "volume", operation, pool, name],
+                    ))
+                    .await
+                    .map_err(|error| {
+                        WorkspaceError::new(provider_cli_error(
+                            PROVIDER_NAME,
+                            &error,
+                            &format!(
+                                "Incus could not load {view_id} for Volume {name} in pool {pool}"
+                            ),
+                        ))
+                    })?;
+                return Ok(ResourceDetails::from_output(&output.stdout));
+            }
             if panel_id.0 != INSTANCES_PANEL_ID {
                 return Err(WorkspaceError::new(format!(
                     "Incus has no {view_id} view for Resource Panel {panel_id}"
@@ -341,6 +385,18 @@ fn instance_detail_views() -> Vec<DetailView> {
         DetailView::new(CONFIG_VIEW_ID, "Config"),
         DetailView::new(CONSOLE_LOG_VIEW_ID, "Console Log"),
     ]
+}
+
+fn volume_address(resource_id: &ResourceId) -> Result<(&str, &str), WorkspaceError> {
+    resource_id
+        .0
+        .split_once('/')
+        .filter(|(pool, name)| !pool.is_empty() && !name.is_empty())
+        .ok_or_else(|| {
+            WorkspaceError::new(format!(
+                "Incus Volume identity {resource_id} does not contain a pool and name"
+            ))
+        })
 }
 
 /// Maps an Incus instance status onto the shared vocabulary.

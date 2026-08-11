@@ -351,6 +351,40 @@ async fn each_detail_view_runs_its_own_incus_command() {
 }
 
 #[tokio::test]
+async fn volume_details_and_plain_delete_use_the_selected_pool_and_name() {
+    let target = resource_target("volumes", "archive/cache");
+    for (view, expected) in [
+        (
+            "info",
+            ProcessSpec::new("incus", &["storage", "volume", "info", "archive", "cache"]),
+        ),
+        (
+            "config",
+            ProcessSpec::new("incus", &["storage", "volume", "show", "archive", "cache"]),
+        ),
+    ] {
+        let cli = FixtureCli::new([(expected, success("native output\n"))]);
+        let details = IncusWorkspace
+            .load_details(&cli, &target, &DetailViewId::new(view))
+            .await
+            .expect("Incus custom Volume details load");
+        assert_eq!(details.lines, ["native output"]);
+    }
+
+    let cli = FixtureCli::new([(
+        ProcessSpec::new(
+            "incus",
+            &["storage", "volume", "delete", "archive", "cache"],
+        ),
+        success(""),
+    )]);
+    IncusWorkspace
+        .execute_command(&cli, &target, ResourceCommand::Delete, None)
+        .await
+        .expect("Incus deletes the custom Volume without force");
+}
+
+#[tokio::test]
 async fn an_instance_with_no_console_log_loads_empty_details() {
     let cli = FixtureCli::new([(
         ProcessSpec::new("incus", &["console", "--show-log", "gateway"]),
