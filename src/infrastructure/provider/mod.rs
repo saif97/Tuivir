@@ -34,6 +34,20 @@ pub fn provider_cli_error(provider_name: &str, error: &ProcessError, fallback: &
     }
 }
 
+pub fn require_resource_state(
+    state: Option<ResourceState>,
+    provider_name: &str,
+    resource_kind: &str,
+    command: ResourceCommand,
+    resource_id: &ResourceId,
+) -> Result<ResourceState, WorkspaceError> {
+    state.ok_or_else(|| {
+        WorkspaceError::new(format!(
+            "{provider_name} cannot {command} {resource_kind} {resource_id} without its last reported Resource State"
+        ))
+    })
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// The presence and initial state of an installed provider.
 ///

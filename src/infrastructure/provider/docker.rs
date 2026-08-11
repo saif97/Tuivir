@@ -9,7 +9,7 @@ use crate::{
         DetailView, DetailViewId, Provider, ProviderDiscovery, ProviderId, ProviderWorkspace,
         Resource, ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourcePanelId,
         ResourceState, ResourceTarget, TargetEnvironment, WorkspaceError, WorkspaceSnapshot,
-        provider_cli_error,
+        provider_cli_error, require_resource_state,
     },
 };
 
@@ -241,11 +241,8 @@ impl ProviderWorkspace for DockerWorkspace {
             // Docker removes a container plainly only from a stopped state; a
             // running, paused, or restarting one needs the force the user
             // already confirmed.
-            let Some(state) = state else {
-                return Err(WorkspaceError::new(format!(
-                    "Docker cannot {command} container {resource_id} without its last reported Resource State"
-                )));
-            };
+            let state =
+                require_resource_state(state, PROVIDER_NAME, "container", command, resource_id)?;
             if command == ResourceCommand::Delete && state != ResourceState::Stopped {
                 args.push("--force");
             }

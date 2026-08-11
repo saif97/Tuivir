@@ -9,7 +9,7 @@ use crate::{
         DetailView, DetailViewId, Provider, ProviderDiscovery, ProviderId, ProviderVersion,
         ProviderWorkspace, Resource, ResourceCommand, ResourceDetails, ResourceId, ResourcePanel,
         ResourcePanelId, ResourceState, ResourceTarget, WorkspaceError, WorkspaceSnapshot,
-        provider_cli_error,
+        provider_cli_error, require_resource_state,
     },
 };
 
@@ -311,11 +311,7 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
         Box::pin(async move {
             let panel_id = target.panel_id();
             let resource_id = target.resource_id();
-            if state.is_none() {
-                return Err(WorkspaceError::new(format!(
-                    "Docker Sandbox cannot {command} sandbox {resource_id} without its last reported Resource State"
-                )));
-            }
+            require_resource_state(state, PROVIDER_NAME, "sandbox", command, resource_id)?;
             if panel_id.0 != SANDBOXES_PANEL_ID {
                 return Err(WorkspaceError::new(format!(
                     "Docker Sandbox has no {command} command for Resource Panel {panel_id}"
