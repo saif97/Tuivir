@@ -1,4 +1,4 @@
-use virtui::{
+use tuivir::{
     application::{App, Command, InteractiveShellProcess, Resource, ResourceCommand},
     domain::{DetailViewId, ResourceId, ResourcePanelId, ResourceState, ResourceTarget},
     infrastructure::{
@@ -669,7 +669,7 @@ async fn deleting_a_volume_through_the_workspace_refreshes_its_panel() {
         .next()
         .expect("confirmation dispatches deletion");
     let (request_id, provider_id, target, command, state) = match deletion {
-        virtui::application::ProviderRequest::ExecuteResourceCommand {
+        tuivir::application::ProviderRequest::ExecuteResourceCommand {
             request_id,
             provider_id,
             target,
@@ -683,7 +683,7 @@ async fn deleting_a_volume_through_the_workspace_refreshes_its_panel() {
         .await
         .expect("volume deletion succeeds");
     let follow_up = app.update(command_completed(
-        virtui::application::ProviderRequest::ExecuteResourceCommand {
+        tuivir::application::ProviderRequest::ExecuteResourceCommand {
             request_id,
             provider_id,
             target,

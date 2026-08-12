@@ -201,8 +201,8 @@ fn listing_failure(error: ProcessError) -> WorkspaceError {
 ///
 /// Deletion always forces. Unlike Docker and Incus, the flag is not about a
 /// running Resource: `sbx rm` prompts for confirmation it reads from a
-/// terminal Virtui does not give it, and `--force` is what skips that prompt.
-/// The user has already confirmed through Virtui's own.
+/// terminal Tuivir does not give it, and `--force` is what skips that prompt.
+/// The user has already confirmed through Tuivir's own.
 fn sandbox_command(command: ResourceCommand, resource_id: &str) -> Option<Vec<&str>> {
     match command {
         ResourceCommand::Start => Some(vec!["exec", "-d", resource_id, "true"]),

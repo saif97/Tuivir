@@ -1,4 +1,4 @@
-use virtui::domain::{
+use tuivir::domain::{
     DetailViewId, Provider, ProviderId, ProviderVersion, ResourceId, ResourcePanelId,
     ResourceState, ResourceTarget,
 };

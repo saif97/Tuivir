@@ -473,7 +473,7 @@ pub(super) fn visible_resource_range(
 /// Resource is distinguishable without reading the text.
 ///
 /// `Unknown` is deliberately left neutral: a status this Provider Workspace
-/// does not recognise must not borrow the colour of a state Virtui understands.
+/// does not recognise must not borrow the colour of a state Tuivir understands.
 fn resource_state_style(state: ResourceState) -> Style {
     let colour = match state {
         ResourceState::Running => theme_colour(ThemeRole::Success),

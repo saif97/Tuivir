@@ -8,7 +8,7 @@ use std::{
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::Color;
 use tokio::sync::{Barrier, Notify, mpsc};
-use virtui::{
+use tuivir::{
     application::{
         App, AppEvent, AppState, Command, CommandRegistry, CommandScope, DetailView, FocusedPane,
         InteractiveShellOutcome, InteractiveShellProcess, LifecycleCommandPolicy, ProviderRequest,
@@ -1326,7 +1326,7 @@ fn question_mark_closes_the_help_overlay_when_it_is_already_open() {
     assert!(screen.contains("api"), "rendered screen:\n{screen}");
 }
 
-/// An Interactive Shell is not work Virtui can run behind its own screen, so
+/// An Interactive Shell is not work Tuivir can run behind its own screen, so
 /// the shell key produces no provider request at all. It asks for the terminal
 /// instead, naming what the shell was opened for so a failure can say so later.
 #[test]
@@ -1792,7 +1792,7 @@ fn each_resource_state_has_a_coloured_symbol_without_repeating_its_status_text()
         (ResourceState::Transitioning, "restarting", "↻", Color::Blue),
         (ResourceState::Broken, "dead", "✕", Color::Red),
         // An unrecognised Provider status stays neutral rather than borrowing
-        // the colour of a state Virtui understands.
+        // the colour of a state Tuivir understands.
         (ResourceState::Unknown, "teleporting", "?", Color::Reset),
     ] {
         let mut app = App::new();

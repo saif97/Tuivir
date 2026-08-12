@@ -18,7 +18,7 @@ impl fmt::Display for ProviderId {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-/// The Provider-selected destination that owns the Resources Virtui operates.
+/// The Provider-selected destination that owns the Resources Tuivir operates.
 ///
 /// This is deliberately distinct from [`ProviderVersion`]: a Docker context
 /// or Incus remote/project says where work happens, while a version says which

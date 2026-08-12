@@ -1,7 +1,7 @@
 {
   "sandboxes": [
     {
-      "name": "claude-virtui",
+      "name": "claude-tuivir",
       "id": "3f2a1c88-91b4-4d0e-9c77-1e5b0a6d2f43",
       "agent": "claude",
       "status": "running",
@@ -14,7 +14,7 @@
         }
       ],
       "workspaces": [
-        "/home/vibebox/projects/virtui"
+        "/home/vibebox/projects/tuivir"
       ]
     },
     {

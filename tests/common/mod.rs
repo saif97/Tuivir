@@ -11,10 +11,10 @@ use std::{
     sync::{Mutex, MutexGuard},
 };
 
-use virtui::infrastructure::process::{
+use tuivir::infrastructure::process::{
     CliRunner, ProcessError, ProcessFailure, ProcessOutput, ProcessSpec,
 };
-use virtui::{
+use tuivir::{
     application::{
         App, AppEvent, ProviderRequest, ResourceDetails, WorkspaceError, WorkspaceSnapshot,
     },
@@ -181,7 +181,7 @@ pub fn detail_request(requests: Vec<ProviderRequest>) -> ProviderRequest {
 /// Enters the first Provider-backed Detail View Tab from snapshot-backed
 /// Overview, returning the Provider work that selection starts.
 pub fn first_provider_detail(app: &mut App) -> ProviderRequest {
-    detail_request(app.invoke(virtui::application::Command::NextDetailView))
+    detail_request(app.invoke(tuivir::application::Command::NextDetailView))
 }
 
 /// Constructs the completion matching a detail-load request.

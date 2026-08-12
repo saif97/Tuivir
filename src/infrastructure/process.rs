@@ -81,7 +81,7 @@ impl ProcessError {
     /// Only a process that never started failed at anything the caller
     /// promised. One that ran and exited non-zero reported a status about its
     /// own work, which for an Interactive Shell is the status of the last
-    /// command the user typed into it — theirs to read, not Virtui's to
+    /// command the user typed into it — theirs to read, not Tuivir's to
     /// complain about.
     ///
     /// The caller already knows which Provider and Resource it asked about, so
@@ -111,14 +111,14 @@ pub trait CliRunner: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = Result<ProcessOutput, ProcessError>> + Send + 'a>>;
 }
 
-/// Runs a Provider CLI process that takes over Virtui's terminal.
+/// Runs a Provider CLI process that takes over Tuivir's terminal.
 ///
 /// This is the opposite of [`CliRunner`] in the one way that matters: the
 /// process inherits the user's own stdin, stdout, and stderr instead of having
 /// them captured, because an Interactive Shell is only a shell if the user can
 /// type into it. Nothing it printed is available afterwards.
 ///
-/// Running is blocking and deliberately so: Virtui has given up the screen and
+/// Running is blocking and deliberately so: Tuivir has given up the screen and
 /// has nothing to do until the shell exits.
 pub trait InteractiveRunner: Send + Sync {
     fn run_interactive(&self, process: &ProcessSpec) -> Result<(), ProcessError>;

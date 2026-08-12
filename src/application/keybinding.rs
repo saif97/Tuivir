@@ -6,9 +6,9 @@ use std::fmt;
 /// part of an invalid override set is applied.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum KeybindingError {
-    /// A keybinding names a Command Virtui does not register.
+    /// A keybinding names a Command Tuivir does not register.
     UnknownCommand { id: String },
-    /// A key string Virtui cannot represent.
+    /// A key string Tuivir cannot represent.
     InvalidKey { id: String, key: String },
     /// One Command lists the same key twice, however it was spelled.
     DuplicateKey { id: String, key: String },
@@ -45,7 +45,7 @@ impl fmt::Display for KeybindingError {
             ),
             Self::ReservedKey { id, key } => write!(
                 formatter,
-                "[keybindings] \"{id}\" cannot claim \"{key}\": it always quits Virtui"
+                "[keybindings] \"{id}\" cannot claim \"{key}\": it always quits Tuivir"
             ),
         }
     }

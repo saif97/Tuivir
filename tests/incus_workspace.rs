@@ -2,7 +2,7 @@ use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
 
 use tokio::sync::Barrier;
 
-use virtui::{
+use tuivir::{
     application::{App, Command, InteractiveShellProcess, ProviderRequest, ResourceCommand},
     domain::{DetailViewId, ProviderId, ResourceState, TargetEnvironment},
     infrastructure::process::{CliRunner, ProcessError, ProcessOutput, ProcessSpec},

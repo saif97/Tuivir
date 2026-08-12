@@ -1,4 +1,4 @@
-use virtui::application::{
+use tuivir::application::{
     Command, CommandRegistry, CommandScope, Key, KeybindingError, ResourceCommand,
 };
 

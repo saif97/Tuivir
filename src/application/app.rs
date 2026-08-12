@@ -72,7 +72,7 @@ pub enum FocusedPane {
 /// height to take a page from.
 const DETAIL_SCROLL_LINES: isize = 10;
 
-/// One sentence for every operation Virtui asked a Provider for and did not
+/// One sentence for every operation Tuivir asked a Provider for and did not
 /// get.
 ///
 /// Lifecycle Commands and Interactive Shells fail in different places and are
@@ -688,7 +688,7 @@ impl App {
         match result {
             Ok(snapshot) if snapshot.panels.len() > NUMBERED_RESOURCE_PANEL_CAPACITY => {
                 provider.reject_snapshot(WorkspaceError::new(format!(
-                    "{} returned {} Resource Panels; Virtui supports at most \
+                    "{} returned {} Resource Panels; Tuivir supports at most \
                      {NUMBERED_RESOURCE_PANEL_CAPACITY} Resource Panels so each retains a \
                      numbered focus Command",
                     provider.name(),

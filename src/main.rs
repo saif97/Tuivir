@@ -17,7 +17,7 @@ use crossterm::{
 };
 use ratatui::DefaultTerminal;
 use tokio::sync::mpsc;
-use virtui::{
+use tuivir::{
     application::{
         App, AppEvent, Command, CommandRegistry, InteractiveShellOutcome, ProviderRequest,
     },
@@ -91,7 +91,7 @@ trait Clipboard {
 }
 
 /// OSC 52 lets capable terminals (including Ghostty) own the platform
-/// clipboard while keeping Virtui independent of a desktop clipboard API.
+/// clipboard while keeping Tuivir independent of a desktop clipboard API.
 struct Osc52Clipboard<W>(W);
 
 impl<W: Write> Clipboard for Osc52Clipboard<W> {
@@ -279,7 +279,7 @@ async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::R
                     break Ok(());
                 }
                 // A key may have asked for the terminal. Handing it over blocks
-                // this loop until the shell exits, which is the point: Virtui
+                // this loop until the shell exits, which is the point: Tuivir
                 // has no screen to draw on until it comes back.
                 //
                 // Asked only when a shell is actually waiting: `block_in_place`
@@ -357,14 +357,14 @@ impl ShellTerminal for Host<'_> {
         // crossterm would swallow the keystrokes meant for the shell.
         self.input.stop();
         // Raw mode goes; the alternate screen stays. Leaving it would uncover
-        // the terminal Virtui was launched from, and the shell would open on
+        // the terminal Tuivir was launched from, and the shell would open on
         // top of whatever was already there — the user's own scrollback, with a
         // container's prompt in the middle of it. Wiping the alternate screen
         // instead opens the shell on nothing but itself, and leaves the real
-        // terminal untouched for Virtui to hand back whole at the end.
+        // terminal untouched for Tuivir to hand back whole at the end.
         disable_raw_mode()?;
         // Mouse capture goes with it: the Interactive Shell owns the whole
-        // terminal, and escape sequences meant for Virtui would otherwise be
+        // terminal, and escape sequences meant for Tuivir would otherwise be
         // typed into the shell.
         execute!(
             io::stdout(),
@@ -382,13 +382,13 @@ impl ShellTerminal for Host<'_> {
         enable_raw_mode()?;
         // Mouse capture comes back with the screen it belongs to.
         execute!(io::stdout(), EnableMouseCapture)?;
-        // Asking for the alternate screen Virtui never gave up costs nothing,
+        // Asking for the alternate screen Tuivir never gave up costs nothing,
         // and is what recovers the one case where it did lose it: a full-screen
         // program run inside the shell — an editor in the container — leaves the
         // alternate screen on its way out and drops the terminal back onto the
-        // screen Virtui must not draw over.
+        // screen Tuivir must not draw over.
         execute!(io::stdout(), EnterAlternateScreen)?;
-        // The shell wrote all over the screen Virtui last drew, so nothing that
+        // The shell wrote all over the screen Tuivir last drew, so nothing that
         // survives the handover is worth keeping — and without this the next
         // draw would diff against a buffer describing a screen that is gone.
         //
@@ -416,7 +416,7 @@ impl ShellTerminal for Host<'_> {
 /// The blocking terminal reader, publishing keys as application input.
 ///
 /// It is stoppable because an Interactive Shell needs the keystrokes more than
-/// Virtui does, and restartable because Virtui needs them back afterwards.
+/// Tuivir does, and restartable because Tuivir needs them back afterwards.
 struct InputThread {
     keys: mpsc::UnboundedSender<Event>,
     stop: Arc<AtomicBool>,
