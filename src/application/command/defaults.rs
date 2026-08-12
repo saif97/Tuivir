@@ -1,7 +1,7 @@
 //! Compiled Command registration policy.
 //!
 //! User TOML supplies partial keybinding overrides through infrastructure; it
-//! cannot be the source of these definitions because Virtui must have its full
+//! cannot be the source of these definitions because Tuivir must have its full
 //! Command registry when no configuration file exists.
 
 use super::{Command, CommandScope, ResourceCommand};

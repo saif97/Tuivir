@@ -1,4 +1,4 @@
-use virtui::{
+use tuivir::{
     application::{
         DetailContent, DetailView, ProviderRequestId, ProviderWorkspaceState, Resource,
         ResourceDetails, ResourcePanel, WorkspaceError, WorkspaceLoadState, WorkspaceSnapshot,

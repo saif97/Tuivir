@@ -5,7 +5,7 @@
 
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
-use virtui::{
+use tuivir::{
     application::{AppState, Command, FocusedPane, ProviderWorkspaceState},
     domain::{Provider, ProviderId},
     presentation::{

@@ -1,5 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use virtui::{
+use tuivir::{
     application::{Key, Named},
     presentation::key_from_event,
 };

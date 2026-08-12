@@ -1,4 +1,4 @@
-use virtui::infrastructure::process::{
+use tuivir::infrastructure::process::{
     CliRunner, InteractiveRunner, ProcessError, ProcessSpec, TokioCliRunner,
 };
 
@@ -23,7 +23,7 @@ async fn an_absent_executable_is_distinct_from_a_process_that_ran() {
     let runner = TokioCliRunner;
 
     let error = runner
-        .run(ProcessSpec::new("virtui-no-such-provider-cli", &["list"]))
+        .run(ProcessSpec::new("tuivir-no-such-provider-cli", &["list"]))
         .await
         .expect_err("the program does not exist");
 
@@ -92,7 +92,7 @@ fn an_interactive_process_that_exits_cleanly_succeeds() {
         .expect("exit status 0 is the only successful result");
 }
 
-/// The streams belong to the user, not to Virtui. A process that printed is
+/// The streams belong to the user, not to Tuivir. A process that printed is
 /// still quoted nowhere, because nothing was captured to quote — which is why
 /// the status is the only thing a failure can carry.
 ///
@@ -108,8 +108,8 @@ fn an_interactive_process_keeps_its_status_and_captures_neither_stream() {
             "/bin/sh",
             &[
                 "-c",
-                "printf 'virtui test: inherited stdout, not captured\\n'; \
-                 printf 'virtui test: inherited stderr, not captured\\n' >&2; \
+                "printf 'tuivir test: inherited stdout, not captured\\n'; \
+                 printf 'tuivir test: inherited stderr, not captured\\n' >&2; \
                  exit 3",
             ],
         ))
@@ -142,14 +142,14 @@ fn a_signalled_interactive_process_ran_and_reports_no_exit_code() {
     assert_eq!(failure.exit_code, None);
 }
 
-/// The one failure Virtui does report to the user: the Provider CLI was there
+/// The one failure Tuivir does report to the user: the Provider CLI was there
 /// at discovery and is gone by the time a shell is asked for.
 #[test]
 fn an_absent_interactive_program_is_distinct_from_a_process_that_ran() {
     let runner = TokioCliRunner;
 
     let error = runner
-        .run_interactive(&ProcessSpec::new("virtui-no-such-provider-cli", &["exec"]))
+        .run_interactive(&ProcessSpec::new("tuivir-no-such-provider-cli", &["exec"]))
         .expect_err("the program does not exist");
 
     assert_eq!(error, ProcessError::ExecutableNotFound);

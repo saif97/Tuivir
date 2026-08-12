@@ -2,7 +2,7 @@
 
 This is a single-context repository. Before exploring or changing an area, read the domain documentation relevant to the work:
 
-- `CONTEXT.md` at the repository root defines Virtui's canonical domain language.
+- `CONTEXT.md` at the repository root defines Tuivir's canonical domain language.
 - `docs/adr/` contains system-wide architectural decisions.
 
 If either location is absent, proceed silently. Domain documentation is created lazily when terms or decisions are resolved.

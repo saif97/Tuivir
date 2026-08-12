@@ -8,7 +8,7 @@
 
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
-use virtui::{
+use tuivir::{
     application::{AppState, Command, PaneBoundary, ProviderWorkspaceState},
     domain::{Provider, ProviderId},
     presentation::resolve_mouse,

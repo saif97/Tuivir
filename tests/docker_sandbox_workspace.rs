@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use virtui::{
+use tuivir::{
     application::{App, Command, InteractiveShellProcess, ProviderRequest, ResourceCommand},
     domain::{
         DetailViewId, ProviderId, ProviderVersion, ResourceId, ResourcePanelId, ResourceState,
@@ -74,8 +74,8 @@ async fn sandboxes_become_resources_identified_by_name() {
             .collect::<Vec<_>>(),
         [
             (
-                "claude-virtui",
-                "claude-virtui",
+                "claude-tuivir",
+                "claude-tuivir",
                 Some("running"),
                 ResourceState::Running
             ),
@@ -144,8 +144,8 @@ async fn a_sandbox_carries_its_agent_uuid_and_workspaces_as_fields() {
     let sandbox = snapshot
         .targets()
         .map(|(_, resource)| resource)
-        .find(|resource| resource.name == "claude-virtui")
-        .expect("the fixture lists claude-virtui");
+        .find(|resource| resource.name == "claude-tuivir")
+        .expect("the fixture lists claude-tuivir");
     assert_eq!(
         sandbox
             .fields
@@ -155,7 +155,7 @@ async fn a_sandbox_carries_its_agent_uuid_and_workspaces_as_fields() {
         [
             ("Agent", "claude"),
             ("ID", "3f2a1c88-91b4-4d0e-9c77-1e5b0a6d2f43"),
-            ("Workspaces", "/home/vibebox/projects/virtui"),
+            ("Workspaces", "/home/vibebox/projects/tuivir"),
         ]
     );
 }
@@ -217,14 +217,14 @@ async fn starting_a_sandbox_generates_the_expected_cli_request() {
 #[tokio::test]
 async fn stopping_a_sandbox_generates_the_expected_cli_request() {
     let cli = FixtureCli::new([(
-        ProcessSpec::new("sbx", &["stop", "claude-virtui"]),
+        ProcessSpec::new("sbx", &["stop", "claude-tuivir"]),
         success(""),
     )]);
 
     DockerSandboxWorkspace
         .execute_command(
             &cli,
-            &resource_target("sandboxes", "claude-virtui"),
+            &resource_target("sandboxes", "claude-tuivir"),
             ResourceCommand::Stop,
             Some(ResourceState::Running),
         )
@@ -233,7 +233,7 @@ async fn stopping_a_sandbox_generates_the_expected_cli_request() {
 }
 
 /// Unlike Docker and Incus, the force here is not about a running Resource.
-/// `sbx rm` prompts for a confirmation it reads from a terminal Virtui never
+/// `sbx rm` prompts for a confirmation it reads from a terminal Tuivir never
 /// gives it, so every deletion needs `--force` to proceed at all — including
 /// one from a settled, stopped sandbox.
 #[tokio::test]
@@ -247,14 +247,14 @@ async fn deleting_a_sandbox_always_forces_regardless_of_state() {
         ResourceState::Unknown,
     ] {
         let cli = FixtureCli::new([(
-            ProcessSpec::new("sbx", &["rm", "--force", "claude-virtui"]),
+            ProcessSpec::new("sbx", &["rm", "--force", "claude-tuivir"]),
             success(""),
         )]);
 
         DockerSandboxWorkspace
             .execute_command(
                 &cli,
-                &resource_target("sandboxes", "claude-virtui"),
+                &resource_target("sandboxes", "claude-tuivir"),
                 ResourceCommand::Delete,
                 Some(state),
             )
@@ -274,7 +274,7 @@ async fn a_command_sbx_cannot_perform_is_refused_without_running_anything() {
         let error = DockerSandboxWorkspace
             .execute_command(
                 &cli,
-                &resource_target("sandboxes", "claude-virtui"),
+                &resource_target("sandboxes", "claude-tuivir"),
                 command,
                 Some(ResourceState::Running),
             )
@@ -283,14 +283,14 @@ async fn a_command_sbx_cannot_perform_is_refused_without_running_anything() {
 
         assert_eq!(
             error.message,
-            format!("Docker Sandbox cannot {command} sandbox claude-virtui")
+            format!("Docker Sandbox cannot {command} sandbox claude-tuivir")
         );
     }
 }
 
 /// `sbx exec` starts a stopped sandbox before running in it, so a sandbox does
 /// not have to be running to carry an Interactive Shell — it only has to be one
-/// Virtui recognises. That is a real difference from Docker and Incus, where
+/// Tuivir recognises. That is a real difference from Docker and Incus, where
 /// exec against anything but a running Resource simply fails, and the rule in
 /// both cases is the same one: offer the shell exactly where it works.
 ///
@@ -417,8 +417,8 @@ async fn discovered_docker_sandbox_omits_an_unselected_environment() {
     assert!(screen.contains("[1] Docker Sandbox"), "{screen}");
     assert!(!screen.contains("Docker Sandbox ·"), "{screen}");
     assert!(screen.contains("Sandboxes"), "{screen}");
-    assert!(screen.contains("claude-virtui"), "{screen}");
-    assert!(screen.contains("● claude-virtui"), "{screen}");
+    assert!(screen.contains("claude-tuivir"), "{screen}");
+    assert!(screen.contains("● claude-tuivir"), "{screen}");
     assert!(screen.contains("shell-dotfiles"), "{screen}");
     assert!(screen.contains("○ shell-dotfiles"), "{screen}");
     assert!(screen.contains("Agent: claude"), "{screen}");
@@ -535,7 +535,7 @@ async fn deleting_a_sandbox_confirms_first_and_then_runs_the_expected_cli_reques
     assert!(pending.is_empty(), "deletion waits for confirmation");
     let screen = render_to_text(app.state(), 100, 24);
     assert!(screen.contains("Docker Sandbox"), "{screen}");
-    assert!(screen.contains("claude-virtui"), "{screen}");
+    assert!(screen.contains("claude-tuivir"), "{screen}");
 
     let ProviderRequest::ExecuteResourceCommand {
         provider_id,
@@ -556,14 +556,14 @@ async fn deleting_a_sandbox_confirms_first_and_then_runs_the_expected_cli_reques
         target,
         ResourceTarget::new(
             ResourcePanelId::new("sandboxes"),
-            ResourceId::new("claude-virtui"),
+            ResourceId::new("claude-tuivir"),
         )
     );
     assert_eq!(command, ResourceCommand::Delete);
 
     // The request the shell produced reaches sbx as the arguments #29 names.
     let executing = FixtureCli::new([(
-        ProcessSpec::new("sbx", &["rm", "--force", "claude-virtui"]),
+        ProcessSpec::new("sbx", &["rm", "--force", "claude-tuivir"]),
         success(""),
     )]);
     sandboxes
@@ -600,7 +600,7 @@ async fn starting_an_already_running_sandbox_is_not_offered_and_issues_nothing()
         .expect("initial refresh");
     app.update(refresh_completed(request, sandboxes.refresh(&cli).await));
 
-    // claude-virtui is running, so Start was never among its Commands.
+    // claude-tuivir is running, so Start was never among its Commands.
     let requests = app.invoke(Command::Resource(ResourceCommand::Start));
 
     assert!(
@@ -612,21 +612,21 @@ async fn starting_an_already_running_sandbox_is_not_offered_and_issues_nothing()
 #[tokio::test]
 async fn a_failed_command_reports_what_sbx_wrote_to_stderr() {
     let cli = FixtureCli::new([(
-        ProcessSpec::new("sbx", &["stop", "claude-virtui"]),
-        failure("Error: sandbox 'claude-virtui' not found"),
+        ProcessSpec::new("sbx", &["stop", "claude-tuivir"]),
+        failure("Error: sandbox 'claude-tuivir' not found"),
     )]);
 
     let error = DockerSandboxWorkspace
         .execute_command(
             &cli,
-            &resource_target("sandboxes", "claude-virtui"),
+            &resource_target("sandboxes", "claude-tuivir"),
             ResourceCommand::Stop,
             Some(ResourceState::Running),
         )
         .await
         .expect_err("a non-zero exit is never a success");
 
-    assert_eq!(error.message, "Error: sandbox 'claude-virtui' not found");
+    assert_eq!(error.message, "Error: sandbox 'claude-tuivir' not found");
 }
 
 /// An sbx that fails without a word still has to say which Provider, which
@@ -634,7 +634,7 @@ async fn a_failed_command_reports_what_sbx_wrote_to_stderr() {
 #[tokio::test]
 async fn a_silent_command_failure_names_the_provider_command_and_sandbox() {
     let cli = FixtureCli::new([(
-        ProcessSpec::new("sbx", &["rm", "--force", "claude-virtui"]),
+        ProcessSpec::new("sbx", &["rm", "--force", "claude-tuivir"]),
         Err(ProcessError::Exited(ProcessFailure {
             exit_code: Some(1),
             stdout: String::new(),
@@ -645,7 +645,7 @@ async fn a_silent_command_failure_names_the_provider_command_and_sandbox() {
     let error = DockerSandboxWorkspace
         .execute_command(
             &cli,
-            &resource_target("sandboxes", "claude-virtui"),
+            &resource_target("sandboxes", "claude-tuivir"),
             ResourceCommand::Delete,
             Some(ResourceState::Running),
         )
@@ -654,7 +654,7 @@ async fn a_silent_command_failure_names_the_provider_command_and_sandbox() {
 
     assert_eq!(
         error.message,
-        "Docker Sandbox could not delete sandbox claude-virtui"
+        "Docker Sandbox could not delete sandbox claude-tuivir"
     );
 }
 
@@ -699,7 +699,7 @@ async fn the_info_view_describes_the_selected_sandbox() {
         .expect("the fixture lists sandboxes");
     let details = snapshot
         .snapshot_detail(
-            &resource_target("sandboxes", "claude-virtui"),
+            &resource_target("sandboxes", "claude-tuivir"),
             &DetailViewId::new("info"),
         )
         .expect("Info is snapshot-backed");
@@ -707,12 +707,12 @@ async fn the_info_view_describes_the_selected_sandbox() {
     assert_eq!(
         details.lines,
         [
-            "Name: claude-virtui",
+            "Name: claude-tuivir",
             "ID: 3f2a1c88-91b4-4d0e-9c77-1e5b0a6d2f43",
             "Agent: claude",
             "Status: running",
             "Workspaces:",
-            "  /home/vibebox/projects/virtui",
+            "  /home/vibebox/projects/tuivir",
             "Ports:",
             "  127.0.0.1:32768 -> 9418/tcp",
         ]
@@ -784,7 +784,7 @@ async fn a_view_docker_sandbox_never_declared_is_refused_without_running_anythin
     let error = DockerSandboxWorkspace
         .load_details(
             &cli,
-            &resource_target("sandboxes", "claude-virtui"),
+            &resource_target("sandboxes", "claude-tuivir"),
             &DetailViewId::new("logs"),
         )
         .await
@@ -792,7 +792,7 @@ async fn a_view_docker_sandbox_never_declared_is_refused_without_running_anythin
 
     assert_eq!(
         error.message,
-        "Docker Sandbox has no logs view for sandbox claude-virtui"
+        "Docker Sandbox has no logs view for sandbox claude-tuivir"
     );
 }
 

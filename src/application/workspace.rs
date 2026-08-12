@@ -231,7 +231,7 @@ impl ProviderWorkspaceState {
         self.invalidate_pending_detail();
     }
 
-    /// Rejects a snapshot whose shape Virtui cannot represent.
+    /// Rejects a snapshot whose shape Tuivir cannot represent.
     pub fn reject_snapshot(&mut self, error: WorkspaceError) {
         self.load_state = WorkspaceLoadState::Error(error);
         self.focused_resource_panel = None;

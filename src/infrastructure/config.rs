@@ -8,13 +8,13 @@ use serde::Deserialize;
 
 use crate::application::{CommandRegistry, KeybindingError};
 
-/// The environment Virtui consults to discover its configuration file.
+/// The environment Tuivir consults to discover its configuration file.
 ///
-/// Real startup builds this from `VIRTUI_CONFIG_FILE`, `XDG_CONFIG_HOME`, and
+/// Real startup builds this from `TUIVIR_CONFIG_FILE`, `XDG_CONFIG_HOME`, and
 /// `HOME`; tests inject it so they never depend on a real home directory.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Env {
-    /// `VIRTUI_CONFIG_FILE`: one absolute file, with highest precedence.
+    /// `TUIVIR_CONFIG_FILE`: one absolute file, with highest precedence.
     pub config_file: Option<PathBuf>,
     /// `$XDG_CONFIG_HOME`: only consulted when it is absolute.
     pub xdg_config_home: Option<PathBuf>,
@@ -26,7 +26,7 @@ impl Env {
     /// Builds the environment from the real process environment.
     pub fn from_environment() -> Self {
         Self {
-            config_file: std::env::var_os("VIRTUI_CONFIG_FILE").map(PathBuf::from),
+            config_file: std::env::var_os("TUIVIR_CONFIG_FILE").map(PathBuf::from),
             xdg_config_home: std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from),
             home: std::env::var_os("HOME").map(PathBuf::from),
         }
@@ -54,7 +54,7 @@ impl ReadFile for FileSystemReader {
 /// so it never appears here.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LoadError {
-    /// `VIRTUI_CONFIG_FILE` names a path that is not absolute.
+    /// `TUIVIR_CONFIG_FILE` names a path that is not absolute.
     ExplicitNotAbsolute { path: PathBuf },
     /// `XDG_CONFIG_HOME` is set to a path that is not absolute.
     XdgNotAbsolute { path: PathBuf },
@@ -76,7 +76,7 @@ impl fmt::Display for LoadError {
         match self {
             Self::ExplicitNotAbsolute { path } => write!(
                 formatter,
-                "VIRTUI_CONFIG_FILE must be an absolute path, not {}",
+                "TUIVIR_CONFIG_FILE must be an absolute path, not {}",
                 path.display()
             ),
             Self::XdgNotAbsolute { path } => write!(
@@ -113,7 +113,7 @@ impl fmt::Display for LoadError {
 /// Loads configuration once, layering any `[keybindings]` over the compiled
 /// defaults.
 ///
-/// With no explicit file and no discoverable file, Virtui uses the defaults
+/// With no explicit file and no discoverable file, Tuivir uses the defaults
 /// and creates nothing.
 pub fn load(env: &Env, reader: &dyn ReadFile) -> Result<CommandRegistry, LoadError> {
     // An explicit file always wins and must be absolute; a discovered file is
@@ -136,7 +136,7 @@ pub fn load(env: &Env, reader: &dyn ReadFile) -> Result<CommandRegistry, LoadErr
             if explicit {
                 return Err(LoadError::ExplicitMissing { path });
             }
-            // A missing discovered file means compiled defaults, and Virtui
+            // A missing discovered file means compiled defaults, and Tuivir
             // creates nothing and searches no project directory.
             return Ok(CommandRegistry::builtin());
         }
@@ -176,12 +176,12 @@ fn discovered_path(env: &Env) -> Result<Option<PathBuf>, LoadError> {
         if !xdg.is_absolute() {
             return Err(LoadError::XdgNotAbsolute { path: xdg.clone() });
         }
-        return Ok(Some(xdg.join("virtui").join("config.toml")));
+        return Ok(Some(xdg.join("tuivir").join("config.toml")));
     }
     Ok(env
         .home
         .as_ref()
-        .map(|home| home.join(".config").join("virtui").join("config.toml")))
+        .map(|home| home.join(".config").join("tuivir").join("config.toml")))
 }
 
 /// The file's shape. Unknown fields are refused so a typo or a setting meant

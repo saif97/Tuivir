@@ -18,7 +18,7 @@ use super::{
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
-use virtui::{
+use tuivir::{
     application::Command,
     application::{
         App, AppEvent, DetailView, InteractiveShellProcess, ProviderRequest, Resource,
@@ -121,13 +121,13 @@ fn docker_discovery() -> ProviderDiscovery {
 
 fn detail_request(resource_id: &str) -> ProviderRequest {
     ProviderRequest::LoadResourceDetails {
-        request_id: virtui::application::ProviderRequestId::new(1),
+        request_id: tuivir::application::ProviderRequestId::new(1),
         provider_id: ProviderId::new("docker"),
-        target: virtui::domain::ResourceTarget::new(
+        target: tuivir::domain::ResourceTarget::new(
             ResourcePanelId::new("containers"),
             ResourceId::new(resource_id),
         ),
-        view_id: virtui::domain::DetailViewId::new("logs"),
+        view_id: tuivir::domain::DetailViewId::new("logs"),
     }
 }
 
@@ -144,7 +144,7 @@ fn a_navigation_burst_dispatches_only_the_detail_view_where_selection_settles() 
     let started = Instant::now();
     let mut dispatch = DetailDispatchQueue::new(quiet_period);
     let refresh = ProviderRequest::RefreshWorkspace {
-        request_id: virtui::application::ProviderRequestId::new(2),
+        request_id: tuivir::application::ProviderRequestId::new(2),
         provider_id: ProviderId::new("docker"),
     };
 
@@ -374,7 +374,7 @@ fn clicking_a_resource_row_selects_it_without_loading_hidden_details() {
 
     assert_eq!(
         app.state().focused_pane,
-        virtui::application::FocusedPane::Resources,
+        tuivir::application::FocusedPane::Resources,
         "clicking a Resource focuses the Panel holding it"
     );
     assert!(requests.is_empty(), "unexpected requests: {requests:?}");
@@ -392,7 +392,7 @@ fn clicking_a_provider_workspace_makes_it_active() {
     assert_eq!(app.state().active_provider, Some(0));
     assert_eq!(
         app.state().focused_pane,
-        virtui::application::FocusedPane::Providers
+        tuivir::application::FocusedPane::Providers
     );
 }
 
@@ -450,7 +450,7 @@ fn a_click_on_an_open_overlay_changes_nothing_beneath_it() {
     assert_eq!(app.state().focused_pane, focus_before);
 }
 
-/// The whole point of the handover: Virtui is off the screen before the
+/// The whole point of the handover: Tuivir is off the screen before the
 /// Provider CLI touches it, and back on afterwards. The refresh can only be
 /// returned once all three have happened.
 #[test]
@@ -490,7 +490,7 @@ fn the_terminal_is_suspended_for_the_provider_cli_and_taken_back_after() {
 
 /// A Provider CLI that was there at discovery and is gone by the time the user
 /// asks for a shell must not take the terminal with it. The complaint waits
-/// until Virtui is back on screen, which is the only place the user can read
+/// until Tuivir is back on screen, which is the only place the user can read
 /// it.
 #[test]
 fn a_shell_that_never_starts_still_gives_the_terminal_back_and_names_what_failed() {
@@ -522,11 +522,11 @@ fn a_shell_that_never_starts_still_gives_the_terminal_back_and_names_what_failed
 
 /// A shell exits with the status of the last command typed into it, so a
 /// non-zero status is the user's own — a `grep` that matched nothing, then
-/// Ctrl-D — and not Virtui failing to give them a shell. Reporting it would put
+/// Ctrl-D — and not Tuivir failing to give them a shell. Reporting it would put
 /// a modal in front of a user who did nothing wrong, every time they left a
 /// shell on a failed command.
 ///
-/// Virtui gave them the shell they asked for. What they did inside it is theirs.
+/// Tuivir gave them the shell they asked for. What they did inside it is theirs.
 #[test]
 fn a_shell_that_ran_is_never_a_failure_whatever_status_it_left() {
     let mut app = app_awaiting_the_terminal();
@@ -558,9 +558,9 @@ fn a_shell_that_ran_is_never_a_failure_whatever_status_it_left() {
     );
 }
 
-/// The other half of the same rule: a shell Virtui could not start is a promise
+/// The other half of the same rule: a shell Tuivir could not start is a promise
 /// it failed to keep, and says so. The CLI's own words are kept, because the
-/// user needs the part Virtui cannot supply.
+/// user needs the part Tuivir cannot supply.
 #[test]
 fn a_shell_that_could_not_be_started_names_what_the_cli_said() {
     let mut app = app_awaiting_the_terminal();
@@ -582,14 +582,14 @@ fn a_shell_that_could_not_be_started_names_what_the_cli_said() {
 }
 
 /// Keys typed while the shell held the terminal were typed at the shell, and
-/// are gone before Virtui reads anything.
+/// are gone before Tuivir reads anything.
 ///
 /// The order is what makes that true rather than merely likely: a reader
 /// started first is already pulling those keys out of the queue, so a discard
 /// that follows it empties a queue the reader has partly drained and the
-/// remainder lands on Virtui as commands the user never aimed at it.
+/// remainder lands on Tuivir as commands the user never aimed at it.
 #[test]
-fn keys_typed_at_the_shell_are_discarded_before_virtui_reads_again() {
+fn keys_typed_at_the_shell_are_discarded_before_tuivir_reads_again() {
     let mut app = app_awaiting_the_terminal();
     let handover = Handover::default();
     let mut terminal = FakeTerminal::new(handover.clone());
@@ -608,7 +608,7 @@ fn keys_typed_at_the_shell_are_discarded_before_virtui_reads_again() {
     let reading = steps
         .iter()
         .position(|step| step == "resume reading")
-        .expect("Virtui to read keys again");
+        .expect("Tuivir to read keys again");
     assert!(
         discarded < reading,
         "discarding must precede reading, got {steps:?}"
@@ -708,8 +708,8 @@ fn mouse_routing_resolves_each_region_without_a_terminal() {
     assert_eq!(
         resolve_mouse(
             &layout,
-            virtui::presentation::MouseInput {
-                action: virtui::presentation::MouseAction::Drag,
+            tuivir::presentation::MouseInput {
+                action: tuivir::presentation::MouseAction::Drag,
                 column: 16,
                 row: 4,
             },
@@ -724,9 +724,9 @@ fn mouse_routing_resolves_each_region_without_a_terminal() {
     assert_eq!(resolve_mouse(&layout, press(79, 23), None), None);
 }
 
-fn press(column: u16, row: u16) -> virtui::presentation::MouseInput {
-    virtui::presentation::MouseInput {
-        action: virtui::presentation::MouseAction::Press,
+fn press(column: u16, row: u16) -> tuivir::presentation::MouseInput {
+    tuivir::presentation::MouseInput {
+        action: tuivir::presentation::MouseAction::Press,
         column,
         row,
     }
@@ -765,6 +765,6 @@ fn mouse_detail_click_focuses_details_without_live_terminal() {
     );
     assert_eq!(
         app.state().focused_pane,
-        virtui::application::FocusedPane::Details
+        tuivir::application::FocusedPane::Details
     );
 }
