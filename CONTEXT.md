@@ -1,6 +1,6 @@
-# Virtui
+# Tuivir
 
-Virtui is a terminal environment for inspecting and operating resources managed by local virtualization and container providers.
+Tuivir is a terminal environment for inspecting and operating resources managed by local virtualization and container providers.
 
 ## Language
 
@@ -13,11 +13,11 @@ Infrastructure evidence that a Provider is installed, together with an actionabl
 _Avoid_: Provider state, provider model
 
 **Provider Version**:
-Build information reported by an installed Provider. It describes the Provider itself and never identifies the Target Environment that owns the Resources Virtui operates.
+Build information reported by an installed Provider. It describes the Provider itself and never identifies the Target Environment that owns the Resources Tuivir operates.
 _Avoid_: Target version, environment version
 
 **Provider Workspace**:
-The provider-specific view of its native resources and operations within Virtui.
+The provider-specific view of its native resources and operations within Tuivir.
 _Avoid_: Provider tab, unified resource view
 
 **Provider Workspace State**:
@@ -33,7 +33,7 @@ A focusable region of the application shell, such as the Provider selector, a Re
 _Avoid_: Area, section, focus region
 
 **Pane Boundary**:
-The movable edge between two Panes, held as the share of the width or height it leaves the first of them rather than as a column or row count — so a terminal that changes size keeps the split the user chose. It is moved by dragging the borders that draw it or by its own Commands, and it holds itself inside a range that leaves both Panes usable. One share serves the whole Virtui run and every Provider Workspace in it; it is not written to a file.
+The movable edge between two Panes, held as the share of the width or height it leaves the first of them rather than as a column or row count — so a terminal that changes size keeps the split the user chose. It is moved by dragging the borders that draw it or by its own Commands, and it holds itself inside a range that leaves both Panes usable. One share serves the whole Tuivir run and every Provider Workspace in it; it is not written to a file.
 _Avoid_: Divider, splitter, split ratio
 
 **Resource**:
@@ -45,7 +45,7 @@ A provider-defined Pane containing one kind of Resource, such as Docker Containe
 _Avoid_: Resource pane, resource list
 
 **Volume**:
-An independently managed storage Resource, such as a Docker volume or an Incus custom storage volume. Storage owned as part of another Resource, a host path mounted into a Docker Sandbox, and a volume snapshot are not Volumes in Virtui.
+An independently managed storage Resource, such as a Docker volume or an Incus custom storage volume. Storage owned as part of another Resource, a host path mounted into a Docker Sandbox, and a volume snapshot are not Volumes in Tuivir.
 _Avoid_: Disk, mount, instance storage
 
 **Target Environment**:
@@ -53,7 +53,7 @@ The environment already selected through a Provider's CLI configuration, such as
 _Avoid_: Cluster, server, connection
 
 **Command**:
-A registered user intention that Virtui can invoke within its Command Scope.
+A registered user intention that Tuivir can invoke within its Command Scope.
 _Avoid_: Action, handler
 
 **Running Resource Command**:
@@ -73,13 +73,13 @@ One selectable, provider-native view of a Resource, declared by the Provider Wor
 _Avoid_: Detail View, pane, inspector, log view
 
 **Resource Shell Session**:
-An ongoing command shell attached to one Resource through a Detail View Tab. It remains active when the user navigates elsewhere in Virtui and is ended explicitly or when Virtui exits.
+An ongoing command shell attached to one Resource through a Detail View Tab. It remains active when the user navigates elsewhere in Tuivir and is ended explicitly or when Tuivir exits.
 _Avoid_: Interactive Detail Session, shell panel, terminal tab
 
 **Resource State**:
-What a Provider reported a stateful Resource to be doing at the last refresh, in one vocabulary shared by every Provider: running, stopped, paused, transitioning, broken, or unknown. Each Provider Workspace maps its own status words into it, and an invoked lifecycle Command carries it so Virtui never asks a Provider CLI for what it already knows. A stateless Resource has no Resource State; absence is not _unknown_. Only _stopped_ is positively determined; every other state, unknown included, means "not settled and stopped", so a Command that must treat those differently fails safe.
+What a Provider reported a stateful Resource to be doing at the last refresh, in one vocabulary shared by every Provider: running, stopped, paused, transitioning, broken, or unknown. Each Provider Workspace maps its own status words into it, and an invoked lifecycle Command carries it so Tuivir never asks a Provider CLI for what it already knows. A stateless Resource has no Resource State; absence is not _unknown_. Only _stopped_ is positively determined; every other state, unknown included, means "not settled and stopped", so a Command that must treat those differently fails safe.
 _Avoid_: Status, run state, power state, phase
 
 **Interactive Shell**:
-A Provider CLI process that temporarily owns Virtui's whole terminal so the user can work inside a Resource directly. Virtui clears its screen and stops reading keys before handing over, and takes both back however that process ends — including one that never started. The shell runs on Virtui's own screen rather than on the terminal Virtui was launched from, so it opens on nothing but itself and the user's terminal is still theirs, untouched, when Virtui exits. A Provider Workspace declares the shell it offers for each Resource in its own words, in the shell a Resource of that kind actually has: Docker's containers get `/bin/sh`, because the image may hold nothing else; an Incus instance is a whole system, so it gets root's login shell. A Resource its Provider declares no shell for offers the operation nowhere rather than failing when asked. Only a shell that never started counts as failing: one that ran exits with the status of the last command the user typed into it, which is theirs to read rather than Virtui's to complain about.
+A Provider CLI process that temporarily owns Tuivir's whole terminal so the user can work inside a Resource directly. Tuivir clears its screen and stops reading keys before handing over, and takes both back however that process ends — including one that never started. The shell runs on Tuivir's own screen rather than on the terminal Tuivir was launched from, so it opens on nothing but itself and the user's terminal is still theirs, untouched, when Tuivir exits. A Provider Workspace declares the shell it offers for each Resource in its own words, in the shell a Resource of that kind actually has: Docker's containers get `/bin/sh`, because the image may hold nothing else; an Incus instance is a whole system, so it gets root's login shell. A Resource its Provider declares no shell for offers the operation nowhere rather than failing when asked. Only a shell that never started counts as failing: one that ran exits with the status of the last command the user typed into it, which is theirs to read rather than Tuivir's to complain about.
 _Avoid_: Exec, attach, terminal session, embedded terminal

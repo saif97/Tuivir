@@ -1,11 +1,11 @@
-# Virtui
+# Tuivir
 
-Virtui is a terminal environment for inspecting and operating resources managed
+Tuivir is a terminal environment for inspecting and operating resources managed
 by local virtualization and container Providers.
 
 ## Source builds
 
-Virtui requires Rust `1.97.1`. With the pinned toolchain installed, build and
+Tuivir requires Rust `1.97.1`. With the pinned toolchain installed, build and
 test the locked dependency set with:
 
 ```sh
@@ -20,7 +20,7 @@ Provider, or initializing the terminal:
 cargo run --locked -- --version
 ```
 
-Provider CLIs remain optional. Virtui discovers Docker, Incus, and other
+Provider CLIs remain optional. Tuivir discovers Docker, Incus, and other
 supported Providers at runtime; they are not build or package dependencies.
 
 ## Planned distribution
@@ -28,11 +28,11 @@ supported Providers at runtime; they are not build or package dependencies.
 The following supported distribution surfaces are planned but are not live yet:
 
 - Homebrew through the `saif97/homebrew-tap` tap for macOS.
-- Omarchy through the `virtui-bin` package in the Arch User Repository (AUR).
+- Omarchy through the `tuivir-bin` package in the Arch User Repository (AUR).
 - Versioned release archives from GitHub Releases for manual installation.
 
-Until those surfaces are published, build Virtui from source with the pinned
+Until those surfaces are published, build Tuivir from source with the pinned
 toolchain above.
 
-Virtui is available under either the MIT License or the Apache License, Version
+Tuivir is available under either the MIT License or the Apache License, Version
 2.0. See [LICENSE-MIT](LICENSE-MIT) and [LICENSE-APACHE](LICENSE-APACHE).
