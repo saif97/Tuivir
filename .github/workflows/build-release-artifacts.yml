@@ -91,7 +91,9 @@ jobs:
           target_dir="$(cargo metadata --locked --no-deps --format-version 1 | jq -r .target_directory)"
           ldd "$target_dir/${{ matrix.target }}/release/tuivir" 2>&1 | grep -Fx 'statically linked'
 
-      - name: Upload the release archive
+      # GitHub Actions is the only cross-runner transfer mechanism here; these
+      # short-lived staging artifacts are never published as release assets.
+      - name: Upload the staging archive
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: tuivir-v${{ inputs.version }}-${{ matrix.target }}
@@ -131,6 +133,8 @@ jobs:
           printf '%s\0' "${archives[@]}" | sort -z | xargs -0 sha256sum > SHA256SUMS
           sha256sum --check SHA256SUMS
 
+      # This is the sole release-facing artifact. Its archives and checksum
+      # manifest have been verified together immediately before this upload.
       - name: Upload verified release artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
