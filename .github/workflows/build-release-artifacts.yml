@@ -1,0 +1,100 @@
+name: Build release artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Stable Cargo package version to package
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        description: Stable Cargo package version to package
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  VERSION: ${{ inputs.version }}
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS Intel
+            runner: macos-13
+            target: x86_64-apple-darwin
+          - name: macOS Apple Silicon
+            runner: macos-14
+            target: aarch64-apple-darwin
+          - name: Omarchy x86-64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned Rust toolchain
+        run: |
+          rustup toolchain install "$(awk -F '"' '$1 ~ /^channel/ { print $2 }' rust-toolchain.toml)" --profile minimal
+          rustup target add "${{ matrix.target }}"
+
+      - name: Install musl build tools
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes musl-tools
+
+      - name: Verify the requested version
+        run: |
+          set -euo pipefail
+          cargo_version="$(cargo metadata --locked --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "tuivir") | .version')"
+          test "$cargo_version" = "$VERSION"
+
+      - name: Build the release binary
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
+        run: cargo build --release --locked --target "${{ matrix.target }}"
+
+      - name: Verify and package the release archive
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          target_dir="$(cargo metadata --locked --no-deps --format-version 1 | jq -r .target_directory)"
+          binary="$target_dir/$TARGET/release/tuivir"
+          test "$("$binary" --version)" = "$VERSION"
+
+          archive="tuivir-v$VERSION-$TARGET.tar.gz"
+          stage="tuivir-v$VERSION-$TARGET"
+          mkdir "$stage"
+          install -m 755 "$binary" "$stage/tuivir"
+          install -m 644 LICENSE-MIT LICENSE-APACHE "$stage"
+          tar -czf "$archive" "$stage"
+
+          tar -tzf "$archive" | grep -Fx "$stage/tuivir"
+          tar -tzf "$archive" | grep -Fx "$stage/LICENSE-MIT"
+          tar -tzf "$archive" | grep -Fx "$stage/LICENSE-APACHE"
+
+      - name: Verify static Omarchy linking
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          target_dir="$(cargo metadata --locked --no-deps --format-version 1 | jq -r .target_directory)"
+          ldd "$target_dir/${{ matrix.target }}/release/tuivir" 2>&1 | grep -Fx 'statically linked'
+
+      - name: Upload the release archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: tuivir-v${{ inputs.version }}-${{ matrix.target }}
+          path: tuivir-v${{ inputs.version }}-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
