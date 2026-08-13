@@ -98,3 +98,43 @@ jobs:
           path: tuivir-v${{ inputs.version }}-${{ matrix.target }}.tar.gz
           if-no-files-found: error
           retention-days: 7
+
+  verify-artifacts:
+    name: Verify release artifacts
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download the release archives
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: tuivir-v${{ inputs.version }}-*
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Generate and verify checksums
+        working-directory: release-artifacts
+        run: |
+          set -euo pipefail
+          expected=(
+            "tuivir-v$VERSION-aarch64-apple-darwin.tar.gz"
+            "tuivir-v$VERSION-x86_64-apple-darwin.tar.gz"
+            "tuivir-v$VERSION-x86_64-unknown-linux-musl.tar.gz"
+          )
+          for archive in "${expected[@]}"; do
+            test -f "$archive"
+          done
+
+          shopt -s nullglob
+          archives=(tuivir-v"$VERSION"-*.tar.gz)
+          test "${#archives[@]}" -eq "${#expected[@]}"
+          printf '%s\0' "${archives[@]}" | sort -z | xargs -0 sha256sum > SHA256SUMS
+          sha256sum --check SHA256SUMS
+
+      - name: Upload verified release artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: tuivir-v${{ inputs.version }}-release-artifacts
+          path: release-artifacts
+          if-no-files-found: error
+          retention-days: 7
