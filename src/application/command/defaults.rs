@@ -1,7 +1,7 @@
 //! Compiled Command registration policy.
 //!
 //! User TOML supplies partial keybinding overrides through infrastructure; it
-//! cannot be the source of these definitions because Virtui must have its full
+//! cannot be the source of these definitions because Tuivir must have its full
 //! Command registry when no configuration file exists.
 
 use super::{Command, CommandScope, ResourceCommand};
@@ -217,6 +217,29 @@ pub(super) const BUILTIN_COMMANDS: &[CommandDefinition] = &[
         command: Command::ScrollDetailsUp,
         scopes: DETAILS,
         default_keys: &["ctrl+u", "pageup"],
+    },
+    CommandDefinition {
+        id: "details.copy",
+        description: "Copy selected details",
+        command: Command::CopyDetails,
+        scopes: DETAILS,
+        default_keys: &["y"],
+    },
+    // The Pane Boundary is the shell's, not one Pane's, so it answers in every
+    // workspace scope. `<` and `>` point the way the boundary travels.
+    CommandDefinition {
+        id: "layout.boundary.left",
+        description: "Widen Details Pane",
+        command: Command::MovePaneBoundaryLeft,
+        scopes: WORKSPACE,
+        default_keys: &["<"],
+    },
+    CommandDefinition {
+        id: "layout.boundary.right",
+        description: "Widen Resource Panels",
+        command: Command::MovePaneBoundaryRight,
+        scopes: WORKSPACE,
+        default_keys: &[">"],
     },
     CommandDefinition {
         id: "modal.confirm",

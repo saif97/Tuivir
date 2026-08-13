@@ -49,6 +49,10 @@ pub fn key_from_event(event: KeyEvent) -> Option<Key> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MouseAction {
     Press,
+    /// The pointer moving with the primary button held down.
+    Drag,
+    /// The primary button let go, whatever the pointer was carrying.
+    Release,
     ScrollUp,
     ScrollDown,
 }
@@ -61,10 +65,12 @@ pub struct MouseInput {
 }
 
 /// Normalizes terminal mouse events into the small pointer vocabulary the host
-/// needs for hit-testing. Motion, release, and non-primary buttons are ignored.
+/// needs for hit-testing. Bare motion and non-primary buttons are ignored.
 pub fn mouse_from_event(event: MouseEvent) -> Option<MouseInput> {
     let action = match event.kind {
         MouseEventKind::Down(MouseButton::Left) => MouseAction::Press,
+        MouseEventKind::Drag(MouseButton::Left) => MouseAction::Drag,
+        MouseEventKind::Up(MouseButton::Left) => MouseAction::Release,
         MouseEventKind::ScrollUp => MouseAction::ScrollUp,
         MouseEventKind::ScrollDown => MouseAction::ScrollDown,
         _ => return None,
@@ -74,46 +80,4 @@ pub fn mouse_from_event(event: MouseEvent) -> Option<MouseInput> {
         column: event.column,
         row: event.row,
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn normalizes_click_and_wheel_but_ignores_motion_and_release() {
-        let click = mouse_from_event(MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
-            column: 4,
-            row: 8,
-            modifiers: KeyModifiers::NONE,
-        });
-        assert_eq!(
-            click,
-            Some(MouseInput {
-                action: MouseAction::Press,
-                column: 4,
-                row: 8,
-            })
-        );
-        assert_eq!(
-            mouse_from_event(MouseEvent {
-                kind: MouseEventKind::ScrollDown,
-                column: 4,
-                row: 8,
-                modifiers: KeyModifiers::NONE,
-            })
-            .map(|input| input.action),
-            Some(MouseAction::ScrollDown)
-        );
-        assert_eq!(
-            mouse_from_event(MouseEvent {
-                kind: MouseEventKind::Moved,
-                column: 4,
-                row: 8,
-                modifiers: KeyModifiers::NONE,
-            }),
-            None
-        );
-    }
 }

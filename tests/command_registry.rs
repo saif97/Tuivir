@@ -1,4 +1,4 @@
-use virtui::application::{
+use tuivir::application::{
     Command, CommandRegistry, CommandScope, Key, KeybindingError, ResourceCommand,
 };
 
@@ -268,6 +268,20 @@ fn shell_focus_and_navigation_defaults_resolve_in_their_own_scopes() {
 }
 
 #[test]
+fn details_copy_defaults_to_y_and_remains_configurable() {
+    let registry = CommandRegistry::builtin();
+
+    assert_eq!(
+        registry.resolve(CommandScope::Details, key("y")),
+        Some(Command::CopyDetails)
+    );
+    assert_eq!(
+        effective(&[("details.copy", &["f8"])]).resolve(CommandScope::Details, key("f8")),
+        Some(Command::CopyDetails)
+    );
+}
+
+#[test]
 fn every_direct_focus_command_exposes_its_effective_hint() {
     let registry = effective(&[("focus.resources.2", &["f7"]), ("focus.details", &["f6"])]);
 
@@ -402,4 +416,52 @@ fn resource_lifecycle_defaults_keep_their_lazydocker_meanings() {
             "{text} should invoke {command}"
         );
     }
+}
+
+/// The Pane Boundary belongs to the shell rather than to one Pane, so its
+/// Commands answer wherever the user is working inside a Provider Workspace.
+#[test]
+fn the_pane_boundary_resizes_from_every_workspace_scope() {
+    let registry = CommandRegistry::builtin();
+
+    for scope in [
+        CommandScope::ProviderSelector,
+        CommandScope::ResourceView,
+        CommandScope::ResourcePanel(1),
+        CommandScope::Details,
+    ] {
+        assert_eq!(
+            registry.resolve(scope, key("<")),
+            Some(Command::MovePaneBoundaryLeft),
+            "< in {scope:?} moves the Pane Boundary left"
+        );
+        assert_eq!(
+            registry.resolve(scope, key(">")),
+            Some(Command::MovePaneBoundaryRight),
+            "> in {scope:?} moves the Pane Boundary right"
+        );
+    }
+}
+
+/// The keys are the user's to change, like every other Keybinding.
+#[test]
+fn the_pane_boundary_commands_take_configured_keys() {
+    let registry = effective(&[
+        ("layout.boundary.left", &["ctrl+left"]),
+        ("layout.boundary.right", &["ctrl+right"]),
+    ]);
+
+    assert_eq!(
+        registry.resolve(CommandScope::Details, key("ctrl+left")),
+        Some(Command::MovePaneBoundaryLeft)
+    );
+    assert_eq!(
+        registry.resolve(CommandScope::Details, key("ctrl+right")),
+        Some(Command::MovePaneBoundaryRight)
+    );
+    assert_eq!(
+        registry.resolve(CommandScope::Details, key("<")),
+        None,
+        "the replaced default no longer resizes"
+    );
 }

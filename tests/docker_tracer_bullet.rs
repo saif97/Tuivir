@@ -1,5 +1,5 @@
-use virtui::{
-    application::{App, InteractiveShellProcess, Resource, ResourceCommand},
+use tuivir::{
+    application::{App, Command, InteractiveShellProcess, Resource, ResourceCommand},
     domain::{DetailViewId, ResourceId, ResourcePanelId, ResourceState, ResourceTarget},
     infrastructure::{
         process::{ProcessError, ProcessOutput, ProcessSpec},
@@ -10,8 +10,8 @@ use virtui::{
 
 mod common;
 use common::{
-    FixtureCli, failure, failure_on_stdout, refresh_completed, resource_target, silent_failure,
-    success,
+    FixtureCli, command_completed, failure, failure_on_stdout, refresh_completed, resource_target,
+    silent_failure, success,
 };
 
 fn container_ls() -> ProcessSpec {
@@ -35,6 +35,14 @@ fn image_ls() -> ProcessSpec {
     )
 }
 
+fn volume_ls() -> ProcessSpec {
+    ProcessSpec::new("docker", &["volume", "ls", "--format", "{{json .}}"])
+}
+
+fn empty_volume_ls() -> (ProcessSpec, Result<ProcessOutput, ProcessError>) {
+    (volume_ls(), success(""))
+}
+
 #[tokio::test]
 async fn docker_restart_generates_the_expected_cli_request() {
     let cli = FixtureCli::new([(
@@ -47,7 +55,7 @@ async fn docker_restart_generates_the_expected_cli_request() {
             &cli,
             &resource_target("containers", "container-a"),
             ResourceCommand::Restart,
-            ResourceState::Running,
+            Some(ResourceState::Running),
         )
         .await
         .expect("Docker restart succeeds");
@@ -65,7 +73,7 @@ async fn docker_start_generates_the_expected_cli_request() {
             &cli,
             &resource_target("containers", "container-a"),
             ResourceCommand::Start,
-            ResourceState::Stopped,
+            Some(ResourceState::Stopped),
         )
         .await
         .expect("Docker start succeeds");
@@ -83,7 +91,7 @@ async fn docker_stop_generates_the_expected_cli_request() {
             &cli,
             &resource_target("containers", "container-a"),
             ResourceCommand::Stop,
-            ResourceState::Running,
+            Some(ResourceState::Running),
         )
         .await
         .expect("Docker stop succeeds");
@@ -101,7 +109,7 @@ async fn docker_resume_generates_the_expected_cli_request() {
             &cli,
             &resource_target("containers", "container-a"),
             ResourceCommand::Resume,
-            ResourceState::Paused,
+            Some(ResourceState::Paused),
         )
         .await
         .expect("Docker resume succeeds");
@@ -119,7 +127,7 @@ async fn deleting_a_stopped_container_generates_the_expected_cli_request() {
             &cli,
             &resource_target("containers", "container-a"),
             ResourceCommand::Delete,
-            ResourceState::Stopped,
+            Some(ResourceState::Stopped),
         )
         .await
         .expect("Docker delete succeeds");
@@ -140,7 +148,7 @@ async fn deleting_a_running_container_forces_removal_without_a_second_query() {
             &cli,
             &resource_target("containers", "container-a"),
             ResourceCommand::Delete,
-            ResourceState::Running,
+            Some(ResourceState::Running),
         )
         .await
         .expect("Docker force delete succeeds");
@@ -167,7 +175,7 @@ async fn deleting_a_container_that_is_not_stopped_forces_removal() {
                 &cli,
                 &resource_target("containers", "container-a"),
                 ResourceCommand::Delete,
-                state,
+                Some(state),
             )
             .await
             .unwrap_or_else(|error| panic!("force delete from {state:?} succeeds: {error:?}"));
@@ -182,6 +190,7 @@ async fn docker_maps_every_container_state_into_the_shared_vocabulary() {
             success(include_str!("fixtures/docker/mixed-state-containers.jsonl")),
         ),
         (image_ls(), success("")),
+        empty_volume_ls(),
     ]);
 
     let snapshot = DockerWorkspace
@@ -226,6 +235,7 @@ async fn only_a_running_container_carries_an_interactive_shell() {
             success(include_str!("fixtures/docker/mixed-state-containers.jsonl")),
         ),
         (image_ls(), success("")),
+        empty_volume_ls(),
     ]);
 
     let snapshot = DockerWorkspace
@@ -264,6 +274,7 @@ async fn only_a_paused_container_offers_the_resume_command() {
             success(include_str!("fixtures/docker/mixed-state-containers.jsonl")),
         ),
         (image_ls(), success("")),
+        empty_volume_ls(),
     ]);
 
     let snapshot = DockerWorkspace
@@ -304,6 +315,7 @@ async fn the_containers_panel_declares_dockers_native_detail_views() {
             success(include_str!("fixtures/docker/containers.jsonl")),
         ),
         (image_ls(), success("")),
+        empty_volume_ls(),
     ]);
 
     let snapshot = DockerWorkspace
@@ -333,6 +345,7 @@ async fn docker_declares_images_after_containers_with_native_stateless_rows() {
             image_ls(),
             success(include_str!("fixtures/docker/images.jsonl")),
         ),
+        empty_volume_ls(),
     ]);
 
     let snapshot = DockerWorkspace
@@ -346,7 +359,11 @@ async fn docker_declares_images_after_containers_with_native_stateless_rows() {
             .iter()
             .map(|panel| (panel.id.0.as_str(), panel.title.as_str()))
             .collect::<Vec<_>>(),
-        [("containers", "Containers"), ("images", "Images")]
+        [
+            ("containers", "Containers"),
+            ("images", "Images"),
+            ("volumes", "Volumes"),
+        ]
     );
     let images = &snapshot.panels[1];
     assert_eq!(
@@ -377,6 +394,77 @@ async fn docker_declares_images_after_containers_with_native_stateless_rows() {
     );
 }
 
+#[tokio::test]
+async fn docker_declares_volumes_after_images_with_native_stateless_rows() {
+    let cli = FixtureCli::new([
+        (container_ls(), success("")),
+        (image_ls(), success("")),
+        (
+            volume_ls(),
+            success(include_str!("fixtures/docker/volumes.jsonl")),
+        ),
+    ]);
+
+    let snapshot = DockerWorkspace
+        .refresh(&cli)
+        .await
+        .expect("fixture lists Docker resources");
+
+    assert_eq!(
+        snapshot
+            .panels
+            .iter()
+            .map(|panel| (panel.id.0.as_str(), panel.title.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("containers", "Containers"),
+            ("images", "Images"),
+            ("volumes", "Volumes"),
+        ]
+    );
+    let volumes = &snapshot.panels[2];
+    assert_eq!(
+        volumes
+            .detail_views
+            .iter()
+            .map(|view| (view.id.0.as_str(), view.title.as_str()))
+            .collect::<Vec<_>>(),
+        [("inspect", "Inspect")]
+    );
+    assert_eq!(
+        volumes
+            .resources
+            .iter()
+            .map(|volume| (
+                volume.id.0.as_str(),
+                volume.name.as_str(),
+                volume.secondary_text.as_deref(),
+                volume.state,
+                volume.status.as_deref(),
+                volume.available_commands,
+            ))
+            .collect::<Vec<_>>(),
+        [
+            (
+                "anonymous-volume",
+                "anonymous-volume",
+                Some("local"),
+                None,
+                None,
+                &[ResourceCommand::Delete][..],
+            ),
+            (
+                "named-volume",
+                "named-volume",
+                Some("nfs"),
+                None,
+                None,
+                &[ResourceCommand::Delete][..],
+            ),
+        ]
+    );
+}
+
 /// Docker lists one row per tag, so a twice-tagged image repeats its digest.
 /// Identifying rows by the digest would make two Resources indistinguishable:
 /// both would draw as selected, and selection could never move past the first.
@@ -388,6 +476,7 @@ async fn images_sharing_a_digest_are_distinct_resources() {
             image_ls(),
             success(include_str!("fixtures/docker/images.jsonl")),
         ),
+        empty_volume_ls(),
     ]);
 
     let snapshot = DockerWorkspace
@@ -432,16 +521,39 @@ async fn images_sharing_a_digest_are_distinct_resources() {
 
 #[tokio::test]
 async fn docker_keeps_an_empty_images_panel() {
-    let cli = FixtureCli::new([(container_ls(), success("")), (image_ls(), success("\n"))]);
+    let cli = FixtureCli::new([
+        (container_ls(), success("")),
+        (image_ls(), success("\n")),
+        empty_volume_ls(),
+    ]);
 
     let snapshot = DockerWorkspace
         .refresh(&cli)
         .await
         .expect("empty image output is valid");
 
-    assert_eq!(snapshot.panels.len(), 2);
+    assert_eq!(snapshot.panels.len(), 3);
     assert!(snapshot.panels[1].resources.is_empty());
     assert_eq!(snapshot.panels[1].id, ResourcePanelId::new("images"));
+    assert!(snapshot.panels[2].resources.is_empty());
+    assert_eq!(snapshot.panels[2].id, ResourcePanelId::new("volumes"));
+}
+
+#[tokio::test]
+async fn malformed_volume_output_becomes_an_actionable_workspace_error() {
+    let cli = FixtureCli::new([
+        (container_ls(), success("")),
+        (image_ls(), success("")),
+        (volume_ls(), success("not a Docker volume row\n")),
+    ]);
+
+    let error = DockerWorkspace
+        .refresh(&cli)
+        .await
+        .expect_err("malformed volume output cannot become Resources");
+
+    assert!(error.message.contains("malformed volume data"));
+    assert!(error.message.contains("docker volume ls"));
 }
 
 #[tokio::test]
@@ -452,6 +564,7 @@ async fn malformed_image_output_becomes_an_actionable_workspace_error() {
             image_ls(),
             success(include_str!("fixtures/docker/malformed-images.jsonl")),
         ),
+        empty_volume_ls(),
     ]);
 
     let error = DockerWorkspace
@@ -481,6 +594,110 @@ async fn image_inspect_is_routed_through_the_images_panel() {
         .expect("Docker image inspect loads");
 
     assert_eq!(details.lines, ["[{\"Id\":\"sha256:111\"}]"]);
+}
+
+#[tokio::test]
+async fn volume_inspect_and_plain_delete_are_routed_through_the_volumes_panel() {
+    let cli = FixtureCli::new([
+        (
+            ProcessSpec::new("docker", &["volume", "inspect", "named-volume"]),
+            success("[{\"Name\":\"named-volume\"}]\n"),
+        ),
+        (
+            ProcessSpec::new("docker", &["volume", "rm", "named-volume"]),
+            success("named-volume\n"),
+        ),
+    ]);
+    let target = resource_target("volumes", "named-volume");
+
+    let details = DockerWorkspace
+        .load_details(&cli, &target, &DetailViewId::new("inspect"))
+        .await
+        .expect("Docker volume inspect loads");
+    assert_eq!(details.lines, ["[{\"Name\":\"named-volume\"}]"]);
+
+    DockerWorkspace
+        .execute_command(&cli, &target, ResourceCommand::Delete, None)
+        .await
+        .expect("Docker removes a stateless volume without force");
+}
+
+#[tokio::test]
+async fn deleting_a_volume_through_the_workspace_refreshes_its_panel() {
+    let cli = FixtureCli::new([
+        (
+            ProcessSpec::new("docker", &["context", "show"]),
+            success("default\n"),
+        ),
+        (container_ls(), success("")),
+        (image_ls(), success("")),
+        (
+            volume_ls(),
+            success(include_str!("fixtures/docker/volumes.jsonl")),
+        ),
+        (
+            ProcessSpec::new("docker", &["volume", "rm", "anonymous-volume"]),
+            success("anonymous-volume\n"),
+        ),
+        (container_ls(), success("")),
+        (image_ls(), success("")),
+        (volume_ls(), success("")),
+    ]);
+    let docker = DockerWorkspace;
+    let discovered = docker.discover(&cli).await.expect("Docker is installed");
+    let mut app = App::new();
+    let refresh = app
+        .update(discovered.into_event())
+        .into_iter()
+        .next()
+        .expect("initial refresh");
+    app.update(refresh_completed(refresh, docker.refresh(&cli).await));
+    assert!(render_to_text(app.state(), 100, 24).contains("anonymous-volume · local"));
+
+    app.invoke(Command::FocusResourcePanel(2));
+    assert!(
+        app.invoke(Command::Resource(ResourceCommand::Delete))
+            .is_empty()
+    );
+    let confirmation = render_to_text(app.state(), 100, 24);
+    assert!(confirmation.contains("anonymous-volume"));
+    assert!(confirmation.contains("permanently removed"));
+
+    let deletion = app
+        .invoke(Command::Confirm)
+        .into_iter()
+        .next()
+        .expect("confirmation dispatches deletion");
+    let (request_id, provider_id, target, command, state) = match deletion {
+        tuivir::application::ProviderRequest::ExecuteResourceCommand {
+            request_id,
+            provider_id,
+            target,
+            command,
+            state,
+        } => (request_id, provider_id, target, command, state),
+        other => panic!("expected deletion request, got {other:?}"),
+    };
+    docker
+        .execute_command(&cli, &target, command, state)
+        .await
+        .expect("volume deletion succeeds");
+    let follow_up = app.update(command_completed(
+        tuivir::application::ProviderRequest::ExecuteResourceCommand {
+            request_id,
+            provider_id,
+            target,
+            command,
+            state,
+        },
+        Ok(()),
+    ));
+    let refresh = follow_up
+        .into_iter()
+        .next()
+        .expect("deletion refreshes workspace");
+    app.update(refresh_completed(refresh, docker.refresh(&cli).await));
+    assert!(!render_to_text(app.state(), 100, 24).contains("anonymous-volume"));
 }
 
 /// Each declared view runs exactly one Docker command. The fixture answers one
@@ -704,7 +921,7 @@ async fn a_silent_command_failure_names_the_operation_and_container() {
             &cli,
             &resource_target("containers", "container-a"),
             ResourceCommand::Restart,
-            ResourceState::Running,
+            Some(ResourceState::Running),
         )
         .await
         .expect_err("a non-zero exit is never a successful command");
@@ -729,7 +946,7 @@ async fn a_failed_command_reports_what_docker_wrote_to_stderr() {
             &cli,
             &resource_target("containers", "container-a"),
             ResourceCommand::Delete,
-            ResourceState::Stopped,
+            Some(ResourceState::Stopped),
         )
         .await
         .expect_err("a non-zero exit is never a successful command");
@@ -762,6 +979,7 @@ async fn discovered_docker_workspace_renders_target_environment_and_containers()
             success(include_str!("fixtures/docker/containers.jsonl")),
         ),
         (image_ls(), success("")),
+        empty_volume_ls(),
     ]);
     let docker = DockerWorkspace;
 
@@ -780,15 +998,15 @@ async fn discovered_docker_workspace_renders_target_environment_and_containers()
     app.update(refresh_completed(request, snapshot));
 
     let screen = render_to_text(app.state(), 100, 24);
-    assert!(screen.contains("Providers"));
     assert!(screen.contains("Docker"));
-    assert!(screen.contains("[ Docker · desktop-linux ]"));
+    assert!(screen.contains("[1] Docker"));
+    assert!(screen.contains("Target: desktop-linux"));
     assert!(screen.contains("Containers"), "rendered screen:\n{screen}");
     assert!(screen.contains("api"));
     assert!(screen.contains("nginx:1.27"));
-    assert!(screen.contains("running"));
+    assert!(screen.contains("● api"));
     assert!(screen.contains("worker"));
-    assert!(screen.contains("exited"));
+    assert!(screen.contains("○ worker"));
 }
 
 #[tokio::test]
@@ -813,6 +1031,7 @@ async fn reachable_docker_without_containers_renders_a_distinct_empty_state() {
             success(""),
         ),
         (image_ls(), success("")),
+        empty_volume_ls(),
     ]);
     let docker = DockerWorkspace;
     let discovered = docker.discover(&cli).await.expect("Docker is installed");
@@ -825,8 +1044,10 @@ async fn reachable_docker_without_containers_renders_a_distinct_empty_state() {
     app.update(refresh_completed(request, docker.refresh(&cli).await));
 
     let screen = render_to_text(app.state(), 100, 24);
-    assert!(screen.contains("[ Docker · colima ]"));
-    assert!(screen.contains("No Docker containers found"));
+    assert!(screen.contains("[1] Docker"));
+    assert!(screen.contains("Target: colima"));
+    assert!(screen.contains("No resources"));
+    assert!(!screen.contains("No Docker containers found"));
     assert!(!screen.contains("unavailable"));
 }
 
@@ -929,7 +1150,8 @@ async fn failed_container_refresh_identifies_docker_command_and_target() {
     app.update(refresh_completed(request, docker.refresh(&cli).await));
 
     let screen = render_to_text(app.state(), 140, 24);
-    assert!(screen.contains("[ Docker · desktop-linux ]"));
+    assert!(screen.contains("[1] Docker"));
+    assert!(screen.contains("Target: desktop-linux"));
     assert!(screen.contains("permission denied connecting to Docker socket"));
     assert!(screen.contains("Run `docker"));
     assert!(screen.contains("container ls --all`"));
@@ -993,6 +1215,7 @@ async fn malformed_docker_output_becomes_an_actionable_workspace_error() {
             success(include_str!("fixtures/docker/malformed-containers.jsonl")),
         ),
         (image_ls(), success("")),
+        empty_volume_ls(),
     ]);
     let docker = DockerWorkspace;
 

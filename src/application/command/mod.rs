@@ -63,6 +63,28 @@ pub enum Command {
     /// Moves through the output of the visible detail view.
     ScrollDetailsDown,
     ScrollDetailsUp,
+    /// Copies the text selected in the visible detail view.
+    CopyDetails,
+    /// Starts a selection at a source-line character boundary in Details.
+    BeginDetailsSelection {
+        line: u16,
+        column: u16,
+    },
+    /// Extends the active Details selection to a source-line character boundary.
+    ExtendDetailsSelection {
+        line: u16,
+        column: u16,
+    },
+    /// Extends selection while the pointer is held above or below Details.
+    ExtendDetailsSelectionAtEdge {
+        above: bool,
+        column: u16,
+        visible_rows: u16,
+    },
+    /// Moves the Pane Boundary between the Resource Panels and the Details
+    /// Pane, giving the width one of them gains to the other.
+    MovePaneBoundaryLeft,
+    MovePaneBoundaryRight,
     /// Hands the terminal to the Provider CLI for an Interactive Shell inside
     /// the selected Resource.
     OpenShell,
@@ -73,16 +95,27 @@ pub enum Command {
     Resource(ResourceCommand),
     /// Activates a Provider Workspace by its position in the provider bar.
     ///
-    /// This and the four Commands below carry a position the user pointed at,
+    /// This and the five Commands below carry a position the user pointed at,
     /// so they are invoked by the mouse rather than bound to a Keybinding.
     /// They are not registered, and so never appear in help or configuration.
     ActivateProviderWorkspace(usize),
+    /// Takes hold of the Pane Boundary, carrying which of its two columns the
+    /// user pressed.
+    ///
+    /// That column is kept so the boundary stays where it is when it is
+    /// grabbed. A boundary that moved to sit under the pointer would jump.
+    GrabPaneBoundary(u16),
+    /// Puts a held Pane Boundary at the share of the width the pointer has
+    /// dragged it to. It is refused unless the boundary is held.
+    SetPaneBoundary(u16),
+    /// Lets go of the Pane Boundary.
+    ReleasePaneBoundary,
     /// Focuses a Resource Panel and selects one Resource inside it.
     SelectResource {
         panel: usize,
         resource: usize,
     },
-    /// Activates one Detail View by its position in the Details Pane.
+    /// Activates one Detail View Tab by its position in the Details Pane.
     ActivateDetailView(usize),
     /// Moves the selection inside one Resource Panel, leaving focus alone.
     ScrollResourcePanelUp(usize),

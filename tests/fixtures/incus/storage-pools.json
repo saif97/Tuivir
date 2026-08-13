@@ -1,0 +1,4 @@
+[
+  {"name":"default","driver":"zfs","description":"Primary storage","status":"Created"},
+  {"name":"archive","driver":"dir","description":"Archive storage","status":"Created"}
+]

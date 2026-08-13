@@ -9,7 +9,7 @@ use crate::{
         DetailView, DetailViewId, Provider, ProviderDiscovery, ProviderId, ProviderWorkspace,
         Resource, ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourcePanelId,
         ResourceState, ResourceTarget, TargetEnvironment, WorkspaceError, WorkspaceSnapshot,
-        provider_cli_error,
+        provider_cli_error, require_resource_state,
     },
 };
 
@@ -17,7 +17,12 @@ const PROVIDER_ID: &str = "incus";
 const PROVIDER_NAME: &str = "Incus";
 /// What a user can run to check the Target Environment a refresh could not read.
 const REFRESH_HELP: &str = "Run `incus list` to verify access to the current Target Environment.";
+const STORAGE_POOL_REFRESH_HELP: &str =
+    "Run `incus storage list` to verify access to storage pools.";
+const VOLUME_REFRESH_HELP: &str =
+    "Run `incus storage volume list <pool>` to verify access to custom Volumes.";
 const INSTANCES_PANEL_ID: &str = "instances";
+const VOLUMES_PANEL_ID: &str = "volumes";
 const INFO_VIEW_ID: &str = "info";
 const CONFIG_VIEW_ID: &str = "config";
 const CONSOLE_LOG_VIEW_ID: &str = "console-log";
@@ -32,6 +37,119 @@ struct InstanceRow {
     instance_type: String,
     architecture: String,
     location: String,
+}
+
+#[derive(Deserialize)]
+struct StoragePoolRow {
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct StorageVolumeRow {
+    name: String,
+    #[serde(rename = "type")]
+    volume_type: String,
+    content_type: String,
+    description: String,
+    project: String,
+    location: String,
+}
+
+fn instance_resources(output: &str) -> Result<Vec<Resource>, WorkspaceError> {
+    let rows: Vec<InstanceRow> =
+        serde_json::from_str(output).map_err(|error| WorkspaceError::new(error.to_string()))?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let state = incus_resource_state(&row.status);
+            Resource {
+                id: ResourceId::new(&row.name),
+                shell: instance_shell(state, &row.name),
+                name: row.name,
+                secondary_text: None,
+                status: Some(row.status),
+                state: Some(state),
+                fields: vec![
+                    ("Type", row.instance_type),
+                    ("Architecture", row.architecture),
+                    ("Location", row.location),
+                ],
+                snapshot_details: Vec::new(),
+                available_commands: lifecycle_commands(
+                    state,
+                    LifecycleCommandPolicy::RestartAndResume,
+                ),
+            }
+        })
+        .collect())
+}
+
+async fn custom_volume_resources(
+    cli: &dyn CliRunner,
+    pools_output: &str,
+) -> Result<Vec<Resource>, WorkspaceError> {
+    let pools: Vec<StoragePoolRow> = serde_json::from_str(pools_output).map_err(|error| {
+        storage_pool_refresh_error(format!(
+            "Incus returned malformed storage pool data: {error}"
+        ))
+    })?;
+    let mut resources = Vec::new();
+    for pool in pools {
+        let output = cli
+            .run(ProcessSpec::new(
+                "incus",
+                &[
+                    "storage",
+                    "volume",
+                    "list",
+                    pool.name.as_str(),
+                    "type=custom",
+                    "--format=json",
+                ],
+            ))
+            .await
+            .map_err(|error| {
+                volume_refresh_failure(
+                    error,
+                    &format!("Incus could not list custom Volumes in pool {}", pool.name),
+                )
+            })?;
+        let rows: Vec<StorageVolumeRow> =
+            serde_json::from_str(&output.stdout).map_err(|error| {
+                volume_refresh_error(format!(
+                    "Incus returned malformed Volume data for pool {}: {error}",
+                    pool.name
+                ))
+            })?;
+        resources.extend(rows.into_iter().filter_map(|row| {
+            if row.volume_type != "custom" || row.name.contains('/') {
+                return None;
+            }
+            Some(Resource {
+                id: ResourceId::new(format!("{}/{}", pool.name, row.name)),
+                name: row.name,
+                secondary_text: Some(pool.name.clone()),
+                status: None,
+                state: None,
+                fields: vec![
+                    ("Pool", pool.name.clone()),
+                    ("Content Type", row.content_type),
+                    ("Description", row.description),
+                    ("Project", row.project),
+                    ("Location", row.location),
+                ],
+                snapshot_details: Vec::new(),
+                available_commands: &[ResourceCommand::Delete],
+                shell: None,
+            })
+        }));
+    }
+    resources.sort_by(|left, right| {
+        left.secondary_text
+            .cmp(&right.secondary_text)
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    Ok(resources)
 }
 
 impl ProviderWorkspace for IncusWorkspace {
@@ -93,43 +211,42 @@ impl ProviderWorkspace for IncusWorkspace {
         cli: &'a dyn CliRunner,
     ) -> Pin<Box<dyn Future<Output = Result<WorkspaceSnapshot, WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
-            let output = cli
-                .run(ProcessSpec::new("incus", &["list", "--format=json"]))
-                .await
-                .map_err(refresh_failure)?;
-            let rows: Vec<InstanceRow> = serde_json::from_str(&output.stdout)
-                .map_err(|error| WorkspaceError::new(error.to_string()))?;
-            let resources = rows
-                .into_iter()
-                .map(|row| {
-                    let state = incus_resource_state(&row.status);
-                    let available_commands =
-                        lifecycle_commands(state, LifecycleCommandPolicy::RestartAndResume);
-                    let shell = instance_shell(state, &row.name);
-                    Resource {
-                        id: ResourceId::new(&row.name),
-                        name: row.name,
-                        status: Some(row.status),
-                        state: Some(state),
-                        fields: vec![
-                            ("Type", row.instance_type),
-                            ("Architecture", row.architecture),
-                            ("Location", row.location),
-                        ],
-                        snapshot_details: Vec::new(),
-                        available_commands,
-                        shell,
-                    }
-                })
-                .collect();
+            let (output, pools_output) = tokio::try_join!(
+                async {
+                    cli.run(ProcessSpec::new("incus", &["list", "--format=json"]))
+                        .await
+                        .map_err(refresh_failure)
+                },
+                async {
+                    cli.run(ProcessSpec::new(
+                        "incus",
+                        &["storage", "list", "--format=json"],
+                    ))
+                    .await
+                    .map_err(storage_pool_refresh_failure)
+                }
+            )?;
+            let resources = instance_resources(&output.stdout)?;
+            let volume_resources = custom_volume_resources(cli, &pools_output.stdout).await?;
 
             Ok(WorkspaceSnapshot {
-                panels: vec![ResourcePanel {
-                    id: ResourcePanelId::new(INSTANCES_PANEL_ID),
-                    title: "Instances".to_owned(),
-                    detail_views: instance_detail_views(),
-                    resources,
-                }],
+                panels: vec![
+                    ResourcePanel {
+                        id: ResourcePanelId::new(INSTANCES_PANEL_ID),
+                        title: "Instances".to_owned(),
+                        detail_views: instance_detail_views(),
+                        resources,
+                    },
+                    ResourcePanel {
+                        id: ResourcePanelId::new(VOLUMES_PANEL_ID),
+                        title: "Volumes".to_owned(),
+                        detail_views: vec![
+                            DetailView::new(INFO_VIEW_ID, "Info"),
+                            DetailView::new(CONFIG_VIEW_ID, "Config"),
+                        ],
+                        resources: volume_resources,
+                    },
+                ],
             })
         })
     }
@@ -139,11 +256,27 @@ impl ProviderWorkspace for IncusWorkspace {
         cli: &'a dyn CliRunner,
         target: &'a ResourceTarget,
         command: ResourceCommand,
-        state: ResourceState,
+        state: Option<ResourceState>,
     ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
             let panel_id = target.panel_id();
             let resource_id = target.resource_id();
+            if panel_id.0 == VOLUMES_PANEL_ID && command == ResourceCommand::Delete {
+                let (pool, name) = volume_address(resource_id)?;
+                cli.run(ProcessSpec::new(
+                    "incus",
+                    &["storage", "volume", "delete", pool, name],
+                ))
+                .await
+                .map_err(|error| {
+                    WorkspaceError::new(provider_cli_error(
+                        PROVIDER_NAME,
+                        &error,
+                        &format!("Incus could not delete Volume {name} in pool {pool}"),
+                    ))
+                })?;
+                return Ok(());
+            }
             if panel_id.0 != INSTANCES_PANEL_ID {
                 return Err(WorkspaceError::new(format!(
                     "Incus has no {command} command for Resource Panel {panel_id}"
@@ -159,6 +292,8 @@ impl ProviderWorkspace for IncusWorkspace {
             let mut args = vec![verb];
             // Incus deletes an instance plainly only from a stopped state; a
             // running or frozen one needs the force the user already confirmed.
+            let state =
+                require_resource_state(state, PROVIDER_NAME, "instance", command, resource_id)?;
             if command == ResourceCommand::Delete && state != ResourceState::Stopped {
                 args.push("--force");
             }
@@ -185,6 +320,34 @@ impl ProviderWorkspace for IncusWorkspace {
         Box::pin(async move {
             let panel_id = target.panel_id();
             let resource_id = target.resource_id();
+            if panel_id.0 == VOLUMES_PANEL_ID {
+                let (pool, name) = volume_address(resource_id)?;
+                let operation = match view_id.0.as_str() {
+                    INFO_VIEW_ID => "info",
+                    CONFIG_VIEW_ID => "show",
+                    _ => {
+                        return Err(WorkspaceError::new(format!(
+                            "Incus has no {view_id} view for Volume {name} in pool {pool}"
+                        )));
+                    }
+                };
+                let output = cli
+                    .run(ProcessSpec::new(
+                        "incus",
+                        &["storage", "volume", operation, pool, name],
+                    ))
+                    .await
+                    .map_err(|error| {
+                        WorkspaceError::new(provider_cli_error(
+                            PROVIDER_NAME,
+                            &error,
+                            &format!(
+                                "Incus could not load {view_id} for Volume {name} in pool {pool}"
+                            ),
+                        ))
+                    })?;
+                return Ok(ResourceDetails::from_output(&output.stdout));
+            }
             if panel_id.0 != INSTANCES_PANEL_ID {
                 return Err(WorkspaceError::new(format!(
                     "Incus has no {view_id} view for Resource Panel {panel_id}"
@@ -232,6 +395,18 @@ fn instance_detail_views() -> Vec<DetailView> {
         DetailView::new(CONFIG_VIEW_ID, "Config"),
         DetailView::new(CONSOLE_LOG_VIEW_ID, "Console Log"),
     ]
+}
+
+fn volume_address(resource_id: &ResourceId) -> Result<(&str, &str), WorkspaceError> {
+    resource_id
+        .0
+        .split_once('/')
+        .filter(|(pool, name)| !pool.is_empty() && !name.is_empty())
+        .ok_or_else(|| {
+            WorkspaceError::new(format!(
+                "Incus Volume identity {resource_id} does not contain a pool and name"
+            ))
+        })
 }
 
 /// Maps an Incus instance status onto the shared vocabulary.
@@ -294,4 +469,28 @@ fn refresh_failure(error: ProcessError) -> WorkspaceError {
 
 fn refresh_error(message: impl AsRef<str>) -> WorkspaceError {
     WorkspaceError::with_help(message, REFRESH_HELP)
+}
+
+fn volume_refresh_failure(error: ProcessError, fallback: &str) -> WorkspaceError {
+    let message = provider_cli_error(PROVIDER_NAME, &error, fallback);
+    match error {
+        ProcessError::Exited(_) => volume_refresh_error(message),
+        _ => WorkspaceError::new(message),
+    }
+}
+
+fn storage_pool_refresh_failure(error: ProcessError) -> WorkspaceError {
+    let message = provider_cli_error(PROVIDER_NAME, &error, "Incus could not list storage pools");
+    match error {
+        ProcessError::Exited(_) => storage_pool_refresh_error(message),
+        _ => WorkspaceError::new(message),
+    }
+}
+
+fn storage_pool_refresh_error(message: impl AsRef<str>) -> WorkspaceError {
+    WorkspaceError::with_help(message, STORAGE_POOL_REFRESH_HELP)
+}
+
+fn volume_refresh_error(message: impl AsRef<str>) -> WorkspaceError {
+    WorkspaceError::with_help(message, VOLUME_REFRESH_HELP)
 }

@@ -9,7 +9,7 @@ use crate::{
         DetailView, DetailViewId, Provider, ProviderDiscovery, ProviderId, ProviderWorkspace,
         Resource, ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourcePanelId,
         ResourceState, ResourceTarget, TargetEnvironment, WorkspaceError, WorkspaceSnapshot,
-        provider_cli_error,
+        provider_cli_error, require_resource_state,
     },
 };
 
@@ -19,8 +19,11 @@ const CONTAINER_REFRESH_HELP: &str =
     "Run `docker container ls --all` to verify access to the current Target Environment.";
 const IMAGE_REFRESH_HELP: &str =
     "Run `docker image ls` to verify access to the current Target Environment.";
+const VOLUME_REFRESH_HELP: &str =
+    "Run `docker volume ls` to verify access to the current Target Environment.";
 const CONTAINERS_PANEL_ID: &str = "containers";
 const IMAGES_PANEL_ID: &str = "images";
+const VOLUMES_PANEL_ID: &str = "volumes";
 const LOGS_VIEW_ID: &str = "logs";
 const STATS_VIEW_ID: &str = "stats";
 const INSPECT_VIEW_ID: &str = "inspect";
@@ -51,6 +54,20 @@ struct ImageRow {
     tag: String,
     #[serde(rename = "Size")]
     size: String,
+}
+
+#[derive(Deserialize)]
+struct VolumeRow {
+    #[serde(rename = "Driver")]
+    driver: String,
+    #[serde(rename = "Labels")]
+    labels: String,
+    #[serde(rename = "Mountpoint")]
+    mountpoint: String,
+    #[serde(rename = "Name")]
+    name: String,
+    #[serde(rename = "Scope")]
+    scope: String,
 }
 
 impl ProviderWorkspace for DockerWorkspace {
@@ -92,9 +109,9 @@ impl ProviderWorkspace for DockerWorkspace {
         cli: &'a dyn CliRunner,
     ) -> Pin<Box<dyn Future<Output = Result<WorkspaceSnapshot, WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
-            // Two independent listings, so they wait on Docker together rather
-            // than one after the other.
-            let (containers, images) = tokio::try_join!(
+            // Independent listings wait on Docker together rather than one
+            // after the other.
+            let (containers, images, volumes) = tokio::try_join!(
                 async {
                     cli.run(ProcessSpec::new(
                         "docker",
@@ -126,6 +143,16 @@ impl ProviderWorkspace for DockerWorkspace {
                         refresh_failure(error, "Docker could not list images", IMAGE_REFRESH_HELP)
                     })
                 },
+                async {
+                    cli.run(ProcessSpec::new(
+                        "docker",
+                        &["volume", "ls", "--format", "{{json .}}"],
+                    ))
+                    .await
+                    .map_err(|error| {
+                        refresh_failure(error, "Docker could not list volumes", VOLUME_REFRESH_HELP)
+                    })
+                },
             )?;
 
             let container_resources = containers
@@ -146,6 +173,7 @@ impl ProviderWorkspace for DockerWorkspace {
                     Ok(Resource {
                         id: ResourceId::new(row.id),
                         name: row.names,
+                        secondary_text: None,
                         status: Some(row.state),
                         state: Some(state),
                         fields: vec![("Image", row.image), ("Status", row.status)],
@@ -155,6 +183,37 @@ impl ProviderWorkspace for DockerWorkspace {
                     })
                 })
                 .collect::<Result<Vec<_>, WorkspaceError>>()?;
+
+            let mut volume_resources = volumes
+                .stdout
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .map(|line| {
+                    let row: VolumeRow = serde_json::from_str(line).map_err(|error| {
+                        refresh_error(
+                            format!("Docker returned malformed volume data: {error}"),
+                            VOLUME_REFRESH_HELP,
+                        )
+                    })?;
+                    Ok(Resource {
+                        id: ResourceId::new(row.name.clone()),
+                        name: row.name,
+                        secondary_text: Some(row.driver.clone()),
+                        status: None,
+                        state: None,
+                        fields: vec![
+                            ("Driver", row.driver),
+                            ("Scope", row.scope),
+                            ("Mountpoint", row.mountpoint),
+                            ("Labels", row.labels),
+                        ],
+                        snapshot_details: Vec::new(),
+                        available_commands: &[ResourceCommand::Delete],
+                        shell: None,
+                    })
+                })
+                .collect::<Result<Vec<_>, WorkspaceError>>()?;
+            volume_resources.sort_by(|left, right| left.name.cmp(&right.name));
 
             let image_resources = images
                 .stdout
@@ -179,6 +238,7 @@ impl ProviderWorkspace for DockerWorkspace {
                     Ok(Resource {
                         id: ResourceId::new(name.clone()),
                         name,
+                        secondary_text: None,
                         status: None,
                         state: None,
                         fields: vec![
@@ -208,6 +268,12 @@ impl ProviderWorkspace for DockerWorkspace {
                         detail_views: vec![DetailView::new(INSPECT_VIEW_ID, "Inspect")],
                         resources: image_resources,
                     },
+                    ResourcePanel {
+                        id: ResourcePanelId::new(VOLUMES_PANEL_ID),
+                        title: "Volumes".to_owned(),
+                        detail_views: vec![DetailView::new(INSPECT_VIEW_ID, "Inspect")],
+                        resources: volume_resources,
+                    },
                 ],
             })
         })
@@ -218,11 +284,26 @@ impl ProviderWorkspace for DockerWorkspace {
         cli: &'a dyn CliRunner,
         target: &'a ResourceTarget,
         command: ResourceCommand,
-        state: ResourceState,
+        state: Option<ResourceState>,
     ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
             let panel_id = target.panel_id();
             let resource_id = target.resource_id();
+            if panel_id.0 == VOLUMES_PANEL_ID && command == ResourceCommand::Delete {
+                cli.run(ProcessSpec::new(
+                    "docker",
+                    &["volume", "rm", resource_id.0.as_str()],
+                ))
+                .await
+                .map_err(|error| {
+                    WorkspaceError::new(provider_cli_error(
+                        PROVIDER_NAME,
+                        &error,
+                        &format!("Docker could not {command} volume {resource_id}"),
+                    ))
+                })?;
+                return Ok(());
+            }
             if panel_id.0 != CONTAINERS_PANEL_ID {
                 return Err(WorkspaceError::new(format!(
                     "Docker has no {command} command for Resource Panel {panel_id}"
@@ -239,6 +320,8 @@ impl ProviderWorkspace for DockerWorkspace {
             // Docker removes a container plainly only from a stopped state; a
             // running, paused, or restarting one needs the force the user
             // already confirmed.
+            let state =
+                require_resource_state(state, PROVIDER_NAME, "container", command, resource_id)?;
             if command == ResourceCommand::Delete && state != ResourceState::Stopped {
                 args.push("--force");
             }
@@ -273,6 +356,10 @@ impl ProviderWorkspace for DockerWorkspace {
                 IMAGES_PANEL_ID if view_id.0 == INSPECT_VIEW_ID => (
                     "image",
                     Some(vec!["image", "inspect", resource_id.0.as_str()]),
+                ),
+                VOLUMES_PANEL_ID if view_id.0 == INSPECT_VIEW_ID => (
+                    "volume",
+                    Some(vec!["volume", "inspect", resource_id.0.as_str()]),
                 ),
                 _ => (panel_id.0.as_str(), None),
             };

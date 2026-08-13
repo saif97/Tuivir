@@ -2,23 +2,75 @@ use ratatui::{
     Frame, Terminal,
     backend::TestBackend,
     buffer::Cell,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph},
 };
 
-use crate::application::{AppState, FocusedPane};
+use crate::application::{AppState, DetailSelection, FocusedPane};
 use crate::application::{
     DetailContent, ResourceDetailsView, ResourcePanelView, WorkspacePresentation, WorkspaceView,
 };
-use crate::domain::ResourceState;
+use crate::domain::{ResourceState, ResourceTarget};
 
 use super::screen_layout::{
-    DETAIL_VIEW_GAP, PROVIDER_LABEL_GAP, PROVIDER_WORKSPACE_GAP, ScreenLayout, command_error_area,
-    confirmation_area, detail_view_label, gap, help_overlay_area, provider_selector_label,
-    provider_workspace_label,
+    DETAIL_VIEW_GAP, ScreenLayout, active_target_label, command_error_area, confirmation_area,
+    detail_view_label, gap, help_overlay_area, provider_selector_label, provider_workspace_label,
 };
+
+/// The default presentation palette names colours by their purpose so render
+/// sites never choose unrelated terminal colours for the same meaning.
+#[derive(Clone, Copy)]
+enum ThemeRole {
+    Primary,
+    Success,
+    Muted,
+    Warning,
+    Error,
+    Selection,
+    InactiveSelection,
+    Terminal,
+    RaisedSurface,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum PaneChrome {
+    Resource,
+    Details,
+    Full,
+}
+
+fn theme_colour(role: ThemeRole) -> Color {
+    match role {
+        ThemeRole::Primary => Color::Blue,
+        ThemeRole::Success => Color::Green,
+        ThemeRole::Muted => Color::DarkGray,
+        ThemeRole::Warning => Color::Yellow,
+        ThemeRole::Error => Color::Red,
+        ThemeRole::Selection => Color::Blue,
+        ThemeRole::InactiveSelection => Color::DarkGray,
+        ThemeRole::Terminal => Color::Reset,
+        ThemeRole::RaisedSurface => Color::Black,
+    }
+}
+
+fn themed_style(role: ThemeRole) -> Style {
+    Style::default().fg(theme_colour(role))
+}
+
+fn raised_surface_style() -> Style {
+    Style::default().bg(theme_colour(ThemeRole::RaisedSurface))
+}
+
+fn modal_block(title: impl Into<Line<'static>>, accent: ThemeRole) -> Block<'static> {
+    Block::default()
+        .title(title)
+        .title_style(themed_style(accent))
+        .border_style(themed_style(accent))
+        .style(raised_surface_style())
+        .borders(Borders::ALL)
+}
 
 pub fn render(state: &AppState, frame: &mut Frame<'_>) {
     render_with_layout(state, frame, &ScreenLayout::measure(state, frame.area()));
@@ -29,8 +81,8 @@ pub fn render(state: &AppState, frame: &mut Frame<'_>) {
 /// The host measures once per frame and keeps that layout for mouse routing, so
 /// what the user clicks is what they see.
 pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &ScreenLayout) {
-    render_provider_bar(state, frame, layout.provider_bar);
-    render_running_command_status(state, frame, layout.status);
+    render_provider_bar(state, frame, layout);
+    render_command_bar(state, frame, layout.status);
 
     let (Some(provider), Some(panes)) = (state.active_workspace(), layout.panes.as_ref()) else {
         frame.render_widget(
@@ -51,12 +103,14 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
         &presentation,
         matches!(&state.focused_pane, FocusedPane::Resources),
         &state.hints.focus_resource_panels,
+        &state.running_commands,
         frame,
         columns[0],
     );
     render_details_panel(
         provider.name(),
         workspace_view,
+        &state.running_commands,
         state.focused_pane == FocusedPane::Details,
         state.hints.focus_details.as_deref(),
         frame,
@@ -72,11 +126,10 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
             .collect::<Vec<_>>();
         frame.render_widget(Clear, area);
         frame.render_widget(
-            Paragraph::new(lines).block(
-                Block::default()
-                    .title(format!(" Commands for {} ", help.target))
-                    .borders(Borders::ALL),
-            ),
+            Paragraph::new(lines).block(modal_block(
+                format!(" Commands for {} ", help.target),
+                ThemeRole::Primary,
+            )),
             area,
         );
     }
@@ -88,15 +141,11 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
         frame.render_widget(Clear, area);
         frame.render_widget(
             Paragraph::new(vec![
-                Line::styled(error.as_str(), Style::default().fg(Color::Red)),
+                Line::styled(error.as_str(), themed_style(ThemeRole::Error)),
                 Line::from("Press Esc to dismiss."),
             ])
             .wrap(ratatui::widgets::Wrap { trim: true })
-            .block(
-                Block::default()
-                    .title(" Command failed ")
-                    .borders(Borders::ALL),
-            ),
+            .block(modal_block(" Command failed ", ThemeRole::Error)),
             area,
         );
     }
@@ -113,16 +162,14 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
         // before the single confirmation that authorises both. The wording
         // stays on the outcome: a paused or restarting Resource is not running,
         // but removing it still stops it.
-        if confirmation.state != ResourceState::Stopped {
-            lines.push(Line::from("It will be stopped and removed."));
+        match confirmation.state {
+            Some(ResourceState::Stopped) => {}
+            Some(_) => lines.push(Line::from("It will be stopped and removed.")),
+            None => lines.push(Line::from("It will be permanently removed.")),
         }
         lines.push(Line::from("Press y/Enter to confirm or n/Esc to cancel."));
         frame.render_widget(
-            Paragraph::new(lines).block(
-                Block::default()
-                    .title(" Confirm deletion ")
-                    .borders(Borders::ALL),
-            ),
+            Paragraph::new(lines).block(modal_block(" Confirm deletion ", ThemeRole::Warning)),
             area,
         );
     }
@@ -133,59 +180,73 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
 /// Each entry names the Provider, Resource, and Command it was dispatched for,
 /// so the status identifies its target even while another Provider Workspace
 /// is active.
-fn render_running_command_status(state: &AppState, frame: &mut Frame<'_>, area: Rect) {
-    if state.running_commands.is_empty() {
-        return;
-    }
-    let status = state
-        .running_commands
+fn render_command_bar(state: &AppState, frame: &mut Frame<'_>, area: Rect) {
+    let mut spans = state
+        .command_bar
         .iter()
-        .map(|running| {
-            format!(
-                "Running {} {} for {} ({})…",
-                running.provider_name, running.command, running.resource_name, running.target
-            )
+        .flat_map(|hint| {
+            [
+                Span::styled(
+                    format!(" {} ", hint.key),
+                    Style::default()
+                        .fg(theme_colour(ThemeRole::Terminal))
+                        .bg(theme_colour(ThemeRole::Primary))
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(format!(" {}  ", hint.description)),
+            ]
         })
-        .collect::<Vec<_>>()
-        .join("   ");
-    frame.render_widget(
-        Paragraph::new(Line::styled(
-            status,
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        )),
-        area,
-    );
+        .collect::<Vec<_>>();
+    spans.push(Span::styled(
+        " ? ",
+        Style::default()
+            .fg(theme_colour(ThemeRole::Terminal))
+            .bg(theme_colour(ThemeRole::Primary))
+            .add_modifier(Modifier::BOLD),
+    ));
+    spans.push(Span::raw(" all commands"));
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-fn render_provider_bar(state: &AppState, frame: &mut Frame<'_>, area: Rect) {
-    let mut provider_spans = vec![
-        Span::styled(
-            provider_selector_label(state),
-            panel_title_style(state.focused_pane == FocusedPane::Providers),
-        ),
-        Span::raw(gap(PROVIDER_LABEL_GAP)),
-    ];
-    for (index, provider) in state.providers.iter().enumerate() {
-        if index > 0 {
-            provider_spans.push(Span::raw(gap(PROVIDER_WORKSPACE_GAP)));
-        }
-        let active = Some(index) == state.active_provider;
-        let label = provider_workspace_label(provider, active);
-        provider_spans.push(if active {
-            Span::styled(label, Style::default().add_modifier(Modifier::BOLD))
-        } else {
-            Span::raw(label)
-        });
+fn render_provider_bar(state: &AppState, frame: &mut Frame<'_>, layout: &ScreenLayout) {
+    if state.providers.is_empty() {
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                provider_selector_label(state),
+                panel_title_style(state.focused_pane == FocusedPane::Providers),
+            )),
+            layout.provider_bar,
+        );
     }
-    frame.render_widget(Paragraph::new(Line::from(provider_spans)), area);
+    for (index, area) in layout.provider_workspaces.iter().copied().enumerate() {
+        let active = Some(index) == state.active_provider;
+        let style = if active {
+            Style::default()
+                .fg(theme_colour(ThemeRole::Terminal))
+                .bg(theme_colour(ThemeRole::Primary))
+                .add_modifier(Modifier::BOLD)
+        } else {
+            themed_style(ThemeRole::Muted)
+        };
+        frame.render_widget(
+            Paragraph::new(Span::styled(provider_workspace_label(state, index), style)),
+            area,
+        );
+    }
+    if let (Some(target), Some(target_area)) = (active_target_label(state), layout.active_target) {
+        frame.render_widget(
+            Paragraph::new(Span::styled(target, themed_style(ThemeRole::Muted)))
+                .alignment(Alignment::Right),
+            target_area,
+        );
+    }
 }
 
 fn render_workspace_panel(
     presentation: &WorkspacePresentation<'_>,
     resource_focus: bool,
     resource_hints: &[Option<String>],
+    running_commands: &[crate::application::RunningResourceCommand],
     frame: &mut Frame<'_>,
     area: Rect,
 ) {
@@ -198,6 +259,7 @@ fn render_workspace_panel(
                     resource_focus,
                 ),
                 resource_focus,
+                PaneChrome::Full,
             )),
             area,
         ),
@@ -205,7 +267,7 @@ fn render_workspace_panel(
             Paragraph::new(vec![
                 Line::styled(
                     format!("{name} provider is unavailable"),
-                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                    themed_style(ThemeRole::Error).add_modifier(Modifier::BOLD),
                 ),
                 Line::from(error.message.as_str()),
             ])
@@ -217,6 +279,7 @@ fn render_workspace_panel(
                     resource_focus,
                 ),
                 resource_focus,
+                PaneChrome::Full,
             )),
             area,
         ),
@@ -230,6 +293,7 @@ fn render_workspace_panel(
                             resource_focus,
                         ),
                         resource_focus,
+                        PaneChrome::Resource,
                     )),
                     area,
                 );
@@ -251,9 +315,10 @@ fn render_workspace_panel(
                 let focused =
                     resource_focus && view.focused_resource_panel == Some(&panel.panel.id);
                 render_resource_panel(
-                    view.name,
                     &panel,
                     resource_hints.get(index).and_then(Option::as_deref),
+                    view.id,
+                    running_commands,
                     focused,
                     frame,
                     area,
@@ -264,9 +329,10 @@ fn render_workspace_panel(
 }
 
 fn render_resource_panel(
-    provider_name: &str,
     view: &ResourcePanelView<'_>,
     resources_hint: Option<&str>,
+    provider_id: &crate::domain::ProviderId,
+    running_commands: &[crate::application::RunningResourceCommand],
     focused: bool,
     frame: &mut Frame<'_>,
     area: Rect,
@@ -275,51 +341,115 @@ fn render_resource_panel(
     let viewport_height = area.height.saturating_sub(2) as usize;
     let visible =
         visible_resource_range(view.selected_index, viewport_height, panel.resources.len());
-    // A row names its Resource and, where the Resource has one, says what it is
-    // doing. Everything else a Provider reported is in the Details pane, so a
-    // row never has to compete for width with it.
+    // A row starts with the Resource State symbol, leaving the Resource name
+    // easy to scan without repeating Provider-specific status text.
     let mut items = panel
         .resources
-        .get(visible)
+        .get(visible.clone())
         .unwrap_or_default()
         .iter()
         .map(|resource| {
-            let marker = if view.selected_resource == Some(&resource.id) {
-                ">"
-            } else {
-                " "
-            };
+            let selected = view.selected_resource == Some(&resource.id);
+            let target = ResourceTarget::new(panel.id.clone(), resource.id.clone());
+            let running = running_commands
+                .iter()
+                .find(|running| running.provider_id == *provider_id && running.target == target);
+            let state = running.map_or_else(
+                || resource.state.map(resource_state_symbol).unwrap_or(" "),
+                |_| "*",
+            );
             let mut spans = vec![
-                Span::raw(marker),
+                Span::styled(
+                    state,
+                    running.map_or_else(
+                        || {
+                            resource
+                                .state
+                                .map_or_else(Style::default, resource_state_style)
+                        },
+                        |_| themed_style(ThemeRole::Warning),
+                    ),
+                ),
                 Span::raw(" "),
                 Span::raw(resource.name.as_str()),
             ];
-            if let Some(status) = &resource.status {
-                spans.push(Span::raw("  "));
-                spans.push(Span::styled(
-                    status.as_str(),
-                    resource
-                        .state
-                        .map_or_else(Style::default, resource_state_style),
-                ));
+            if let Some(secondary_text) = &resource.secondary_text {
+                spans.push(Span::raw(" · "));
+                spans.push(Span::raw(secondary_text.as_str()));
             }
-            ListItem::new(Line::from(spans))
+            let style = selected.then(|| {
+                Style::default().bg(theme_colour(if focused {
+                    ThemeRole::Selection
+                } else {
+                    ThemeRole::InactiveSelection
+                }))
+            });
+            ListItem::new(Line::from(spans)).style(style.unwrap_or_default())
         })
         .collect::<Vec<_>>();
     if items.is_empty() {
-        items.push(ListItem::new(format!(
-            "No {} {} found",
-            provider_name,
-            panel.title.to_lowercase()
+        items.push(ListItem::new(Line::styled(
+            "No resources",
+            themed_style(ThemeRole::Muted),
         )));
     }
     frame.render_widget(
         List::new(items).block(pane_block(
-            pane_title(resources_hint, &panel.title, focused),
+            pane_title(
+                resources_hint,
+                &format!("{} ({})", panel.title, panel.resources.len()),
+                focused,
+            ),
             focused,
+            PaneChrome::Resource,
         )),
         area,
     );
+    render_resource_scrollbar(visible, viewport_height, panel.resources.len(), frame, area);
+}
+
+fn render_resource_scrollbar(
+    visible: std::ops::Range<usize>,
+    viewport_height: usize,
+    resource_count: usize,
+    frame: &mut Frame<'_>,
+    area: Rect,
+) {
+    if resource_count <= viewport_height || viewport_height == 0 || area.width < 2 {
+        return;
+    }
+    let thumb_height = (viewport_height * viewport_height / resource_count).max(1);
+    let thumb_start = visible.start * viewport_height / resource_count;
+    let lines = (0..viewport_height).map(|row| {
+        Line::styled(
+            if (thumb_start..thumb_start + thumb_height).contains(&row) {
+                "█"
+            } else {
+                "░"
+            },
+            themed_style(ThemeRole::Muted),
+        )
+    });
+    frame.render_widget(
+        Paragraph::new(lines.collect::<Vec<_>>()),
+        Rect::new(
+            area.x + area.width - 2,
+            area.y + 1,
+            1,
+            area.height.saturating_sub(2),
+        ),
+    );
+}
+
+fn resource_state_symbol(state: ResourceState) -> &'static str {
+    match state {
+        ResourceState::Running => "●",
+        ResourceState::Stopped => "○",
+        ResourceState::Paused => "‖",
+        ResourceState::Transitioning => "↻",
+        ResourceState::Broken => "✕",
+        ResourceState::Unknown => "?",
+    }
 }
 
 pub(super) fn visible_resource_range(
@@ -343,24 +473,22 @@ pub(super) fn visible_resource_range(
 /// Resource is distinguishable without reading the text.
 ///
 /// `Unknown` is deliberately left neutral: a status this Provider Workspace
-/// does not recognise must not borrow the colour of a state Virtui understands.
+/// does not recognise must not borrow the colour of a state Tuivir understands.
 fn resource_state_style(state: ResourceState) -> Style {
     let colour = match state {
-        ResourceState::Running => Color::Green,
-        ResourceState::Stopped => Color::DarkGray,
-        ResourceState::Paused => Color::Yellow,
-        ResourceState::Transitioning => Color::Blue,
-        ResourceState::Broken => Color::Red,
-        ResourceState::Unknown => Color::Reset,
+        ResourceState::Running => theme_colour(ThemeRole::Success),
+        ResourceState::Stopped => theme_colour(ThemeRole::Muted),
+        ResourceState::Paused => theme_colour(ThemeRole::Warning),
+        ResourceState::Transitioning => theme_colour(ThemeRole::Primary),
+        ResourceState::Broken => theme_colour(ThemeRole::Error),
+        ResourceState::Unknown => theme_colour(ThemeRole::Terminal),
     };
     Style::default().fg(colour)
 }
 
 fn panel_title_style(focused: bool) -> Style {
     if focused {
-        Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD)
+        themed_style(ThemeRole::Primary).add_modifier(Modifier::BOLD)
     } else {
         Style::default()
     }
@@ -380,22 +508,24 @@ pub(super) fn pane_title(hint: Option<&str>, label: &str, focused: bool) -> Stri
     }
 }
 
-pub(super) fn pane_block(title: String, focused: bool) -> Block<'static> {
+pub(super) fn pane_block(title: String, focused: bool, chrome: PaneChrome) -> Block<'static> {
+    let borders = match chrome {
+        PaneChrome::Resource => Borders::TOP | Borders::BOTTOM | Borders::RIGHT,
+        PaneChrome::Details => Borders::TOP | Borders::BOTTOM | Borders::LEFT,
+        PaneChrome::Full => Borders::ALL,
+    };
     Block::default()
         .title(title)
         .title_style(panel_title_style(focused))
         .border_style(panel_title_style(focused))
-        .border_type(if focused {
-            BorderType::Thick
-        } else {
-            BorderType::Plain
-        })
-        .borders(Borders::ALL)
+        .border_type(BorderType::Plain)
+        .borders(borders)
 }
 
 fn render_details_panel(
     provider_name: &str,
     view: Option<&WorkspaceView<'_>>,
+    running_commands: &[crate::application::RunningResourceCommand],
     focused: bool,
     details_hint: Option<&str>,
     frame: &mut Frame<'_>,
@@ -425,51 +555,75 @@ fn render_details_panel(
             }
         });
 
-    let block = pane_block(pane_title(details_hint, "Details", focused), focused);
+    let block = pane_block(
+        pane_title(details_hint, "Details", focused),
+        focused,
+        PaneChrome::Details,
+    );
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
     let views = view.map_or(&[][..], |view| view.detail_views);
-    // The view strip is a control, not another summary field, so it gets a
-    // blank line to sit behind rather than running straight into the fields.
+    let has_detail_tabs = view.is_some_and(|view| view.selected_resource.is_some());
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(summary.len() as u16),
-            Constraint::Length(u16::from(!views.is_empty()) * 2),
+            Constraint::Length(u16::from(has_detail_tabs)),
             Constraint::Min(0),
         ])
         .split(inner);
-    frame.render_widget(
-        Paragraph::new(summary).wrap(ratatui::widgets::Wrap { trim: true }),
-        rows[0],
-    );
 
-    if views.is_empty() {
+    if !has_detail_tabs {
+        frame.render_widget(
+            Paragraph::new(summary).wrap(ratatui::widgets::Wrap { trim: true }),
+            rows[1],
+        );
         return;
     }
-    if let Some(details) = view.and_then(|view| view.details) {
-        render_detail_content(provider_name, details, frame, rows[2]);
+    let running = view.and_then(|view| {
+        let target = ResourceTarget::new(
+            view.focused_resource_panel?.clone(),
+            view.selected_resource?.id.clone(),
+        );
+        running_commands
+            .iter()
+            .find(|running| running.provider_id == *view.id && running.target == target)
+    });
+    if let Some(running) = running {
+        frame.render_widget(
+            Paragraph::new(format!(
+                "Running {} for {}…",
+                running.command, running.resource_name
+            ))
+            .alignment(Alignment::Center)
+            .style(themed_style(ThemeRole::Warning).add_modifier(Modifier::BOLD)),
+            rows[1],
+        );
+    } else if let Some(details) = view.and_then(|view| view.details) {
+        render_detail_content(provider_name, details, frame, rows[1]);
     }
-    let mut spans = Vec::new();
+    let overview_selected = view.is_some_and(|view| view.overview_selected);
+    let mut spans = vec![detail_view_tab("Overview", overview_selected)];
     for detail_view in views {
-        if !spans.is_empty() {
-            spans.push(Span::raw(gap(DETAIL_VIEW_GAP)));
-        }
+        spans.push(Span::raw(gap(DETAIL_VIEW_GAP)));
         let selected = view
             .and_then(|workspace| workspace.selected_detail_view)
             .is_some_and(|selected| selected.id == detail_view.id);
-        let label = detail_view_label(&detail_view.title, selected);
-        spans.push(if selected {
-            Span::styled(label, Style::default().add_modifier(Modifier::BOLD))
-        } else {
-            Span::raw(label)
-        });
+        spans.push(detail_view_tab(&detail_view.title, selected));
     }
-    frame.render_widget(
-        Paragraph::new(vec![Line::default(), Line::from(spans)]),
-        rows[1],
-    );
+    frame.render_widget(Paragraph::new(Line::from(spans)), rows[0]);
+}
+
+fn detail_view_tab(title: &str, selected: bool) -> Span<'static> {
+    let label = detail_view_label(title, selected);
+    if selected {
+        Span::styled(
+            label,
+            themed_style(ThemeRole::Primary).add_modifier(Modifier::BOLD),
+        )
+    } else {
+        Span::styled(label, themed_style(ThemeRole::Muted))
+    }
 }
 
 /// Draws the loaded detail view, or what is happening to it.
@@ -489,14 +643,15 @@ fn render_detail_content(
                 "{} returned no {} for {}",
                 provider_name, details.title, details.resource_name
             ),
-            Style::default().fg(Color::DarkGray),
+            themed_style(ThemeRole::Muted),
         )],
         DetailContent::Ready(loaded) => loaded
             .lines
             .iter()
+            .enumerate()
             .skip(details.scroll as usize)
             .take(area.height as usize)
-            .map(|line| Line::from(line.as_str()))
+            .map(|(line_index, line)| detail_line(line, line_index as u16, details.selection))
             .collect(),
         DetailContent::Error(error) => vec![
             Line::styled(
@@ -504,12 +659,48 @@ fn render_detail_content(
                     "{} {} failed for {}:",
                     provider_name, details.title, details.resource_name
                 ),
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                themed_style(ThemeRole::Error).add_modifier(Modifier::BOLD),
             ),
             Line::from(error.message.as_str()),
         ],
     };
     frame.render_widget(Paragraph::new(lines), area);
+}
+
+fn detail_line(text: &str, line: u16, selection: Option<&DetailSelection>) -> Line<'static> {
+    let Some(selection) = selection else {
+        return Line::from(text.to_owned());
+    };
+    let (start, end) = if selection.start <= selection.end {
+        (selection.start, selection.end)
+    } else {
+        (selection.end, selection.start)
+    };
+    if start == end || line < start.line || line > end.line {
+        return Line::from(text.to_owned());
+    }
+    let first = if line == start.line {
+        start.column as usize
+    } else {
+        0
+    };
+    let last = if line == end.line {
+        end.column as usize
+    } else {
+        text.chars().count()
+    };
+    let before = text.chars().take(first).collect::<String>();
+    let selected = text
+        .chars()
+        .skip(first)
+        .take(last.saturating_sub(first))
+        .collect::<String>();
+    let after = text.chars().skip(last).collect::<String>();
+    Line::from(vec![
+        Span::raw(before),
+        Span::styled(selected, Style::default().fg(Color::White).bg(Color::Blue)),
+        Span::raw(after),
+    ])
 }
 
 pub fn render_to_text(state: &AppState, width: u16, height: u16) -> String {
@@ -527,6 +718,12 @@ pub fn render_to_text(state: &AppState, width: u16, height: u16) -> String {
 /// the other.
 pub fn render_foreground_colours(state: &AppState, width: u16, height: u16) -> Vec<Vec<Color>> {
     render_to_buffer(state, width, height, |cell| cell.fg)
+}
+
+/// The background counterpart of [`render_to_text`], used to verify raised
+/// surfaces and interactive selection highlights.
+pub fn render_background_colours(state: &AppState, width: u16, height: u16) -> Vec<Vec<Color>> {
+    render_to_buffer(state, width, height, |cell| cell.bg)
 }
 
 fn render_to_buffer<T>(
@@ -561,46 +758,9 @@ mod tests {
         assert_eq!(
             panel_title_style(true),
             Style::default()
-                .fg(Color::Cyan)
+                .fg(theme_colour(ThemeRole::Primary))
                 .add_modifier(Modifier::BOLD)
         );
         assert_eq!(panel_title_style(false), Style::default());
-    }
-
-    /// Hit-testing is only honest if it agrees with what the user sees, so this
-    /// compares measured regions against the drawn screen rather than against a
-    /// second copy of the same arithmetic.
-    #[test]
-    fn measured_provider_workspaces_sit_where_they_are_drawn() {
-        use crate::application::ProviderWorkspaceState;
-        use crate::domain::{Provider, ProviderId};
-
-        let state = AppState {
-            providers: vec![
-                ProviderWorkspaceState::new(
-                    Provider::new(ProviderId::new("docker"), "Docker", None, None),
-                    None,
-                ),
-                ProviderWorkspaceState::new(
-                    Provider::new(ProviderId::new("incus"), "Incus", None, None),
-                    None,
-                ),
-            ],
-            active_provider: Some(0),
-            ..AppState::default()
-        };
-        // The Providers Pane is unfocused by default, so no caret is drawn.
-        assert_eq!(state.focused_pane, FocusedPane::Resources);
-
-        let layout = ScreenLayout::measure(&state, Rect::new(0, 0, 80, 24));
-        let screen = render_to_text(&state, 80, 24);
-        let bar = screen.lines().next().expect("a provider bar is drawn");
-
-        let drawn = bar.find("Incus").expect("the Provider Workspace is drawn") as u16;
-
-        assert_eq!(
-            layout.provider_workspaces[1].x, drawn,
-            "a click lands where the Provider Workspace is drawn, not where a second calculation guessed"
-        );
     }
 }

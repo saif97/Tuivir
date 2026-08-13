@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use super::workspace::{DetailCompletion, ProviderWorkspaceState};
 use super::{
     Command, CommandRegistry, CommandScope, InteractiveShellOutcome, InteractiveShellProcess, Key,
-    NUMBERED_RESOURCE_PANEL_CAPACITY, ProviderRequest, ProviderRequestId, ResourceCommand,
-    ResourceDetails, WorkspaceError, WorkspaceSnapshot,
+    NUMBERED_RESOURCE_PANEL_CAPACITY, PaneBoundary, ProviderRequest, ProviderRequestId,
+    ResourceCommand, ResourceDetails, WorkspaceError, WorkspaceSnapshot,
 };
 use crate::domain::{DetailViewId, Provider, ProviderId, ResourceState, ResourceTarget};
 
@@ -72,7 +72,7 @@ pub enum FocusedPane {
 /// height to take a page from.
 const DETAIL_SCROLL_LINES: isize = 10;
 
-/// One sentence for every operation Virtui asked a Provider for and did not
+/// One sentence for every operation Tuivir asked a Provider for and did not
 /// get.
 ///
 /// Lifecycle Commands and Interactive Shells fail in different places and are
@@ -97,6 +97,11 @@ pub struct AppState {
     ///
     /// `None` represents startup before any installed provider is discovered.
     pub active_provider: Option<usize>,
+    /// Where the Resource Panels give way to the Details Pane.
+    ///
+    /// One share for the whole run, so moving between Provider Workspaces finds
+    /// the Panes the size the user left them.
+    pub pane_boundary: PaneBoundary,
     pub help_overlay: Option<HelpOverlay>,
     pub confirmation: Option<ResourceCommandInvocation>,
     pub command_error: Option<String>,
@@ -119,6 +124,11 @@ pub struct AppState {
     /// rendered hints cannot drift. `None` means the Command is unbound and its
     /// hint is omitted.
     pub hints: KeyHints,
+    /// A compact, scope-correct subset of Commands shown at the bottom of the
+    /// screen. The help overlay remains the complete reference.
+    pub command_bar: Vec<HelpEntry>,
+    #[doc(hidden)]
+    pub pending_details_copy: Option<String>,
 }
 
 impl AppState {
@@ -210,7 +220,7 @@ pub struct ResourceCommandInvocation {
     pub command: ResourceCommand,
     /// What the Resource was doing when the Command was invoked, so the prompt
     /// can say what confirming will really do and the request can carry it on.
-    pub state: ResourceState,
+    pub state: Option<ResourceState>,
 }
 
 pub struct App {
@@ -259,7 +269,7 @@ impl App {
         &self.state
     }
 
-    /// Confirms that a debounced Detail View request still describes the
+    /// Confirms that a debounced Detail View Tab request still describes the
     /// visible load before the host starts Provider work for it.
     pub fn detail_request_is_current(&self, request: &ProviderRequest) -> bool {
         let ProviderRequest::LoadResourceDetails {
@@ -283,6 +293,7 @@ impl App {
     pub fn update(&mut self, event: AppEvent) -> Vec<ProviderRequest> {
         let mut requests = self.apply(event);
         requests.extend(self.sync_details());
+        self.update_command_bar();
         requests
     }
 
@@ -357,11 +368,57 @@ impl App {
         self.commands.reserved(key)
     }
 
+    /// Takes the exact selected text a Details Copy Command asked the host to
+    /// place on the clipboard. The application never performs clipboard I/O.
+    pub fn take_pending_details_copy(&mut self) -> Option<String> {
+        self.state.pending_details_copy.take()
+    }
+
+    /// Records a clipboard-adapter failure through the ordinary UI error path.
+    pub fn report_details_copy_failure(&mut self, reason: String) {
+        self.state.command_error = Some(format!("copy selected Details failed: {reason}"));
+    }
+
     /// Carries out one resolved user intention and returns any provider work.
     pub fn invoke(&mut self, command: Command) -> Vec<ProviderRequest> {
         let mut requests = self.dispatch(command);
         requests.extend(self.sync_details());
+        self.update_command_bar();
         requests
+    }
+
+    fn update_command_bar(&mut self) {
+        let scope = self.active_scope();
+        let resource = self
+            .state
+            .active_workspace()
+            .and_then(|workspace| workspace.selected_resource());
+        let commands =
+            self.commands
+                .in_scope(scope)
+                .filter(|entry| match entry.command {
+                    Command::Resource(command) => resource
+                        .is_some_and(|resource| resource.available_commands.contains(&command)),
+                    _ => true,
+                })
+                .filter(|entry| entry.command != Command::ToggleHelp)
+                .collect::<Vec<_>>();
+        self.state.command_bar = commands
+            .iter()
+            .filter(|entry| matches!(entry.command, Command::Resource(_)))
+            .chain(
+                commands
+                    .iter()
+                    .filter(|entry| !matches!(entry.command, Command::Resource(_))),
+            )
+            .take(4)
+            .filter_map(|entry| {
+                entry.keys.first().map(|key| HelpEntry {
+                    key: key.to_string(),
+                    description: entry.description.to_owned(),
+                })
+            })
+            .collect();
     }
 
     /// Makes one Provider Workspace active.
@@ -383,6 +440,16 @@ impl App {
         self.refresh_active_provider()
     }
 
+    /// Resizes the Panes and nothing else. No Provider has work to do: the
+    /// Panes are drawn from state the shell already holds.
+    fn move_pane_boundary(
+        &mut self,
+        moved: impl FnOnce(PaneBoundary) -> PaneBoundary,
+    ) -> Vec<ProviderRequest> {
+        self.state.pane_boundary = moved(self.state.pane_boundary);
+        Vec::new()
+    }
+
     fn scroll_resource_panel(&mut self, panel: usize, delta: isize) -> Vec<ProviderRequest> {
         if let Some(workspace) = self.state.active_workspace_mut() {
             workspace.move_resource_selection_at(panel, delta);
@@ -391,6 +458,16 @@ impl App {
     }
 
     fn dispatch(&mut self, command: Command) -> Vec<ProviderRequest> {
+        if !matches!(
+            command,
+            Command::CopyDetails
+                | Command::BeginDetailsSelection { .. }
+                | Command::ExtendDetailsSelection { .. }
+                | Command::ExtendDetailsSelectionAtEdge { .. }
+        ) && let Some(workspace) = self.state.active_workspace_mut()
+        {
+            workspace.clear_detail_selection();
+        }
         match command {
             Command::Quit => Vec::new(),
             Command::ToggleHelp => {
@@ -398,6 +475,15 @@ impl App {
                 Vec::new()
             }
             Command::Refresh => self.refresh_active_provider(),
+            Command::MovePaneBoundaryLeft => self.move_pane_boundary(PaneBoundary::moved_left),
+            Command::MovePaneBoundaryRight => self.move_pane_boundary(PaneBoundary::moved_right),
+            Command::GrabPaneBoundary(column) => {
+                self.move_pane_boundary(|boundary| boundary.grabbed_at(column))
+            }
+            Command::SetPaneBoundary(share) => {
+                self.move_pane_boundary(|boundary| boundary.dragged_to(share))
+            }
+            Command::ReleasePaneBoundary => self.move_pane_boundary(PaneBoundary::released),
             Command::FocusProviders => {
                 self.state.focused_pane = FocusedPane::Providers;
                 Vec::new()
@@ -444,6 +530,46 @@ impl App {
             }
             Command::ScrollDetailsUp => {
                 self.scroll_details(-DETAIL_SCROLL_LINES);
+                Vec::new()
+            }
+            // A Details selection arrives through the mouse path. Until one is
+            // present, Copy deliberately has nothing to send to the host.
+            Command::CopyDetails => {
+                self.state.pending_details_copy = self
+                    .state
+                    .active_workspace()
+                    .and_then(ProviderWorkspaceState::selected_detail_text);
+                Vec::new()
+            }
+            Command::BeginDetailsSelection { line, column } => {
+                self.state.focused_pane = FocusedPane::Details;
+                if let Some(workspace) = self.state.active_workspace_mut() {
+                    workspace.begin_detail_selection(line, column);
+                }
+                Vec::new()
+            }
+            Command::ExtendDetailsSelection { line, column } => {
+                if let Some(workspace) = self.state.active_workspace_mut() {
+                    workspace.extend_detail_selection(line, column);
+                }
+                Vec::new()
+            }
+            Command::ExtendDetailsSelectionAtEdge {
+                above,
+                column,
+                visible_rows,
+            } => {
+                if let Some(workspace) = self.state.active_workspace_mut() {
+                    workspace.scroll_details(if above { -1 } else { 1 });
+                    workspace.extend_detail_selection(
+                        if above {
+                            0
+                        } else {
+                            visible_rows.saturating_sub(1)
+                        },
+                        column,
+                    );
+                }
                 Vec::new()
             }
             Command::OpenShell => {
@@ -562,7 +688,7 @@ impl App {
         match result {
             Ok(snapshot) if snapshot.panels.len() > NUMBERED_RESOURCE_PANEL_CAPACITY => {
                 provider.reject_snapshot(WorkspaceError::new(format!(
-                    "{} returned {} Resource Panels; Virtui supports at most \
+                    "{} returned {} Resource Panels; Tuivir supports at most \
                      {NUMBERED_RESOURCE_PANEL_CAPACITY} Resource Panels so each retains a \
                      numbered focus Command",
                     provider.name(),
@@ -732,16 +858,13 @@ impl App {
         let provider_id = provider.id().clone();
         let provider_name = provider.name().to_owned();
         let resource_name = resource.name.clone();
-        let Some(state) = resource.state else {
-            return Vec::new();
-        };
         let target = ResourceCommandInvocation {
             provider_id,
             provider_name,
             target,
             resource_name,
             command,
-            state,
+            state: resource.state,
         };
         if command == ResourceCommand::Delete {
             self.state.confirmation = Some(target);

@@ -8,6 +8,9 @@ use crate::{
         ResourceTarget, TargetEnvironment,
     },
 };
+use unicode_width::UnicodeWidthChar;
+
+const OVERVIEW_DETAIL_VIEW_ID: &str = "overview";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// Whether a Provider Workspace is loading, ready to present, or unavailable.
@@ -44,6 +47,20 @@ struct ResourceDetailsState {
     title: String,
     content: DetailContent,
     scroll: u16,
+    selection: Option<DetailSelection>,
+}
+
+/// A half-open source range inside loaded Details text.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DetailSelection {
+    pub start: DetailPosition,
+    pub end: DetailPosition,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct DetailPosition {
+    pub line: u16,
+    pub column: u16,
 }
 
 impl ResourceDetailsState {
@@ -214,7 +231,7 @@ impl ProviderWorkspaceState {
         self.invalidate_pending_detail();
     }
 
-    /// Rejects a snapshot whose shape Virtui cannot represent.
+    /// Rejects a snapshot whose shape Tuivir cannot represent.
     pub fn reject_snapshot(&mut self, error: WorkspaceError) {
         self.load_state = WorkspaceLoadState::Error(error);
         self.focused_resource_panel = None;
@@ -248,10 +265,12 @@ impl ProviderWorkspaceState {
             let still_offered = workspace
                 .selected_detail_view
                 .as_ref()
-                .is_some_and(|selected| panel.detail_views.iter().any(|view| &view.id == selected));
+                .is_some_and(|selected| {
+                    selected.0 == OVERVIEW_DETAIL_VIEW_ID
+                        || panel.detail_views.iter().any(|view| &view.id == selected)
+                });
             if !still_offered {
-                workspace.selected_detail_view =
-                    panel.detail_views.first().map(|view| view.id.clone());
+                workspace.selected_detail_view = Some(DetailViewId::new(OVERVIEW_DETAIL_VIEW_ID));
             }
             true
         })
@@ -348,7 +367,7 @@ impl ProviderWorkspaceState {
         });
     }
 
-    /// Moves through the focused panel's Detail Views as a ring.
+    /// Moves through the focused panel's Detail View Tabs as a ring.
     pub fn move_detail_view(&mut self, delta: isize) {
         self.invalidate_detail_when_target_changes(|workspace| {
             let WorkspaceLoadState::Ready(snapshot) = &workspace.load_state else {
@@ -360,9 +379,6 @@ impl ProviderWorkspaceState {
             let Some(panel) = snapshot.panel(panel_id) else {
                 return;
             };
-            if panel.detail_views.is_empty() {
-                return;
-            }
             let current = workspace
                 .selected_detail_view
                 .as_ref()
@@ -371,12 +387,17 @@ impl ProviderWorkspaceState {
                         .detail_views
                         .iter()
                         .position(|view| &view.id == selected)
+                        .map(|index| index + 1)
                 })
                 .unwrap_or(0);
-            let next =
-                (current as isize + delta).rem_euclid(panel.detail_views.len() as isize) as usize;
-            workspace.selected_detail_view =
-                panel.detail_views.get(next).map(|view| view.id.clone());
+            let next = (current as isize + delta)
+                .rem_euclid((panel.detail_views.len() + 1) as isize)
+                as usize;
+            workspace.selected_detail_view = Some(if next == 0 {
+                DetailViewId::new(OVERVIEW_DETAIL_VIEW_ID)
+            } else {
+                panel.detail_views[next - 1].id.clone()
+            });
         });
     }
 
@@ -391,8 +412,18 @@ impl ProviderWorkspaceState {
             let Some(panel) = snapshot.panel(panel_id) else {
                 return;
             };
-            workspace.selected_detail_view =
-                panel.detail_views.get(index).map(|view| view.id.clone());
+            let Some(view_id) = (index == 0)
+                .then(|| DetailViewId::new(OVERVIEW_DETAIL_VIEW_ID))
+                .or_else(|| {
+                    panel
+                        .detail_views
+                        .get(index - 1)
+                        .map(|view| view.id.clone())
+                })
+            else {
+                return;
+            };
+            workspace.selected_detail_view = Some(view_id);
         });
     }
 
@@ -411,7 +442,7 @@ impl ProviderWorkspaceState {
         self.move_selection_within(&panel_id, delta);
     }
 
-    /// Starts a load only when the visible Resource and Detail View are not
+    /// Starts a load only when the visible Resource and Detail View Tab are not
     /// already loaded or pending. The application supplies the request ID and
     /// dispatches the returned work.
     pub fn start_visible_detail_load(
@@ -437,7 +468,20 @@ impl ProviderWorkspaceState {
 
         let snapshot_content = match &self.load_state {
             WorkspaceLoadState::Ready(snapshot) => {
-                snapshot.snapshot_detail(&detail_target.resource, &detail_target.view_id)
+                if detail_target.view_id.0 == OVERVIEW_DETAIL_VIEW_ID {
+                    snapshot.resource(&detail_target.resource).map(|resource| {
+                        ResourceDetails::from_lines(
+                            std::iter::once(resource.name.clone()).chain(
+                                resource
+                                    .fields
+                                    .iter()
+                                    .map(|(label, value)| format!("{label}: {value}")),
+                            ),
+                        )
+                    })
+                } else {
+                    snapshot.snapshot_detail(&detail_target.resource, &detail_target.view_id)
+                }
             }
             WorkspaceLoadState::Loading | WorkspaceLoadState::Error(_) => None,
         };
@@ -450,6 +494,7 @@ impl ProviderWorkspaceState {
                 title: view.title,
                 content: DetailContent::Ready(content),
                 scroll: 0,
+                selection: None,
             });
             return None;
         }
@@ -468,6 +513,7 @@ impl ProviderWorkspaceState {
             title: view.title,
             content: DetailContent::Loading,
             scroll: 0,
+            selection: None,
         });
         Some(load)
     }
@@ -500,6 +546,48 @@ impl ProviderWorkspaceState {
         details.scroll = (details.scroll as usize)
             .saturating_add_signed(delta)
             .min(last_line) as u16;
+    }
+
+    pub fn begin_detail_selection(&mut self, line: u16, column: u16) {
+        let Some(details) = self.details.as_mut() else {
+            return;
+        };
+        let line = details.scroll.saturating_add(line);
+        let Some(position) = detail_position(&details.content, line, column) else {
+            return;
+        };
+        details.selection = Some(DetailSelection {
+            start: position,
+            end: position,
+        });
+    }
+
+    pub fn extend_detail_selection(&mut self, line: u16, column: u16) {
+        let Some(details) = self.details.as_mut() else {
+            return;
+        };
+        let line = details.scroll.saturating_add(line);
+        let Some(position) = detail_position(&details.content, line, column) else {
+            return;
+        };
+        if let Some(selection) = &mut details.selection {
+            selection.end = position;
+        }
+    }
+
+    pub fn clear_detail_selection(&mut self) {
+        if let Some(details) = self.details.as_mut() {
+            details.selection = None;
+        }
+    }
+
+    pub fn selected_detail_text(&self) -> Option<String> {
+        let details = self.details.as_ref()?;
+        let DetailContent::Ready(loaded) = &details.content else {
+            return None;
+        };
+        let selection = details.selection.as_ref()?;
+        selected_text(&loaded.lines, selection)
     }
 
     /// Replaces Provider data while preserving every still-valid presentation
@@ -550,6 +638,15 @@ impl ProviderWorkspaceState {
                     snapshot.panels.first().map(|panel| panel.id.clone());
             }
             workspace.reconcile_detail_view(&snapshot);
+            if workspace
+                .selected_detail_view
+                .as_ref()
+                .is_some_and(|view| view.0 == OVERVIEW_DETAIL_VIEW_ID)
+            {
+                // Overview belongs to the current snapshot, so it is rebuilt
+                // on refresh rather than retaining fields from an older one.
+                workspace.details = None;
+            }
             workspace.load_state = WorkspaceLoadState::Ready(snapshot);
         });
     }
@@ -587,6 +684,10 @@ impl ProviderWorkspaceState {
             panel_navigation: &self.panel_navigation,
             selected_resource,
             detail_views,
+            overview_selected: self
+                .selected_detail_view
+                .as_ref()
+                .is_some_and(|selected| selected.0 == OVERVIEW_DETAIL_VIEW_ID),
             selected_detail_view,
             details: details.map(ResourceDetailsView::from),
         }
@@ -652,12 +753,11 @@ impl ProviderWorkspaceState {
             .as_ref()
             .and_then(|selected| snapshot.panel_for(selected))
             .map_or(&[][..], |panel| panel.detail_views.as_slice());
-        let still_offered = self
-            .selected_detail_view
-            .as_ref()
-            .is_some_and(|selected| offered.iter().any(|view| &view.id == selected));
+        let still_offered = self.selected_detail_view.as_ref().is_some_and(|selected| {
+            selected.0 == OVERVIEW_DETAIL_VIEW_ID || offered.iter().any(|view| &view.id == selected)
+        });
         if !still_offered {
-            self.selected_detail_view = offered.first().map(|view| view.id.clone());
+            self.selected_detail_view = Some(DetailViewId::new(OVERVIEW_DETAIL_VIEW_ID));
         }
     }
 
@@ -668,12 +768,16 @@ impl ProviderWorkspaceState {
         let target = self.selected_resource_target()?;
         let resource = snapshot.resource(&target)?;
         let view_id = self.selected_detail_view.as_ref()?;
-        let view = snapshot
-            .panel_for(&target)?
-            .detail_views
-            .iter()
-            .find(|view| &view.id == view_id)?
-            .clone();
+        let view = if view_id.0 == OVERVIEW_DETAIL_VIEW_ID {
+            DetailView::from_snapshot(OVERVIEW_DETAIL_VIEW_ID, "Overview")
+        } else {
+            snapshot
+                .panel_for(&target)?
+                .detail_views
+                .iter()
+                .find(|view| &view.id == view_id)?
+                .clone()
+        };
         Some((target, resource.name.clone(), view))
     }
 }
@@ -689,6 +793,7 @@ pub struct WorkspaceView<'a> {
     panel_navigation: &'a [ResourcePanelNavigation],
     pub selected_resource: Option<&'a Resource>,
     pub detail_views: &'a [DetailView],
+    pub overview_selected: bool,
     pub selected_detail_view: Option<&'a DetailView>,
     pub details: Option<ResourceDetailsView<'a>>,
 }
@@ -729,6 +834,7 @@ pub struct ResourceDetailsView<'a> {
     pub title: &'a str,
     pub content: &'a DetailContent,
     pub scroll: u16,
+    pub selection: Option<&'a DetailSelection>,
 }
 
 impl<'a> From<&'a ResourceDetailsState> for ResourceDetailsView<'a> {
@@ -738,8 +844,72 @@ impl<'a> From<&'a ResourceDetailsState> for ResourceDetailsView<'a> {
             title: &details.title,
             content: &details.content,
             scroll: details.scroll,
+            selection: details.selection.as_ref(),
         }
     }
+}
+
+fn detail_position(content: &DetailContent, line: u16, column: u16) -> Option<DetailPosition> {
+    let DetailContent::Ready(loaded) = content else {
+        return None;
+    };
+    let text = loaded.lines.get(line as usize)?;
+    Some(DetailPosition {
+        line,
+        column: character_at_terminal_column(text, column),
+    })
+}
+
+/// Maps a terminal-cell offset to a source character boundary. A click in the
+/// second cell of a wide character resolves after that character, never into
+/// an invalid half-character boundary.
+fn character_at_terminal_column(text: &str, column: u16) -> u16 {
+    let mut cells = 0_u16;
+    for (index, character) in text.chars().enumerate() {
+        let width = UnicodeWidthChar::width(character).unwrap_or(0) as u16;
+        if column <= cells {
+            return index as u16;
+        }
+        cells = cells.saturating_add(width);
+        if column < cells {
+            return index as u16 + 1;
+        }
+    }
+    text.chars().count() as u16
+}
+
+fn selected_text(lines: &[String], selection: &DetailSelection) -> Option<String> {
+    let (start, end) = if selection.start <= selection.end {
+        (selection.start, selection.end)
+    } else {
+        (selection.end, selection.start)
+    };
+    if start == end || end.line as usize >= lines.len() {
+        return None;
+    }
+    Some(
+        (start.line..=end.line)
+            .enumerate()
+            .map(|(offset, line)| {
+                let text = &lines[line as usize];
+                let from = if offset == 0 {
+                    start.column as usize
+                } else {
+                    0
+                };
+                let to = if line == end.line {
+                    end.column as usize
+                } else {
+                    text.chars().count()
+                };
+                text.chars()
+                    .skip(from)
+                    .take(to.saturating_sub(from))
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
 }
 
 /// One Resource Panel paired with its private navigation projection.

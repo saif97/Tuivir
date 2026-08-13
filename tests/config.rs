@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use virtui::{
+use tuivir::{
     application::{Command, CommandScope, Key, KeybindingError as ConfigError, ResourceCommand},
     infrastructure::config::{Env, FileSystemReader, LoadError, ReadFile, load},
 };
@@ -44,7 +44,7 @@ impl ReadFile for MemoryFs {
 
 #[test]
 fn an_explicit_config_file_overrides_one_binding_and_leaves_the_rest() {
-    let path = PathBuf::from("/cfg/virtui.toml");
+    let path = PathBuf::from("/cfg/tuivir.toml");
     let env = Env {
         config_file: Some(path.clone()),
         ..Default::default()
@@ -72,7 +72,7 @@ fn an_explicit_config_file_overrides_one_binding_and_leaves_the_rest() {
 
 #[test]
 fn an_empty_explicit_config_file_means_compiled_defaults() {
-    let path = PathBuf::from("/cfg/virtui.toml");
+    let path = PathBuf::from("/cfg/tuivir.toml");
     let env = Env {
         config_file: Some(path.clone()),
         ..Default::default()
@@ -117,7 +117,7 @@ fn a_relative_explicit_file_is_fatal() {
 
 #[test]
 fn xdg_config_home_is_used_when_no_explicit_file_is_set() {
-    let path = PathBuf::from("/xdg/virtui/config.toml");
+    let path = PathBuf::from("/xdg/tuivir/config.toml");
     let env = Env {
         xdg_config_home: Some(PathBuf::from("/xdg")),
         ..Default::default()
@@ -139,7 +139,7 @@ fn xdg_config_home_is_used_when_no_explicit_file_is_set() {
 
 #[test]
 fn home_config_is_used_when_xdg_is_unset() {
-    let path = PathBuf::from("/home/me/.config/virtui/config.toml");
+    let path = PathBuf::from("/home/me/.config/tuivir/config.toml");
     let env = Env {
         home: Some(PathBuf::from("/home/me")),
         ..Default::default()
@@ -154,7 +154,7 @@ fn home_config_is_used_when_xdg_is_unset() {
     );
 }
 
-/// A relative `XDG_CONFIG_HOME` names no single file, so Virtui refuses to
+/// A relative `XDG_CONFIG_HOME` names no single file, so Tuivir refuses to
 /// guess which one the user meant rather than quietly reading a different one.
 #[test]
 fn a_relative_xdg_config_home_is_fatal() {
@@ -164,7 +164,7 @@ fn a_relative_xdg_config_home_is_fatal() {
         ..Default::default()
     };
     let fs = MemoryFs::with(
-        "/home/me/.config/virtui/config.toml",
+        "/home/me/.config/tuivir/config.toml",
         "[keybindings]\n\"resource.restart\" = [\"x\"]\n",
     );
 
@@ -178,11 +178,11 @@ fn a_relative_xdg_config_home_is_fatal() {
 }
 
 /// An exported-but-empty variable is how a shell spells "unset", and the
-/// process environment cannot tell Virtui the difference. Treating it as a
+/// process environment cannot tell Tuivir the difference. Treating it as a
 /// relative path would refuse to start over a variable that selects nothing.
 #[test]
 fn an_empty_xdg_config_home_means_unset_rather_than_relative() {
-    let path = PathBuf::from("/home/me/.config/virtui/config.toml");
+    let path = PathBuf::from("/home/me/.config/tuivir/config.toml");
     let env = Env {
         xdg_config_home: Some(PathBuf::new()),
         home: Some(PathBuf::from("/home/me")),
@@ -198,11 +198,11 @@ fn an_empty_xdg_config_home_means_unset_rather_than_relative() {
     );
 }
 
-/// `VIRTUI_CONFIG_FILE` selects one exact file, so discovery never runs and a
+/// `TUIVIR_CONFIG_FILE` selects one exact file, so discovery never runs and a
 /// broken `XDG_CONFIG_HOME` cannot stop a run that does not consult it.
 #[test]
 fn an_explicit_file_is_unaffected_by_a_relative_xdg_config_home() {
-    let path = PathBuf::from("/cfg/virtui.toml");
+    let path = PathBuf::from("/cfg/tuivir.toml");
     let env = Env {
         config_file: Some(path.clone()),
         xdg_config_home: Some(PathBuf::from("relative-xdg")),
@@ -248,7 +248,7 @@ fn nothing_is_configured_and_nothing_exists_so_compiled_defaults_apply() {
 
 #[test]
 fn a_file_that_is_not_valid_toml_is_reported_with_its_path() {
-    let path = PathBuf::from("/cfg/virtui.toml");
+    let path = PathBuf::from("/cfg/tuivir.toml");
     let env = Env {
         config_file: Some(path.clone()),
         ..Default::default()
@@ -262,14 +262,14 @@ fn a_file_that_is_not_valid_toml_is_reported_with_its_path() {
     else {
         panic!("expected an unparsable file, got {error:?}");
     };
-    assert_eq!(error_path, PathBuf::from("/cfg/virtui.toml"));
+    assert_eq!(error_path, PathBuf::from("/cfg/tuivir.toml"));
 }
 
-/// A field Virtui does not understand is a typo or a setting from a different
+/// A field Tuivir does not understand is a typo or a setting from a different
 /// tool. Ignoring it would leave the user believing it took effect.
 #[test]
 fn an_unknown_field_is_rejected_and_names_itself() {
-    let path = PathBuf::from("/cfg/virtui.toml");
+    let path = PathBuf::from("/cfg/tuivir.toml");
     let env = Env {
         config_file: Some(path.clone()),
         ..Default::default()
@@ -283,7 +283,7 @@ fn an_unknown_field_is_rejected_and_names_itself() {
     let LoadError::Unparsable { path, message } = error else {
         panic!("expected an unknown field to be rejected, got {error:?}");
     };
-    assert_eq!(path, PathBuf::from("/cfg/virtui.toml"));
+    assert_eq!(path, PathBuf::from("/cfg/tuivir.toml"));
     assert!(
         message.contains("theme"),
         "the diagnostic must name the field the user wrote, got {message:?}"
@@ -292,7 +292,7 @@ fn an_unknown_field_is_rejected_and_names_itself() {
 
 #[test]
 fn an_unknown_command_id_is_rejected() {
-    let path = PathBuf::from("/cfg/virtui.toml");
+    let path = PathBuf::from("/cfg/tuivir.toml");
     let env = Env {
         config_file: Some(path.clone()),
         ..Default::default()
@@ -302,7 +302,7 @@ fn an_unknown_command_id_is_rejected() {
     assert_eq!(
         load(&env, &fs).unwrap_err(),
         LoadError::Invalid {
-            path: PathBuf::from("/cfg/virtui.toml"),
+            path: PathBuf::from("/cfg/tuivir.toml"),
             errors: vec![ConfigError::UnknownCommand {
                 id: "no.such.command".to_owned()
             }]
@@ -312,7 +312,7 @@ fn an_unknown_command_id_is_rejected() {
 
 #[test]
 fn an_unrecognised_key_is_rejected() {
-    let path = PathBuf::from("/cfg/virtui.toml");
+    let path = PathBuf::from("/cfg/tuivir.toml");
     let env = Env {
         config_file: Some(path.clone()),
         ..Default::default()
@@ -322,7 +322,7 @@ fn an_unrecognised_key_is_rejected() {
     assert_eq!(
         load(&env, &fs).unwrap_err(),
         LoadError::Invalid {
-            path: PathBuf::from("/cfg/virtui.toml"),
+            path: PathBuf::from("/cfg/tuivir.toml"),
             errors: vec![ConfigError::InvalidKey {
                 id: "resource.restart".to_owned(),
                 key: "f13".to_owned()
@@ -333,7 +333,7 @@ fn an_unrecognised_key_is_rejected() {
 
 #[test]
 fn claiming_ctrl_c_for_another_command_is_rejected() {
-    let path = PathBuf::from("/cfg/virtui.toml");
+    let path = PathBuf::from("/cfg/tuivir.toml");
     let env = Env {
         config_file: Some(path.clone()),
         ..Default::default()
@@ -343,7 +343,7 @@ fn claiming_ctrl_c_for_another_command_is_rejected() {
     assert_eq!(
         load(&env, &fs).unwrap_err(),
         LoadError::Invalid {
-            path: PathBuf::from("/cfg/virtui.toml"),
+            path: PathBuf::from("/cfg/tuivir.toml"),
             errors: vec![ConfigError::ReservedKey {
                 id: "resource.delete".to_owned(),
                 key: "ctrl+c".to_owned()
@@ -359,7 +359,7 @@ fn claiming_ctrl_c_for_another_command_is_rejected() {
 /// to generate an inline hint from — a rejected file cannot half-apply.
 #[test]
 fn every_discoverable_failure_is_reported_together() {
-    let path = PathBuf::from("/cfg/virtui.toml");
+    let path = PathBuf::from("/cfg/tuivir.toml");
     let env = Env {
         config_file: Some(path.clone()),
         ..Default::default()
@@ -400,10 +400,10 @@ fn every_discoverable_failure_is_reported_together() {
 }
 
 /// An uppercase Command ID is a typo rather than a second spelling: IDs are
-/// lowercase and case-sensitive, so it names no Command Virtui registers.
+/// lowercase and case-sensitive, so it names no Command Tuivir registers.
 #[test]
 fn an_uppercase_command_id_is_rejected() {
-    let path = PathBuf::from("/cfg/virtui.toml");
+    let path = PathBuf::from("/cfg/tuivir.toml");
     let env = Env {
         config_file: Some(path.clone()),
         ..Default::default()
@@ -413,7 +413,7 @@ fn an_uppercase_command_id_is_rejected() {
     assert_eq!(
         load(&env, &fs).unwrap_err(),
         LoadError::Invalid {
-            path: PathBuf::from("/cfg/virtui.toml"),
+            path: PathBuf::from("/cfg/tuivir.toml"),
             errors: vec![ConfigError::UnknownCommand {
                 id: "Resource.Delete".to_owned()
             }]
@@ -426,7 +426,7 @@ fn an_uppercase_command_id_is_rejected() {
 /// selected configuration produced nothing.
 #[test]
 fn an_explicit_file_that_is_a_directory_is_fatal() {
-    let path = std::env::temp_dir().join("virtui-config-is-a-directory");
+    let path = std::env::temp_dir().join("tuivir-config-is-a-directory");
     std::fs::create_dir_all(&path).expect("a directory to point the override at");
     let env = Env {
         config_file: Some(path.clone()),
@@ -443,7 +443,7 @@ fn an_explicit_file_that_is_a_directory_is_fatal() {
 /// need a second reader implementation.
 #[test]
 fn the_real_filesystem_reader_reads_a_file_from_disk() {
-    let path = std::env::temp_dir().join("virtui-fsreader-test.toml");
+    let path = std::env::temp_dir().join("tuivir-fsreader-test.toml");
     std::fs::write(&path, "[keybindings]\n\"resource.restart\" = [\"x\"]\n").unwrap();
     let env = Env {
         config_file: Some(path.clone()),

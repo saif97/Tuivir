@@ -1,0 +1,4 @@
+[
+  {"name":"cache","type":"custom","content_type":"filesystem","description":"Archived cache","project":"default","location":"none"},
+  {"name":"cache/snapshot-1","type":"custom","content_type":"filesystem","description":"Snapshot","project":"default","location":"none"}
+]

@@ -10,19 +10,75 @@ use crate::application::Command;
 
 /// Resolves one mouse event against the layout that drew the screen.
 ///
+/// `boundary_grab` is the Pane Boundary column the pointer is holding, which is
+/// the one fact a gesture needs beyond the regions on screen: a drag names no
+/// region, because the pointer has usually left the one it started in.
+///
 /// Returns `None` where there is nothing to do: over a border, over blank space,
 /// or while an overlay owns the screen.
-pub fn resolve(layout: &ScreenLayout, input: MouseInput) -> Option<Command> {
-    // A modal owns the screen while it is open, so a click anywhere is not for
-    // the widgets drawn beneath it. It is dismissed by its own Commands.
-    if layout.overlay.is_some() {
-        return None;
-    }
+pub fn resolve(
+    layout: &ScreenLayout,
+    input: MouseInput,
+    boundary_grab: Option<u16>,
+) -> Option<Command> {
     match input.action {
+        // Letting go is answered first, because it is not a click on whatever is
+        // on screen — it ends a gesture that began before it. A modal that opened
+        // mid-drag would otherwise swallow the release and leave the boundary
+        // held, and the next drag anywhere would carry it off.
+        //
+        // Every click ends in a release too, and only a held boundary makes one
+        // worth reporting.
+        MouseAction::Release => boundary_grab.map(|_| Command::ReleasePaneBoundary),
+        // A modal owns the screen while it is open, so pointing at anything is
+        // not for the widgets drawn beneath it. It is dismissed by its own
+        // Commands.
+        _ if layout.overlay.is_some() => None,
         MouseAction::Press => press(layout, input),
+        MouseAction::Drag => drag(layout, input, boundary_grab),
         MouseAction::ScrollUp => scroll(layout, input, ScrollDirection::Up),
         MouseAction::ScrollDown => scroll(layout, input, ScrollDirection::Down),
     }
+}
+
+/// Carries a held Pane Boundary to the pointer, as the share it now leaves the
+/// Resource Panels.
+///
+/// The share is worked out here because the width it is a share of belongs to
+/// the screen. `grab` is the column of the boundary the pointer took hold of,
+/// and taking it off the pointer is what stops the boundary jumping.
+fn drag(layout: &ScreenLayout, input: MouseInput, boundary_grab: Option<u16>) -> Option<Command> {
+    if boundary_grab.is_none() {
+        let panes = layout.panes.as_ref()?;
+        let point = point(input);
+        if panes.detail_content.contains(point) {
+            return Some(Command::ExtendDetailsSelection {
+                line: point.y - panes.detail_content.y,
+                column: point.x - panes.detail_content.x,
+            });
+        }
+        if point.x >= panes.detail_content.x && point.x < panes.detail_content.right() {
+            return Some(Command::ExtendDetailsSelectionAtEdge {
+                above: point.y < panes.detail_content.y,
+                column: point.x - panes.detail_content.x,
+                visible_rows: panes.detail_content.height,
+            });
+        }
+        return None;
+    }
+    let grab = boundary_grab.expect("checked above");
+    let workspace = layout.workspace;
+    if workspace.width == 0 {
+        return None;
+    }
+    let last_column = input.column.saturating_sub(grab);
+    let width = last_column
+        .saturating_add(1)
+        .saturating_sub(workspace.x)
+        .min(workspace.width);
+    Some(Command::SetPaneBoundary(
+        (u32::from(width) * 100 / u32::from(workspace.width)) as u16,
+    ))
 }
 
 enum ScrollDirection {
@@ -41,6 +97,12 @@ fn press(layout: &ScreenLayout, input: MouseInput) -> Option<Command> {
     }
 
     let panes = layout.panes.as_ref()?;
+    // Before the Panes: the boundary's own columns are the last column of the
+    // Resource Panels and the first of the Details Pane, so a boundary tested
+    // afterwards would never be reached.
+    if panes.pane_boundary.contains(point) {
+        return Some(Command::GrabPaneBoundary(point.x - panes.pane_boundary.x));
+    }
     for (panel, rows) in panes.resource_rows.iter().enumerate() {
         if let Some((resource, _)) = rows.iter().find(|(_, area)| area.contains(point)) {
             return Some(Command::SelectResource {
@@ -51,6 +113,12 @@ fn press(layout: &ScreenLayout, input: MouseInput) -> Option<Command> {
     }
     if let Some(index) = index_containing(&panes.detail_views, point) {
         return Some(Command::ActivateDetailView(index));
+    }
+    if panes.detail_content.contains(point) {
+        return Some(Command::BeginDetailsSelection {
+            line: point.y - panes.detail_content.y,
+            column: point.x - panes.detail_content.x,
+        });
     }
     if let Some(panel) = index_containing(&panes.resource_panels, point) {
         return Some(Command::FocusResourcePanel(panel));
@@ -94,46 +162,4 @@ fn index_containing(
     point: ratatui::layout::Position,
 ) -> Option<usize> {
     areas.iter().position(|area| area.contains(point))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::application::AppState;
-    use ratatui::layout::Rect;
-
-    fn press(column: u16, row: u16) -> MouseInput {
-        MouseInput {
-            action: MouseAction::Press,
-            column,
-            row,
-        }
-    }
-
-    /// Startup draws a Providers Pane and nothing else, so every other point is
-    /// blank space rather than a region to guess at.
-    #[test]
-    fn an_empty_screen_routes_only_the_providers_pane() {
-        let layout = ScreenLayout::measure(&AppState::default(), Rect::new(0, 0, 80, 24));
-
-        assert_eq!(resolve(&layout, press(0, 0)), Some(Command::FocusProviders));
-        assert_eq!(resolve(&layout, press(79, 23)), None);
-    }
-
-    #[test]
-    fn the_wheel_over_blank_space_resolves_to_nothing() {
-        let layout = ScreenLayout::measure(&AppState::default(), Rect::new(0, 0, 80, 24));
-
-        assert_eq!(
-            resolve(
-                &layout,
-                MouseInput {
-                    action: MouseAction::ScrollDown,
-                    column: 79,
-                    row: 23,
-                }
-            ),
-            None
-        );
-    }
 }

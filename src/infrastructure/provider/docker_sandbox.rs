@@ -9,7 +9,7 @@ use crate::{
         DetailView, DetailViewId, Provider, ProviderDiscovery, ProviderId, ProviderVersion,
         ProviderWorkspace, Resource, ResourceCommand, ResourceDetails, ResourceId, ResourcePanel,
         ResourcePanelId, ResourceState, ResourceTarget, WorkspaceError, WorkspaceSnapshot,
-        provider_cli_error,
+        provider_cli_error, require_resource_state,
     },
 };
 
@@ -18,7 +18,7 @@ const PROVIDER_NAME: &str = "Docker Sandbox";
 const SANDBOXES_PANEL_ID: &str = "sandboxes";
 /// The one Resource listing sbx offers.
 const LIST_SANDBOXES: [&str; 2] = ["ls", "--json"];
-/// The only Detail View Docker Sandbox declares.
+/// The only Detail View Tab Docker Sandbox declares.
 const INFO_VIEW: &str = "info";
 /// What a user can run to check the Target Environment a refresh could not read.
 const REFRESH_HELP: &str = "Run `sbx ls` to verify access to the current Target Environment.";
@@ -201,8 +201,8 @@ fn listing_failure(error: ProcessError) -> WorkspaceError {
 ///
 /// Deletion always forces. Unlike Docker and Incus, the flag is not about a
 /// running Resource: `sbx rm` prompts for confirmation it reads from a
-/// terminal Virtui does not give it, and `--force` is what skips that prompt.
-/// The user has already confirmed through Virtui's own.
+/// terminal Tuivir does not give it, and `--force` is what skips that prompt.
+/// The user has already confirmed through Tuivir's own.
 fn sandbox_command(command: ResourceCommand, resource_id: &str) -> Option<Vec<&str>> {
     match command {
         ResourceCommand::Start => Some(vec!["exec", "-d", resource_id, "true"]),
@@ -276,6 +276,7 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
                     Resource {
                         id: ResourceId::new(&row.name),
                         name: row.name,
+                        secondary_text: None,
                         status: Some(row.status),
                         state: Some(state),
                         fields,
@@ -305,11 +306,12 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
         cli: &'a dyn CliRunner,
         target: &'a ResourceTarget,
         command: ResourceCommand,
-        _state: ResourceState,
+        state: Option<ResourceState>,
     ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
             let panel_id = target.panel_id();
             let resource_id = target.resource_id();
+            require_resource_state(state, PROVIDER_NAME, "sandbox", command, resource_id)?;
             if panel_id.0 != SANDBOXES_PANEL_ID {
                 return Err(WorkspaceError::new(format!(
                     "Docker Sandbox has no {command} command for Resource Panel {panel_id}"

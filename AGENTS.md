@@ -4,7 +4,7 @@
 
 ### Issue tracker
 
-Issues and PRDs live in `saif97/virtui` on GitHub Issues. See `docs/agents/issue-tracker.md`.
+Issues and PRDs live in `saif97/Tuivir` on GitHub Issues. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

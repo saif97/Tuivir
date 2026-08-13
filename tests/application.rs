@@ -8,7 +8,7 @@ use std::{
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::Color;
 use tokio::sync::{Barrier, Notify, mpsc};
-use virtui::{
+use tuivir::{
     application::{
         App, AppEvent, AppState, Command, CommandRegistry, CommandScope, DetailView, FocusedPane,
         InteractiveShellOutcome, InteractiveShellProcess, LifecycleCommandPolicy, ProviderRequest,
@@ -24,13 +24,15 @@ use virtui::{
     },
     infrastructure::provider::{DockerWorkspace, ProviderDiscovery, ProviderWorkspace},
     infrastructure::runtime::{ProviderRuntime, RefreshTimer},
-    presentation::{key_from_event, render_foreground_colours, render_to_text},
+    presentation::{
+        key_from_event, render_background_colours, render_foreground_colours, render_to_text,
+    },
 };
 
 mod common;
 use common::{
-    command_completed, command_request, detail_request, details_completed, ready_workspace,
-    refresh_completed, refresh_request,
+    command_completed, command_request, detail_request, details_completed, first_provider_detail,
+    ready_workspace, refresh_completed, refresh_request,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -57,8 +59,24 @@ fn handle_key(app: &mut App, event: KeyEvent) -> (ShellControl, Vec<ProviderRequ
 /// Reports the single foreground colour `text` is rendered in, panicking when
 /// it is absent from the screen or split across colours.
 fn foreground_of(state: &AppState, width: u16, height: u16, text: &str) -> Color {
+    colour_of(state, width, height, text, render_foreground_colours)
+}
+
+fn background_of(state: &AppState, width: u16, height: u16, text: &str) -> Color {
+    colour_of(state, width, height, text, render_background_colours)
+}
+
+/// Reports the single colour `text` is rendered in, panicking when it is
+/// absent from the screen or split across colours.
+fn colour_of(
+    state: &AppState,
+    width: u16,
+    height: u16,
+    text: &str,
+    render_colours: fn(&AppState, u16, u16) -> Vec<Vec<Color>>,
+) -> Color {
     let screen = render_to_text(state, width, height);
-    let colours = render_foreground_colours(state, width, height);
+    let colours = render_colours(state, width, height);
     // Cell symbols such as a panel border are multi-byte, so a byte offset into
     // the rendered line is not a screen column until it is counted in chars.
     let (row, column) = screen
@@ -260,11 +278,14 @@ impl CliRunner for DelayedCli {
         command: ProcessSpec,
     ) -> Pin<Box<dyn Future<Output = Result<ProcessOutput, ProcessError>> + Send + 'a>> {
         Box::pin(async move {
-            if command
-                == ProcessSpec::new(
+            if [
+                ProcessSpec::new(
                     "docker",
                     &["image", "ls", "--no-trunc", "--format", "{{json .}}"],
-                )
+                ),
+                ProcessSpec::new("docker", &["volume", "ls", "--format", "{{json .}}"]),
+            ]
+            .contains(&command)
             {
                 return Ok(ProcessOutput {
                     stdout: String::new(),
@@ -504,15 +525,8 @@ fn keyboard_commands_drive_navigation_manual_refresh_and_quit() {
         KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
     );
     assert_eq!(control, ShellControl::Continue);
-    // Moving the selection asks only for the newly selected Resource's details.
-    assert!(matches!(
-        requests.as_slice(),
-        [ProviderRequest::LoadResourceDetails { target, .. }]
-            if target == &ResourceTarget::new(
-                ResourcePanelId::new("containers"),
-                ResourceId::new("container-b"),
-            )
-    ));
+    // The new Resource starts on its snapshot-backed Overview.
+    assert!(requests.is_empty(), "unexpected requests: {requests:?}");
     assert!(render_to_text(app.state(), 100, 24).contains("Image: alpine:3.21"));
 
     let (_, requests) = handle_key(
@@ -634,7 +648,7 @@ fn resume_key_dispatches_for_a_paused_container_and_carries_its_state() {
             provider_id,
             target,
             command: ResourceCommand::Resume,
-            state: ResourceState::Paused,
+            state: Some(ResourceState::Paused),
             ..
         }] if provider_id == &ProviderId::new("docker")
             && target == &ResourceTarget::new(
@@ -934,7 +948,7 @@ fn switching_provider_workspaces_keeps_an_in_flight_resource_command() {
 }
 
 #[test]
-fn a_running_resource_command_shows_a_status_identifying_provider_resource_and_command() {
+fn a_running_resource_command_marks_its_resource_without_replacing_the_command_bar() {
     let mut app = App::new();
     ready_workspace(
         &mut app,
@@ -945,10 +959,37 @@ fn a_running_resource_command_shows_a_status_identifying_provider_resource_and_c
     app.invoke(Command::Resource(ResourceCommand::Restart));
 
     let screen = render_to_text(app.state(), 160, 24);
+    assert!(screen.contains("* api"), "rendered screen:\n{screen}");
     assert!(
-        screen.contains("Running Docker restart for api (container-a)"),
+        screen.contains("Running restart for api…"),
         "rendered screen:\n{screen}"
     );
+    assert!(screen.contains("r  Restart"), "rendered screen:\n{screen}");
+    assert!(
+        screen.contains("?  all commands"),
+        "rendered screen:\n{screen}"
+    );
+}
+
+#[test]
+fn concurrent_resource_commands_mark_every_affected_resource() {
+    let mut app = App::new();
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[
+            ("container-a", "api", "nginx:1.27"),
+            ("container-b", "worker", "alpine:3.21"),
+        ]),
+    );
+
+    app.invoke(Command::Resource(ResourceCommand::Restart));
+    app.invoke(Command::SelectNext);
+    app.invoke(Command::Resource(ResourceCommand::Restart));
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(screen.contains("* api"), "rendered screen:\n{screen}");
+    assert!(screen.contains("* worker"), "rendered screen:\n{screen}");
 }
 
 #[test]
@@ -1068,7 +1109,7 @@ fn a_successful_resource_command_clears_its_status_without_opening_a_popup() {
     );
     let restart = command_request(app.invoke(Command::Resource(ResourceCommand::Restart)));
     assert!(
-        render_to_text(app.state(), 160, 24).contains("Running Docker restart for api"),
+        render_to_text(app.state(), 160, 24).contains("Running restart for api"),
         "the dispatched Resource Command is visible while it runs"
     );
 
@@ -1080,7 +1121,7 @@ fn a_successful_resource_command_clears_its_status_without_opening_a_popup() {
 
     let screen = render_to_text(app.state(), 160, 24);
     assert!(
-        !screen.contains("Running Docker restart for api"),
+        !screen.contains("Running restart for api"),
         "rendered screen:\n{screen}"
     );
     assert!(
@@ -1121,7 +1162,7 @@ fn switching_providers_invalidates_a_refresh_but_not_a_running_resource_command(
         current_screen,
         "a stale refresh snapshot does not disturb the Active Workspace"
     );
-    assert!(current_screen.contains("Running Docker restart for api (container-a)"));
+    assert!(current_screen.contains("?  all commands"));
 
     app.invoke(Command::PreviousWorkspace);
     let docker_screen = render_to_text(app.state(), 160, 24);
@@ -1285,7 +1326,7 @@ fn question_mark_closes_the_help_overlay_when_it_is_already_open() {
     assert!(screen.contains("api"), "rendered screen:\n{screen}");
 }
 
-/// An Interactive Shell is not work Virtui can run behind its own screen, so
+/// An Interactive Shell is not work Tuivir can run behind its own screen, so
 /// the shell key produces no provider request at all. It asks for the terminal
 /// instead, naming what the shell was opened for so a failure can say so later.
 #[test]
@@ -1396,6 +1437,141 @@ fn delete_requires_target_identifying_confirmation_before_dispatch() {
 }
 
 #[test]
+fn deleting_a_stateless_resource_confirms_permanent_removal_before_dispatch() {
+    let mut app = App::new();
+    ready_workspace(&mut app, docker_discovery(), stateless_snapshot());
+
+    let workspace = render_to_text(app.state(), 100, 24);
+    assert!(
+        workspace.contains("cache · local"),
+        "rendered screen:\n{workspace}"
+    );
+
+    let (_, delete_requests) = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE),
+    );
+    assert!(
+        delete_requests.is_empty(),
+        "no provider process runs before confirmation"
+    );
+
+    let confirmation = render_to_text(app.state(), 100, 24);
+    assert!(
+        confirmation.contains("Delete Docker resource cache (cache-volume)?"),
+        "rendered screen:\n{confirmation}"
+    );
+    assert!(
+        confirmation.contains("It will be permanently removed."),
+        "rendered screen:\n{confirmation}"
+    );
+    assert!(
+        !confirmation.contains("It will be stopped and removed."),
+        "rendered screen:\n{confirmation}"
+    );
+
+    let (_, confirmed_requests) = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE),
+    );
+    assert!(matches!(
+        confirmed_requests.as_slice(),
+        [ProviderRequest::ExecuteResourceCommand {
+            provider_id,
+            target,
+            command: ResourceCommand::Delete,
+            state: None,
+            ..
+        }] if provider_id == &ProviderId::new("docker")
+            && target == &ResourceTarget::new(
+                ResourcePanelId::new("volumes"),
+                ResourceId::new("cache-volume"),
+            )
+    ));
+}
+
+#[test]
+fn cancelling_a_stateless_resource_deletion_dispatches_nothing() {
+    let mut app = App::new();
+    ready_workspace(&mut app, docker_discovery(), stateless_snapshot());
+
+    assert!(
+        app.invoke(Command::Resource(ResourceCommand::Delete))
+            .is_empty()
+    );
+    assert!(app.invoke(Command::Cancel).is_empty());
+    assert!(app.state().confirmation.is_none());
+}
+
+#[test]
+fn a_delete_confirmation_is_a_raised_warning_surface() {
+    let mut app = App::new();
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
+
+    app.invoke(Command::Resource(ResourceCommand::Delete));
+
+    assert_eq!(
+        foreground_of(app.state(), 100, 24, "Confirm deletion"),
+        Color::Yellow
+    );
+    assert_eq!(
+        background_of(
+            app.state(),
+            100,
+            24,
+            "Press y/Enter to confirm or n/Esc to cancel."
+        ),
+        Color::Black
+    );
+}
+
+#[test]
+fn help_and_failures_are_raised_semantic_surfaces() {
+    let mut help = App::new();
+    ready_workspace(
+        &mut help,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
+    handle_key(
+        &mut help,
+        KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+    );
+    assert_eq!(
+        foreground_of(help.state(), 100, 24, "Commands for api"),
+        Color::Blue
+    );
+    assert_eq!(
+        background_of(help.state(), 100, 24, "d  Delete"),
+        Color::Black
+    );
+
+    let mut failed = App::new();
+    ready_workspace(
+        &mut failed,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
+    let restart = command_request(failed.invoke(Command::Resource(ResourceCommand::Restart)));
+    failed.update(command_completed(
+        restart,
+        Err(WorkspaceError::new("permission denied")),
+    ));
+    assert_eq!(
+        foreground_of(failed.state(), 100, 24, "Command failed"),
+        Color::Red
+    );
+    assert_eq!(
+        background_of(failed.state(), 100, 24, "Press Esc to dismiss."),
+        Color::Black
+    );
+}
+
+#[test]
 fn confirming_a_running_resource_warns_it_is_stopped_and_dispatches_its_state() {
     let mut app = App::new();
     ready_workspace(
@@ -1422,7 +1598,7 @@ fn confirming_a_running_resource_warns_it_is_stopped_and_dispatches_its_state() 
         confirmed_requests.as_slice(),
         [ProviderRequest::ExecuteResourceCommand {
             command: ResourceCommand::Delete,
-            state: ResourceState::Running,
+            state: Some(ResourceState::Running),
             ..
         }]
     ));
@@ -1461,7 +1637,7 @@ fn confirming_a_paused_resource_warns_it_is_stopped_and_dispatches_its_state() {
         confirmed_requests.as_slice(),
         [ProviderRequest::ExecuteResourceCommand {
             command: ResourceCommand::Delete,
-            state: ResourceState::Paused,
+            state: Some(ResourceState::Paused),
             ..
         }]
     ));
@@ -1498,7 +1674,7 @@ fn confirming_a_stopped_resource_promises_no_stop_and_dispatches_its_state() {
         confirmed_requests.as_slice(),
         [ProviderRequest::ExecuteResourceCommand {
             command: ResourceCommand::Delete,
-            state: ResourceState::Stopped,
+            state: Some(ResourceState::Stopped),
             ..
         }]
     ));
@@ -1568,13 +1744,13 @@ fn provider_bar_precedes_the_workspace_panes() {
         lines
             .next()
             .expect("provider row")
-            .starts_with("[1] Providers  [ Docker · desktop-linux ]")
+            .starts_with("[1] Docker")
     );
     assert!(
         lines
             .next()
             .expect("workspace row")
-            .starts_with("┏ ▶ [2] Containers")
+            .starts_with(" ▶ [2] Containers")
     );
 }
 
@@ -1588,7 +1764,7 @@ fn numbered_panels_render_their_navigation_shortcuts() {
     );
 
     let screen = render_to_text(app.state(), 100, 24);
-    assert!(screen.starts_with("[1] Providers"));
+    assert!(screen.starts_with("[1] Docker"));
     assert!(screen.contains("[2] Containers"));
 }
 
@@ -1608,16 +1784,16 @@ fn resource_panel_keeps_its_navigation_shortcut_while_loading_or_unavailable() {
 }
 
 #[test]
-fn each_resource_status_is_coloured_by_its_resource_state() {
-    for (state, status, colour) in [
-        (ResourceState::Running, "running", Color::Green),
-        (ResourceState::Stopped, "exited", Color::DarkGray),
-        (ResourceState::Paused, "paused", Color::Yellow),
-        (ResourceState::Transitioning, "restarting", Color::Blue),
-        (ResourceState::Broken, "dead", Color::Red),
+fn each_resource_state_has_a_coloured_symbol_without_repeating_its_status_text() {
+    for (state, status, symbol, colour) in [
+        (ResourceState::Running, "running", "●", Color::Green),
+        (ResourceState::Stopped, "exited", "○", Color::DarkGray),
+        (ResourceState::Paused, "paused", "‖", Color::Yellow),
+        (ResourceState::Transitioning, "restarting", "↻", Color::Blue),
+        (ResourceState::Broken, "dead", "✕", Color::Red),
         // An unrecognised Provider status stays neutral rather than borrowing
-        // the colour of a state Virtui understands.
-        (ResourceState::Unknown, "teleporting", Color::Reset),
+        // the colour of a state Tuivir understands.
+        (ResourceState::Unknown, "teleporting", "?", Color::Reset),
     ] {
         let mut app = App::new();
         let initial = refresh_request(app.update(docker_discovery().into_event()));
@@ -1629,10 +1805,13 @@ fn each_resource_status_is_coloured_by_its_resource_state() {
             )),
         ));
 
+        let screen = render_to_text(app.state(), 100, 24);
+        assert!(screen.contains(symbol), "rendered:\n{screen}");
+        assert!(!screen.contains(status), "rendered:\n{screen}");
         assert_eq!(
-            foreground_of(app.state(), 100, 24, status),
+            foreground_of(app.state(), 100, 24, symbol),
             colour,
-            "{state:?} status should be rendered in {colour:?}"
+            "{state:?} symbol should be rendered in {colour:?}"
         );
     }
 }
@@ -1647,6 +1826,27 @@ fn a_resource_name_is_left_uncoloured_by_its_resource_state() {
     );
 
     assert_eq!(foreground_of(app.state(), 100, 24, "api"), Color::Reset);
+}
+
+#[test]
+fn an_empty_resource_panel_is_compact_muted_and_uses_the_terminal_background() {
+    let mut app = App::new();
+    ready_workspace(&mut app, docker_discovery(), snapshot(&[]));
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(screen.contains("No resources"), "rendered:\n{screen}");
+    assert!(
+        !screen.contains("No Docker Containers found"),
+        "the Panel title already identifies the Resources:\n{screen}"
+    );
+    assert_eq!(
+        foreground_of(app.state(), 100, 24, "No resources"),
+        Color::DarkGray
+    );
+    assert_eq!(
+        background_of(app.state(), 100, 24, "No resources"),
+        Color::Reset
+    );
 }
 
 #[test]
@@ -1667,10 +1867,7 @@ fn bracket_keys_switch_the_active_workspace() {
         KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE),
     );
     assert_eq!(requests.len(), 1, "new Active Workspace is refreshed");
-    assert!(
-        render_to_text(app.state(), 100, 24)
-            .starts_with("[1] Providers  Docker   [ Fixture · local ]")
-    );
+    assert!(render_to_text(app.state(), 100, 24).starts_with("[1] Docker   [1] Fixture"));
 
     let (_, requests) = handle_key(
         &mut app,
@@ -1678,11 +1875,8 @@ fn bracket_keys_switch_the_active_workspace() {
     );
     // Returning refreshes Docker and asks again for the detail view whose load
     // was abandoned on the way out.
-    assert_eq!(requests.len(), 2, "unexpected requests: {requests:?}");
-    assert!(
-        render_to_text(app.state(), 100, 24)
-            .starts_with("[1] Providers  [ Docker · desktop-linux ]   Fixture")
-    );
+    assert_eq!(requests.len(), 1, "unexpected requests: {requests:?}");
+    assert!(render_to_text(app.state(), 100, 24).starts_with("[1] Docker   [1] Fixture"));
 }
 
 #[test]
@@ -1719,10 +1913,7 @@ fn numbered_provider_panel_activates_incus_and_requests_its_refresh() {
             ..
         } if provider_id == ProviderId::new("incus")
     ));
-    assert!(
-        render_to_text(app.state(), 100, 24)
-            .starts_with("▶ [1] Providers  Docker   [ Incus · local / default ]")
-    );
+    assert!(render_to_text(app.state(), 100, 24).starts_with("▶ [1] Docker   [1] Incus"));
 }
 
 #[test]
@@ -1744,7 +1935,7 @@ fn late_docker_result_cannot_replace_the_active_incus_workspace() {
     ));
 
     assert_eq!(render_to_text(app.state(), 100, 24), current_screen);
-    assert!(current_screen.contains("[ Incus · local / default ]"));
+    assert!(current_screen.contains("Target: local / default"));
     assert!(current_screen.contains("gateway"));
     assert!(!current_screen.contains("nginx:1.27"));
 }
@@ -1765,6 +1956,27 @@ fn seven_resources() -> WorkspaceSnapshot {
 
 fn snapshot(containers: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
     container_snapshot(containers, ResourceState::Running)
+}
+
+fn stateless_snapshot() -> WorkspaceSnapshot {
+    WorkspaceSnapshot {
+        panels: vec![ResourcePanel {
+            id: ResourcePanelId::new("volumes"),
+            title: "Volumes".to_owned(),
+            detail_views: Vec::new(),
+            resources: vec![Resource {
+                id: ResourceId::new("cache-volume"),
+                name: "cache".to_owned(),
+                secondary_text: Some("local".to_owned()),
+                status: None,
+                state: None,
+                fields: Vec::new(),
+                snapshot_details: Vec::new(),
+                available_commands: &[ResourceCommand::Delete],
+                shell: None,
+            }],
+        }],
+    }
 }
 
 fn stopped_snapshot(containers: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
@@ -1802,6 +2014,7 @@ fn container_snapshot(
                 .map(|(id, name, image)| Resource {
                     id: ResourceId((*id).to_owned()),
                     name: (*name).to_owned(),
+                    secondary_text: None,
                     status: Some(status.to_owned()),
                     state: Some(state),
                     fields: vec![("Image", (*image).to_owned())],
@@ -1833,6 +2046,7 @@ fn incus_snapshot(instances: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
                     Resource {
                         id: ResourceId((*id).to_owned()),
                         name: (*name).to_owned(),
+                        secondary_text: None,
                         status: Some((*status).to_owned()),
                         state: Some(if running {
                             ResourceState::Running
@@ -1876,6 +2090,7 @@ fn docker_multi_panel_snapshot() -> WorkspaceSnapshot {
                 resources: vec![Resource {
                     id: ResourceId::new("shared-id"),
                     name: "api".to_owned(),
+                    secondary_text: None,
                     status: Some("running".to_owned()),
                     state: Some(ResourceState::Running),
                     fields: vec![
@@ -1901,6 +2116,7 @@ fn docker_multi_panel_snapshot() -> WorkspaceSnapshot {
                 resources: vec![Resource {
                     id: ResourceId::new("shared-id"),
                     name: "nginx:1.27".to_owned(),
+                    secondary_text: None,
                     status: None,
                     state: None,
                     fields: vec![
@@ -1918,10 +2134,10 @@ fn docker_multi_panel_snapshot() -> WorkspaceSnapshot {
     }
 }
 
-/// The shell offers whatever views the Provider Workspace declared, under the
-/// Provider's own names, and shows the first of them.
+/// Every selected Resource starts with its snapshot-backed Overview before the
+/// Provider's own Detail View Tabs.
 #[test]
-fn a_selected_container_offers_dockers_native_detail_views() {
+fn a_selected_container_starts_on_snapshot_backed_overview() {
     let mut app = App::new();
     let initial = refresh_request(app.update(docker_discovery().into_event()));
 
@@ -1932,15 +2148,19 @@ fn a_selected_container_offers_dockers_native_detail_views() {
 
     let screen = render_to_text(app.state(), 100, 24);
     assert!(
-        screen.contains("[ Logs ]  Stats  Inspect"),
+        screen.contains("[ Overview ]  Logs  Stats  Inspect"),
         "rendered:\n{screen}"
+    );
+    assert!(
+        screen.find("[ Overview ]") < screen.find("Image: nginx:1.27"),
+        "the Overview tab precedes its snapshot-backed content:\n{screen}"
     );
 }
 
-/// Detail data is lazy: settling on a Resource asks the Provider for the one
-/// view on screen and for nothing else.
+/// The visible Overview comes entirely from the Workspace Snapshot, so
+/// selecting a Resource does not ask its Provider to load details yet.
 #[test]
-fn settling_on_a_resource_requests_only_the_visible_detail_view() {
+fn settling_on_a_resource_does_not_load_snapshot_backed_overview() {
     let mut app = App::new();
     let initial = refresh_request(app.update(docker_discovery().into_event()));
 
@@ -1949,35 +2169,18 @@ fn settling_on_a_resource_requests_only_the_visible_detail_view() {
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
     ));
 
-    assert_eq!(requests.len(), 1, "one view is visible, so one is loaded");
-    assert!(
-        matches!(
-            &requests[0],
-            ProviderRequest::LoadResourceDetails {
-                provider_id,
-                target,
-                view_id,
-                ..
-            } if provider_id == &ProviderId::new("docker")
-                && target == &ResourceTarget::new(
-                    ResourcePanelId::new("containers"),
-                    ResourceId::new("container-a"),
-                )
-                && view_id == &DetailViewId::new("logs")
-        ),
-        "unexpected request: {:?}",
-        requests[0]
-    );
+    assert!(requests.is_empty(), "unexpected requests: {requests:?}");
 }
 
 #[test]
 fn a_detail_request_is_current_only_while_its_full_identity_remains_visible() {
     let mut app = App::new();
-    let request = detail_request(ready_workspace(
+    ready_workspace(
         &mut app,
         docker_discovery(),
         snapshot(&[("container-a", "api", "nginx:1.27")]),
-    ));
+    );
+    let request = first_provider_detail(&mut app);
 
     assert!(app.detail_request_is_current(&request));
 
@@ -2001,7 +2204,9 @@ fn docker_renders_every_provider_defined_resource_panel() {
 
     let screen = render_to_text(app.state(), 80, 30);
     assert!(screen.contains("Containers"), "rendered:\n{screen}");
+    assert!(screen.contains("Containers (1)"), "rendered:\n{screen}");
     assert!(screen.contains("Images"), "rendered:\n{screen}");
+    assert!(screen.contains("Images (1)"), "rendered:\n{screen}");
     assert!(screen.contains("api"), "rendered:\n{screen}");
     assert!(screen.contains("nginx:1.27"), "rendered:\n{screen}");
 }
@@ -2021,31 +2226,54 @@ fn every_resource_panel_advertises_its_effective_focus_key() {
 }
 
 #[test]
-fn focus_has_a_non_colour_cue_on_every_pane() {
+fn focus_accents_a_pane_title_and_edge_without_a_thick_border() {
     let mut app = App::new();
     ready_workspace(&mut app, docker_discovery(), docker_multi_panel_snapshot());
 
     let screen = render_to_text(app.state(), 80, 30);
-    assert!(
-        screen.contains("┏ ▶ [2] Containers"),
-        "the focused Resource Panel uses a thick border and title cue:\n{screen}"
+    assert!(screen.contains("▶ [2] Containers"), "rendered:\n{screen}");
+    assert_eq!(
+        foreground_of(app.state(), 80, 30, "▶ [2] Containers"),
+        Color::Blue,
+        "the focused Pane title uses the primary accent"
     );
 
     app.invoke(Command::FocusResourcePanel(1));
     let screen = render_to_text(app.state(), 80, 30);
-    assert!(screen.contains("┏ ▶ [3] Images"), "rendered:\n{screen}");
+    assert!(screen.contains("▶ [3] Images"), "rendered:\n{screen}");
     assert!(!screen.contains("▶ [2] Containers"));
 
     app.invoke(Command::FocusDetails);
     let screen = render_to_text(app.state(), 80, 30);
     assert!(
-        screen.contains("┏ ▶ [enter] Details"),
+        screen.contains("┌ ▶ [enter] Details"),
         "rendered:\n{screen}"
     );
 
     app.invoke(Command::FocusProviders);
     let screen = render_to_text(app.state(), 80, 30);
-    assert!(screen.starts_with("▶ [1] Providers"), "rendered:\n{screen}");
+    assert!(screen.starts_with("▶ [1] Docker"), "rendered:\n{screen}");
+}
+
+#[test]
+fn selected_resource_uses_a_full_row_background_that_dims_without_focus() {
+    let mut app = App::new();
+    ready_workspace(&mut app, docker_discovery(), docker_multi_panel_snapshot());
+
+    assert_eq!(background_of(app.state(), 80, 30, "api"), Color::Blue);
+
+    app.invoke(Command::FocusDetails);
+
+    assert_eq!(background_of(app.state(), 80, 30, "api"), Color::DarkGray);
+}
+
+#[test]
+fn resource_panel_shows_a_visual_scrollbar_only_when_rows_overflow() {
+    let mut app = App::new();
+    ready_workspace(&mut app, docker_discovery(), seven_resources());
+
+    assert!(render_to_text(app.state(), 100, 8).contains("█"));
+    assert!(!render_to_text(app.state(), 100, 24).contains("█"));
 }
 
 #[test]
@@ -2072,16 +2300,74 @@ fn a_workspace_over_the_numbered_panel_capacity_is_refused() {
 }
 
 #[test]
-fn active_provider_and_target_environment_share_the_top_bar() {
+fn provider_workspaces_render_as_navigation_segments_with_the_active_target_on_the_right() {
     let mut app = App::new();
     ready_workspace(&mut app, docker_discovery(), docker_multi_panel_snapshot());
+    app.update(fixture_discovery().into_event());
 
     let screen = render_to_text(app.state(), 80, 30);
+    let provider_bar = screen.lines().next().expect("a Provider bar");
     assert!(
-        screen.starts_with("[1] Providers  [ Docker · desktop-linux ]"),
+        provider_bar.starts_with("[1] Docker   [1] Fixture"),
         "rendered:\n{screen}"
     );
-    assert!(!screen.contains("Target:"));
+    assert!(
+        provider_bar.ends_with("Target: desktop-linux"),
+        "rendered:\n{screen}"
+    );
+    assert!(!provider_bar.contains("Docker · desktop-linux"));
+}
+
+#[test]
+fn the_default_target_environment_stays_visible_beside_the_provider_navigation() {
+    let default_docker = ProviderDiscovery::new(
+        Provider::new(
+            ProviderId::new("docker"),
+            "Docker",
+            Some(TargetEnvironment::new("default")),
+            None,
+        ),
+        None,
+    );
+    let mut app = App::new();
+    ready_workspace(&mut app, default_docker, docker_multi_panel_snapshot());
+
+    assert!(
+        render_to_text(app.state(), 80, 30)
+            .lines()
+            .next()
+            .expect("a Provider bar")
+            .ends_with("Target: default")
+    );
+}
+
+#[test]
+fn the_active_workspace_stays_filled_when_the_providers_pane_has_focus() {
+    let mut app = App::new();
+    ready_workspace(&mut app, docker_discovery(), docker_multi_panel_snapshot());
+    app.update(fixture_discovery().into_event());
+
+    assert_eq!(
+        background_of(app.state(), 80, 30, "Docker"),
+        Color::Blue,
+        "the Active Workspace has a filled segment"
+    );
+    assert_eq!(
+        foreground_of(app.state(), 80, 30, "Fixture"),
+        Color::DarkGray,
+        "inactive Provider Workspaces are subdued"
+    );
+
+    app.invoke(Command::FocusProviders);
+    assert!(
+        render_to_text(app.state(), 80, 30).starts_with("▶ [1] Docker   [1] Fixture"),
+        "the Providers Pane carries its own focus accent"
+    );
+    assert_eq!(
+        background_of(app.state(), 80, 30, "Docker"),
+        Color::Blue,
+        "Pane focus does not remove the Active Workspace selection"
+    );
 }
 
 #[test]
@@ -2104,8 +2390,8 @@ fn resource_panel_scroll_is_restored_when_focus_returns() {
     app.invoke(Command::FocusResourcePanel(0));
 
     let screen = render_to_text(app.state(), 80, 12);
-    assert!(screen.contains("> worker-8"), "rendered:\n{screen}");
-    assert!(!screen.contains("> api"), "rendered:\n{screen}");
+    assert!(screen.contains("● worker-8"), "rendered:\n{screen}");
+    assert!(!screen.contains("● api"), "rendered:\n{screen}");
 }
 
 #[test]
@@ -2230,37 +2516,24 @@ fn selecting_an_image_routes_details_by_panel_and_resource() {
     ready_workspace(&mut app, docker_discovery(), docker_multi_panel_snapshot());
 
     let requests = app.invoke(Command::FocusResourcePanel(1));
-
-    assert!(
-        matches!(
-            requests.as_slice(),
-            [ProviderRequest::LoadResourceDetails {
-                target,
-                view_id,
-                ..
-            }] if target == &ResourceTarget::new(
-                    ResourcePanelId::new("images"),
-                    ResourceId::new("shared-id"),
-                )
-                && view_id == &DetailViewId::new("inspect")
-        ),
-        "unexpected requests: {requests:?}"
-    );
+    assert!(requests.is_empty(), "unexpected requests: {requests:?}");
     let screen = render_to_text(app.state(), 160, 30);
     assert!(screen.contains("Repository: nginx"), "rendered:\n{screen}");
     assert!(screen.contains("Identity: sha256:shared-id"));
-    assert!(screen.contains("[ Inspect ]"));
+    assert!(screen.contains("[ Overview ]  Inspect"));
 }
 
 #[test]
 fn stale_container_details_cannot_replace_selected_image_details() {
     let mut app = App::new();
     let initial = refresh_request(app.update(docker_discovery().into_event()));
-    let stale_container = detail_request(app.update(refresh_completed(
+    app.update(refresh_completed(
         initial,
         Ok(docker_multi_panel_snapshot()),
-    )));
-    let image_request = detail_request(app.invoke(Command::FocusResourcePanel(1)));
+    ));
+    let stale_container = first_provider_detail(&mut app);
+    assert!(app.invoke(Command::FocusResourcePanel(1)).is_empty());
+    let image_request = first_provider_detail(&mut app);
     app.update(details_completed(
         image_request,
         Ok(ResourceDetails::from_lines(["selected image details"])),
@@ -2282,10 +2555,11 @@ fn stale_container_details_cannot_replace_selected_image_details() {
 fn the_detail_panel_reports_loading_and_then_the_providers_own_output() {
     let mut app = App::new();
     let initial = refresh_request(app.update(docker_discovery().into_event()));
-    let request = detail_request(app.update(refresh_completed(
+    app.update(refresh_completed(
         initial,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    )));
+    ));
+    let request = first_provider_detail(&mut app);
 
     let loading = render_to_text(app.state(), 100, 24);
     assert!(loading.contains("Loading Logs…"), "rendered:\n{loading}");
@@ -2323,27 +2597,20 @@ fn moving_through_the_detail_views_loads_only_the_newly_visible_one() {
         matches!(
             requests.as_slice(),
             [ProviderRequest::LoadResourceDetails { view_id, .. }]
-                if view_id == &DetailViewId::new("stats")
+                if view_id == &DetailViewId::new("logs")
         ),
         "unexpected requests: {requests:?}"
     );
     let screen = render_to_text(app.state(), 100, 24);
     assert!(
-        screen.contains("Logs  [ Stats ]  Inspect"),
+        screen.contains("Overview  [ Logs ]  Stats  Inspect"),
         "rendered:\n{screen}"
     );
 
     let (_, requests) = handle_key(&mut app, KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
 
-    assert!(
-        matches!(
-            requests.as_slice(),
-            [ProviderRequest::LoadResourceDetails { view_id, .. }]
-                if view_id == &DetailViewId::new("logs")
-        ),
-        "unexpected requests: {requests:?}"
-    );
-    assert!(render_to_text(app.state(), 100, 24).contains("[ Logs ]  Stats  Inspect"));
+    assert!(requests.is_empty(), "unexpected requests: {requests:?}");
+    assert!(render_to_text(app.state(), 100, 24).contains("[ Overview ]  Logs  Stats  Inspect"));
 }
 
 /// The views are a ring, so moving past either end lands on the other rather
@@ -2361,7 +2628,7 @@ fn detail_views_wrap_around_at_both_ends() {
     assert!(render_to_text(app.state(), 100, 24).contains("Logs  Stats  [ Inspect ]"));
 
     app.invoke(Command::NextDetailView);
-    assert!(render_to_text(app.state(), 100, 24).contains("[ Logs ]  Stats  Inspect"));
+    assert!(render_to_text(app.state(), 100, 24).contains("[ Overview ]  Logs  Stats  Inspect"));
 }
 
 /// The view survives moving between Resources, so reading one kind of detail
@@ -2378,6 +2645,7 @@ fn the_chosen_detail_view_survives_moving_to_another_resource() {
         ]),
     );
     app.invoke(Command::NextDetailView);
+    app.invoke(Command::NextDetailView);
 
     let requests = app.invoke(Command::SelectNext);
 
@@ -2393,7 +2661,7 @@ fn the_chosen_detail_view_survives_moving_to_another_resource() {
         ),
         "unexpected requests: {requests:?}"
     );
-    assert!(render_to_text(app.state(), 100, 24).contains("Logs  [ Stats ]  Inspect"));
+    assert!(render_to_text(app.state(), 100, 24).contains("Overview  Logs  [ Stats ]  Inspect"));
 }
 
 /// A user who moves off a Resource before its details arrive must not have the
@@ -2402,13 +2670,14 @@ fn the_chosen_detail_view_survives_moving_to_another_resource() {
 fn a_late_result_for_the_previous_resource_cannot_replace_current_details() {
     let mut app = App::new();
     let initial = refresh_request(app.update(docker_discovery().into_event()));
-    let stale = detail_request(app.update(refresh_completed(
+    app.update(refresh_completed(
         initial,
         Ok(snapshot(&[
             ("container-a", "api", "nginx:1.27"),
             ("container-b", "worker", "alpine:3.21"),
         ])),
-    )));
+    ));
+    let stale = first_provider_detail(&mut app);
     let current = detail_request(app.invoke(Command::SelectNext));
     app.update(details_completed(
         current,
@@ -2431,10 +2700,11 @@ fn a_late_result_for_the_previous_resource_cannot_replace_current_details() {
 fn a_late_result_for_the_previous_detail_view_cannot_replace_current_details() {
     let mut app = App::new();
     let initial = refresh_request(app.update(docker_discovery().into_event()));
-    let stale = detail_request(app.update(refresh_completed(
+    app.update(refresh_completed(
         initial,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    )));
+    ));
+    let stale = first_provider_detail(&mut app);
     let current = detail_request(app.invoke(Command::NextDetailView));
     app.update(details_completed(
         current,
@@ -2455,17 +2725,19 @@ fn a_late_result_for_the_previous_detail_view_cannot_replace_current_details() {
 fn a_late_docker_detail_result_cannot_reach_the_active_incus_workspace() {
     let mut app = App::new();
     let docker_refresh = refresh_request(app.update(docker_discovery().into_event()));
-    let stale = detail_request(app.update(refresh_completed(
+    app.update(refresh_completed(
         docker_refresh,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    )));
+    ));
+    let stale = first_provider_detail(&mut app);
     app.update(incus_discovery().into_event());
     app.invoke(Command::FocusProviders);
     let incus_refresh = refresh_request(app.invoke(Command::NextWorkspace));
-    let incus_details = detail_request(app.update(refresh_completed(
+    app.update(refresh_completed(
         incus_refresh,
         Ok(incus_snapshot(&[("instance-a", "gateway", "Running")])),
-    )));
+    ));
+    let incus_details = first_provider_detail(&mut app);
     app.update(details_completed(
         incus_details,
         Ok(ResourceDetails::from_lines(["gateway is up"])),
@@ -2488,10 +2760,11 @@ fn a_late_docker_detail_result_cannot_reach_the_active_incus_workspace() {
 fn returning_to_a_workspace_whose_detail_load_was_invalidated_asks_for_it_again() {
     let mut app = App::new();
     let docker_refresh = refresh_request(app.update(docker_discovery().into_event()));
-    let abandoned = detail_request(app.update(refresh_completed(
+    app.update(refresh_completed(
         docker_refresh,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    )));
+    ));
+    let abandoned = first_provider_detail(&mut app);
     app.update(incus_discovery().into_event());
     app.invoke(Command::FocusProviders);
     app.invoke(Command::NextWorkspace);
@@ -2530,13 +2803,14 @@ fn returning_to_a_workspace_whose_detail_load_was_invalidated_asks_for_it_again(
 fn an_ordinary_refresh_neither_reloads_nor_discards_the_loaded_details() {
     let mut app = App::new();
     let initial = refresh_request(app.update(docker_discovery().into_event()));
-    let details = detail_request(app.update(refresh_completed(
+    app.update(refresh_completed(
         initial,
         Ok(snapshot(&[
             ("container-a", "api", "nginx:1.27"),
             ("container-b", "worker", "alpine:3.21"),
         ])),
-    )));
+    ));
+    let details = first_provider_detail(&mut app);
     app.update(details_completed(
         details,
         Ok(ResourceDetails::from_lines(["listening on port 80"])),
@@ -2568,10 +2842,11 @@ fn an_ordinary_refresh_neither_reloads_nor_discards_the_loaded_details() {
 fn a_refresh_that_removes_the_selected_resource_loads_the_new_selections_details() {
     let mut app = App::new();
     let initial = refresh_request(app.update(docker_discovery().into_event()));
-    let details = detail_request(app.update(refresh_completed(
+    app.update(refresh_completed(
         initial,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    )));
+    ));
+    let details = first_provider_detail(&mut app);
     app.update(details_completed(
         details,
         Ok(ResourceDetails::from_lines(["listening on port 80"])),
@@ -2606,10 +2881,11 @@ fn a_refresh_that_removes_the_selected_resource_loads_the_new_selections_details
 fn a_detail_view_the_provider_answered_with_nothing_gets_its_own_empty_state() {
     let mut app = App::new();
     let initial = refresh_request(app.update(docker_discovery().into_event()));
-    let details = detail_request(app.update(refresh_completed(
+    app.update(refresh_completed(
         initial,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    )));
+    ));
+    let details = first_provider_detail(&mut app);
 
     app.update(details_completed(details, Ok(ResourceDetails::default())));
 
@@ -2624,10 +2900,11 @@ fn a_detail_view_the_provider_answered_with_nothing_gets_its_own_empty_state() {
 fn a_failed_detail_view_names_the_provider_resource_and_view() {
     let mut app = App::new();
     let initial = refresh_request(app.update(docker_discovery().into_event()));
-    let details = detail_request(app.update(refresh_completed(
+    app.update(refresh_completed(
         initial,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    )));
+    ));
+    let details = first_provider_detail(&mut app);
 
     app.update(details_completed(
         details,
@@ -2648,10 +2925,11 @@ fn a_failed_detail_view_names_the_provider_resource_and_view() {
 fn a_failed_detail_view_leaves_the_resource_list_and_its_commands_alone() {
     let mut app = App::new();
     let initial = refresh_request(app.update(docker_discovery().into_event()));
-    let details = detail_request(app.update(refresh_completed(
+    app.update(refresh_completed(
         initial,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    )));
+    ));
+    let details = first_provider_detail(&mut app);
 
     app.update(details_completed(
         details,
@@ -2683,10 +2961,11 @@ fn a_failed_detail_view_leaves_the_resource_list_and_its_commands_alone() {
 fn scrolling_moves_through_a_long_detail_view_and_clamps_at_both_ends() {
     let mut app = App::new();
     let initial = refresh_request(app.update(docker_discovery().into_event()));
-    let details = detail_request(app.update(refresh_completed(
+    app.update(refresh_completed(
         initial,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    )));
+    ));
+    let details = first_provider_detail(&mut app);
     app.update(details_completed(
         details,
         Ok(ResourceDetails::from_lines(
@@ -2724,10 +3003,11 @@ fn scrolling_moves_through_a_long_detail_view_and_clamps_at_both_ends() {
 fn detail_source_lines_clip_at_the_panel_edge_instead_of_wrapping() {
     let mut app = App::new();
     let initial = refresh_request(app.update(docker_discovery().into_event()));
-    let details = detail_request(app.update(refresh_completed(
+    app.update(refresh_completed(
         initial,
         Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
-    )));
+    ));
+    let details = first_provider_detail(&mut app);
     app.update(details_completed(
         details,
         Ok(ResourceDetails::from_lines([
@@ -2742,19 +3022,133 @@ fn detail_source_lines_clip_at_the_panel_edge_instead_of_wrapping() {
     assert!(!screen.contains("SHOULD"), "rendered:\n{screen}");
 }
 
+#[test]
+fn copying_a_details_selection_returns_exact_source_text() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+    let details = first_provider_detail(&mut app);
+    app.update(details_completed(
+        details,
+        Ok(ResourceDetails::from_lines(["hello", "world"])),
+    ));
+
+    app.invoke(Command::BeginDetailsSelection { line: 0, column: 1 });
+    app.invoke(Command::ExtendDetailsSelection { line: 1, column: 3 });
+    app.invoke(Command::CopyDetails);
+
+    assert_eq!(
+        app.take_pending_details_copy(),
+        Some("ello\nwor".to_owned())
+    );
+}
+
+#[test]
+fn selected_details_text_is_visibly_highlighted() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+    let details = first_provider_detail(&mut app);
+    app.update(details_completed(
+        details,
+        Ok(ResourceDetails::from_lines(["hello"])),
+    ));
+    app.invoke(Command::BeginDetailsSelection { line: 0, column: 1 });
+    app.invoke(Command::ExtendDetailsSelection { line: 0, column: 4 });
+
+    let screen = render_to_text(app.state(), 100, 24);
+    let backgrounds = render_background_colours(app.state(), 100, 24);
+    let (row, column) = screen
+        .lines()
+        .enumerate()
+        .find_map(|(row, line)| {
+            line.find("hello")
+                .map(|offset| (row, line[..offset].chars().count()))
+        })
+        .expect("detail text is rendered");
+
+    assert_eq!(
+        &backgrounds[row][column + 1..column + 4],
+        &[Color::Blue, Color::Blue, Color::Blue],
+        "screen:\n{screen}",
+    );
+}
+
+#[test]
+fn changing_the_selected_resource_clears_details_selection() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[
+            ("container-a", "api", "nginx:1.27"),
+            ("container-b", "worker", "alpine:3.21"),
+        ])),
+    ));
+    let details = first_provider_detail(&mut app);
+    app.update(details_completed(
+        details,
+        Ok(ResourceDetails::from_lines(["hello"])),
+    ));
+    app.invoke(Command::BeginDetailsSelection { line: 0, column: 0 });
+    app.invoke(Command::ExtendDetailsSelection { line: 0, column: 5 });
+    app.invoke(Command::SelectNext);
+    app.invoke(Command::CopyDetails);
+
+    assert_eq!(app.take_pending_details_copy(), None);
+}
+
+#[test]
+fn dragging_below_details_autoscrolls_and_extends_the_selection() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[("container-a", "api", "nginx:1.27")])),
+    ));
+    let details = first_provider_detail(&mut app);
+    app.update(details_completed(
+        details,
+        Ok(ResourceDetails::from_lines(
+            (0..20).map(|line| format!("line-{line}")),
+        )),
+    ));
+    app.invoke(Command::BeginDetailsSelection { line: 0, column: 0 });
+    for _ in 0..3 {
+        app.invoke(Command::ExtendDetailsSelectionAtEdge {
+            above: false,
+            column: 6,
+            visible_rows: 1,
+        });
+    }
+    app.invoke(Command::CopyDetails);
+
+    assert_eq!(
+        app.take_pending_details_copy(),
+        Some("line-0\nline-1\nline-2\nline-3".to_owned())
+    );
+}
+
 /// Every view starts at its own top: a scrolled position belongs to the output
 /// it was scrolled through, not to the panel.
 #[test]
 fn moving_to_another_resource_starts_its_detail_view_at_the_top() {
     let mut app = App::new();
     let initial = refresh_request(app.update(docker_discovery().into_event()));
-    let details = detail_request(app.update(refresh_completed(
+    app.update(refresh_completed(
         initial,
         Ok(snapshot(&[
             ("container-a", "api", "nginx:1.27"),
             ("container-b", "worker", "alpine:3.21"),
         ])),
-    )));
+    ));
+    let details = first_provider_detail(&mut app);
     app.update(details_completed(
         details,
         Ok(ResourceDetails::from_lines(
@@ -2791,14 +3185,14 @@ fn configured_detail_view_keys_change_dispatch_and_help_together() {
 
     app.invoke(Command::FocusDetails);
     handle_key(&mut app, KeyEvent::new(KeyCode::F(12), KeyModifiers::NONE));
-    assert!(render_to_text(app.state(), 100, 24).contains("Logs  [ Stats ]  Inspect"));
+    assert!(render_to_text(app.state(), 100, 24).contains("Overview  [ Logs ]  Stats  Inspect"));
 
     handle_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE),
     );
     assert!(
-        render_to_text(app.state(), 100, 24).contains("Logs  [ Stats ]  Inspect"),
+        render_to_text(app.state(), 100, 24).contains("Overview  [ Logs ]  Stats  Inspect"),
         "the replaced default no longer moves the view"
     );
 
@@ -2832,7 +3226,7 @@ fn a_selected_instance_offers_incus_views_rather_than_docker_equivalents() {
 
     let screen = render_to_text(app.state(), 100, 24);
     assert!(
-        screen.contains("[ Info ]  Config  Console Log"),
+        screen.contains("[ Overview ]  Info  Config  Console Log"),
         "rendered:\n{screen}"
     );
     for docker_view in ["Logs", "Stats", "Inspect"] {
@@ -2909,8 +3303,8 @@ fn resource_navigation_keeps_earlier_rows_visible_until_the_selection_leaves_the
     app.invoke(Command::SelectNext);
 
     let screen = render_to_text(app.state(), 100, 24);
-    assert!(screen.contains("  api"), "rendered screen:\n{screen}");
-    assert!(screen.contains("> worker"), "rendered screen:\n{screen}");
+    assert!(screen.contains("● api"), "rendered screen:\n{screen}");
+    assert!(screen.contains("● worker"), "rendered screen:\n{screen}");
 }
 
 #[test]
@@ -3217,11 +3611,11 @@ fn an_overridden_focus_key_renders_its_effective_hint() {
 
     let screen = render_to_text(app.state(), 100, 24);
     assert!(
-        screen.starts_with("[f10] Providers"),
+        screen.starts_with("[f10] Docker"),
         "the panel hint follows the effective binding:\n{screen}"
     );
     assert!(
-        !screen.contains("[1] Providers"),
+        !screen.contains("[1] Docker"),
         "the replaced default hint is gone:\n{screen}"
     );
 }
@@ -3261,7 +3655,7 @@ fn one_override_changes_dispatch_help_and_the_inline_hint_together() {
 
     // The inline hint follows the override.
     let screen = render_to_text(app.state(), 100, 24);
-    assert!(screen.starts_with("[f10] Providers"), "rendered:\n{screen}");
+    assert!(screen.starts_with("[f10] Docker"), "rendered:\n{screen}");
 
     // Contextual help follows the override.
     handle_key(
@@ -3295,4 +3689,174 @@ fn one_override_changes_dispatch_help_and_the_inline_hint_together() {
         KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE),
     );
     assert!(stale.is_empty(), "the old Restart key is unbound");
+}
+
+/// The user moves the Pane Boundary in steps they can predict, so five presses
+/// one way and five back leave the Panes where they started.
+#[test]
+fn moving_the_pane_boundary_steps_it_by_five_points_each_way() {
+    let mut app = App::new();
+    let start = app.state().pane_boundary.resources_percent();
+
+    app.invoke(Command::MovePaneBoundaryRight);
+
+    assert_eq!(
+        app.state().pane_boundary.resources_percent(),
+        start + 5,
+        "moving right gives the Resource Panels more of the width"
+    );
+
+    app.invoke(Command::MovePaneBoundaryLeft);
+    app.invoke(Command::MovePaneBoundaryLeft);
+
+    assert_eq!(
+        app.state().pane_boundary.resources_percent(),
+        start - 5,
+        "moving left gives the Details Pane more of the width"
+    );
+}
+
+/// Neither Pane may be squeezed out of usefulness, however long the user holds
+/// the key down.
+#[test]
+fn the_pane_boundary_stops_at_the_edges_of_its_range() {
+    let mut app = App::new();
+
+    for _ in 0..20 {
+        app.invoke(Command::MovePaneBoundaryRight);
+    }
+
+    assert_eq!(
+        app.state().pane_boundary.resources_percent(),
+        75,
+        "the Details Pane keeps a quarter of the width"
+    );
+
+    for _ in 0..20 {
+        app.invoke(Command::MovePaneBoundaryLeft);
+    }
+
+    assert_eq!(
+        app.state().pane_boundary.resources_percent(),
+        25,
+        "the Resource Panels keep a quarter of the width"
+    );
+}
+
+/// A drag is only the Pane Boundary's while the pointer holds it. Every other
+/// drag on the screen reaches the application the same way and must not move
+/// the Panes.
+#[test]
+fn the_pane_boundary_moves_only_while_the_pointer_holds_it() {
+    let mut app = App::new();
+    let start = app.state().pane_boundary.resources_percent();
+
+    app.invoke(Command::SetPaneBoundary(60));
+
+    assert_eq!(
+        app.state().pane_boundary.resources_percent(),
+        start,
+        "a boundary nobody grabbed ignores the pointer"
+    );
+
+    app.invoke(Command::GrabPaneBoundary(0));
+    app.invoke(Command::SetPaneBoundary(60));
+
+    assert_eq!(app.state().pane_boundary.resources_percent(), 60);
+
+    app.invoke(Command::ReleasePaneBoundary);
+    app.invoke(Command::SetPaneBoundary(30));
+
+    assert_eq!(
+        app.state().pane_boundary.resources_percent(),
+        60,
+        "letting go stops the boundary following the pointer"
+    );
+}
+
+/// A resize is only a resize. Which Pane has focus, which Resource is selected,
+/// which Detail View Tab is on screen, and how far through it the user had read are
+/// all still there afterwards.
+#[test]
+fn resizing_the_panes_disturbs_nothing_inside_them() {
+    let mut app = App::new();
+    let initial = refresh_request(app.update(docker_discovery().into_event()));
+    app.update(refresh_completed(
+        initial,
+        Ok(snapshot(&[
+            ("container-a", "api", "nginx:1.27"),
+            ("container-b", "worker", "alpine:3.21"),
+        ])),
+    ));
+    let details = first_provider_detail(&mut app);
+    app.update(details_completed(
+        details,
+        Ok(ResourceDetails::from_lines(
+            (0..30).map(|line| format!("line-{line}")),
+        )),
+    ));
+    app.invoke(Command::FocusDetails);
+    handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE),
+    );
+    let selected_before = app.state().providers[0].selected_resource_target();
+    let scrolled = render_to_text(app.state(), 100, 24);
+    assert!(scrolled.contains("line-10"), "rendered:\n{scrolled}");
+    assert!(
+        !scrolled.contains("line-0 "),
+        "the first line has been scrolled past, rendered:\n{scrolled}"
+    );
+
+    for _ in 0..4 {
+        app.invoke(Command::MovePaneBoundaryRight);
+    }
+
+    assert_ne!(
+        app.state().pane_boundary.resources_percent(),
+        48,
+        "the Panes really did change size"
+    );
+    assert_eq!(
+        app.state().focused_pane,
+        FocusedPane::Details,
+        "the Pane the keyboard drives is still the one the user left it on"
+    );
+    assert_eq!(
+        app.state().providers[0].selected_resource_target(),
+        selected_before,
+        "the selected Resource survives the resize"
+    );
+    let resized = render_to_text(app.state(), 100, 24);
+    assert!(
+        resized.contains("line-10") && !resized.contains("line-0 "),
+        "the Detail View Tab is still where it was read to, rendered:\n{resized}"
+    );
+}
+
+/// The Pane Boundary belongs to the run, not to one Provider Workspace. A user
+/// who sized the Panes to read Docker logs finds them that size in Incus too.
+#[test]
+fn the_pane_boundary_survives_provider_workspace_navigation() {
+    let mut app = App::new();
+    app.update(docker_discovery().into_event());
+    app.update(incus_discovery().into_event());
+    for _ in 0..3 {
+        app.invoke(Command::MovePaneBoundaryLeft);
+    }
+    let chosen = app.state().pane_boundary.resources_percent();
+    assert_eq!(chosen, 33, "three steps left from the starting share");
+
+    app.invoke(Command::NextWorkspace);
+
+    assert_eq!(app.state().active_provider, Some(1), "Incus is active");
+    assert_eq!(
+        app.state().pane_boundary.resources_percent(),
+        chosen,
+        "the Panes keep the size the user gave them"
+    );
+
+    app.invoke(Command::PreviousWorkspace);
+
+    assert_eq!(app.state().pane_boundary.resources_percent(), chosen);
 }

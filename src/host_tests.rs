@@ -12,10 +12,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-use super::{DetailDispatchQueue, ShellTerminal, handle_key, handle_mouse, open_pending_shell};
+use super::{
+    Clipboard, DetailDispatchQueue, Osc52Clipboard, ShellTerminal, handle_key, handle_mouse,
+    open_pending_shell,
+};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
-use virtui::{
+use tuivir::{
     application::Command,
     application::{
         App, AppEvent, DetailView, InteractiveShellProcess, ProviderRequest, Resource,
@@ -118,14 +121,21 @@ fn docker_discovery() -> ProviderDiscovery {
 
 fn detail_request(resource_id: &str) -> ProviderRequest {
     ProviderRequest::LoadResourceDetails {
-        request_id: virtui::application::ProviderRequestId::new(1),
+        request_id: tuivir::application::ProviderRequestId::new(1),
         provider_id: ProviderId::new("docker"),
-        target: virtui::domain::ResourceTarget::new(
+        target: tuivir::domain::ResourceTarget::new(
             ResourcePanelId::new("containers"),
             ResourceId::new(resource_id),
         ),
-        view_id: virtui::domain::DetailViewId::new("logs"),
+        view_id: tuivir::domain::DetailViewId::new("logs"),
     }
+}
+
+#[test]
+fn clipboard_adapter_emits_osc_52_for_exact_text() {
+    let mut clipboard = Osc52Clipboard(Vec::new());
+    clipboard.copy("a\nb").expect("clipboard write");
+    assert_eq!(clipboard.0, b"\x1b]52;c;YQpi\x07");
 }
 
 #[test]
@@ -134,7 +144,7 @@ fn a_navigation_burst_dispatches_only_the_detail_view_where_selection_settles() 
     let started = Instant::now();
     let mut dispatch = DetailDispatchQueue::new(quiet_period);
     let refresh = ProviderRequest::RefreshWorkspace {
-        request_id: virtui::application::ProviderRequestId::new(2),
+        request_id: tuivir::application::ProviderRequestId::new(2),
         provider_id: ProviderId::new("docker"),
     };
 
@@ -177,6 +187,7 @@ fn running_container() -> WorkspaceSnapshot {
             resources: vec![Resource {
                 id: ResourceId::new("container-a"),
                 name: "api".to_owned(),
+                secondary_text: None,
                 status: Some("running".to_owned()),
                 state: Some(ResourceState::Running),
                 fields: vec![("Image", "nginx:1.27".to_owned())],
@@ -255,10 +266,26 @@ fn app_on_workspace(snapshot: WorkspaceSnapshot) -> App {
 }
 
 fn click(app: &mut App, layout: &ScreenLayout, column: u16, row: u16) -> Vec<ProviderRequest> {
+    pointer(
+        app,
+        layout,
+        MouseEventKind::Down(MouseButton::Left),
+        column,
+        row,
+    )
+}
+
+fn pointer(
+    app: &mut App,
+    layout: &ScreenLayout,
+    kind: MouseEventKind,
+    column: u16,
+    row: u16,
+) -> Vec<ProviderRequest> {
     handle_mouse(
         app,
         MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
+            kind,
             column,
             row,
             modifiers: KeyModifiers::NONE,
@@ -267,11 +294,77 @@ fn click(app: &mut App, layout: &ScreenLayout, column: u16, row: u16) -> Vec<Pro
     )
 }
 
-/// A clicked Resource must load like a keyboard-selected one. Selecting without
-/// loading is the failure this guards: the Detail View would look activated and
-/// stay empty until an unrelated refresh happened along.
+/// One whole gesture through the terminal's own event type: take hold of the
+/// Pane Boundary, carry it, and let go.
+///
+/// Grabbing must not focus the Resource Panel the boundary's left column sits
+/// in, and a drag after the release must find nothing to move.
 #[test]
-fn clicking_a_resource_row_selects_it_and_asks_for_its_details() {
+fn a_whole_drag_gesture_resizes_the_panes_and_then_lets_go() {
+    let mut app = app_on_workspace(two_containers());
+    let layout = ScreenLayout::measure(app.state(), Rect::new(0, 0, 80, 24));
+    let boundary = layout
+        .panes
+        .as_ref()
+        .expect("a Provider Workspace is active")
+        .pane_boundary;
+    let row = boundary.y + 2;
+    let focus_before = app.state().focused_pane;
+
+    pointer(
+        &mut app,
+        &layout,
+        MouseEventKind::Down(MouseButton::Left),
+        boundary.x,
+        row,
+    );
+
+    assert_eq!(
+        app.state().focused_pane,
+        focus_before,
+        "taking hold of the boundary is not focusing the Pane behind it"
+    );
+
+    pointer(
+        &mut app,
+        &layout,
+        MouseEventKind::Drag(MouseButton::Left),
+        51,
+        row,
+    );
+
+    assert_eq!(
+        app.state().pane_boundary.resources_percent(),
+        65,
+        "column 51 ends a Resources column 52 of the 80 the Workspace has"
+    );
+
+    pointer(
+        &mut app,
+        &layout,
+        MouseEventKind::Up(MouseButton::Left),
+        51,
+        row,
+    );
+    pointer(
+        &mut app,
+        &layout,
+        MouseEventKind::Drag(MouseButton::Left),
+        30,
+        row,
+    );
+
+    assert_eq!(
+        app.state().pane_boundary.resources_percent(),
+        65,
+        "a drag after the release carries nothing"
+    );
+}
+
+/// A clicked Resource starts on its snapshot-backed Overview, so selecting it
+/// never asks the Provider to load a hidden Detail View Tab.
+#[test]
+fn clicking_a_resource_row_selects_it_without_loading_hidden_details() {
     let mut app = app_on_workspace(two_containers());
     let layout = ScreenLayout::measure(app.state(), Rect::new(0, 0, 80, 24));
     let panes = layout.panes.as_ref().expect("a Workspace is active");
@@ -281,15 +374,11 @@ fn clicking_a_resource_row_selects_it_and_asks_for_its_details() {
 
     assert_eq!(
         app.state().focused_pane,
-        virtui::application::FocusedPane::Resources,
+        tuivir::application::FocusedPane::Resources,
         "clicking a Resource focuses the Panel holding it"
     );
-    assert!(
-        requests
-            .iter()
-            .any(|request| matches!(request, ProviderRequest::LoadResourceDetails { .. })),
-        "the click asks for the Detail View, got {requests:?}"
-    );
+    assert!(requests.is_empty(), "unexpected requests: {requests:?}");
+    assert!(render_to_text(app.state(), 80, 24).contains("[ Overview ]"));
 }
 
 #[test]
@@ -303,7 +392,7 @@ fn clicking_a_provider_workspace_makes_it_active() {
     assert_eq!(app.state().active_provider, Some(0));
     assert_eq!(
         app.state().focused_pane,
-        virtui::application::FocusedPane::Providers
+        tuivir::application::FocusedPane::Providers
     );
 }
 
@@ -361,7 +450,7 @@ fn a_click_on_an_open_overlay_changes_nothing_beneath_it() {
     assert_eq!(app.state().focused_pane, focus_before);
 }
 
-/// The whole point of the handover: Virtui is off the screen before the
+/// The whole point of the handover: Tuivir is off the screen before the
 /// Provider CLI touches it, and back on afterwards. The refresh can only be
 /// returned once all three have happened.
 #[test]
@@ -401,7 +490,7 @@ fn the_terminal_is_suspended_for_the_provider_cli_and_taken_back_after() {
 
 /// A Provider CLI that was there at discovery and is gone by the time the user
 /// asks for a shell must not take the terminal with it. The complaint waits
-/// until Virtui is back on screen, which is the only place the user can read
+/// until Tuivir is back on screen, which is the only place the user can read
 /// it.
 #[test]
 fn a_shell_that_never_starts_still_gives_the_terminal_back_and_names_what_failed() {
@@ -433,11 +522,11 @@ fn a_shell_that_never_starts_still_gives_the_terminal_back_and_names_what_failed
 
 /// A shell exits with the status of the last command typed into it, so a
 /// non-zero status is the user's own — a `grep` that matched nothing, then
-/// Ctrl-D — and not Virtui failing to give them a shell. Reporting it would put
+/// Ctrl-D — and not Tuivir failing to give them a shell. Reporting it would put
 /// a modal in front of a user who did nothing wrong, every time they left a
 /// shell on a failed command.
 ///
-/// Virtui gave them the shell they asked for. What they did inside it is theirs.
+/// Tuivir gave them the shell they asked for. What they did inside it is theirs.
 #[test]
 fn a_shell_that_ran_is_never_a_failure_whatever_status_it_left() {
     let mut app = app_awaiting_the_terminal();
@@ -469,9 +558,9 @@ fn a_shell_that_ran_is_never_a_failure_whatever_status_it_left() {
     );
 }
 
-/// The other half of the same rule: a shell Virtui could not start is a promise
+/// The other half of the same rule: a shell Tuivir could not start is a promise
 /// it failed to keep, and says so. The CLI's own words are kept, because the
-/// user needs the part Virtui cannot supply.
+/// user needs the part Tuivir cannot supply.
 #[test]
 fn a_shell_that_could_not_be_started_names_what_the_cli_said() {
     let mut app = app_awaiting_the_terminal();
@@ -493,14 +582,14 @@ fn a_shell_that_could_not_be_started_names_what_the_cli_said() {
 }
 
 /// Keys typed while the shell held the terminal were typed at the shell, and
-/// are gone before Virtui reads anything.
+/// are gone before Tuivir reads anything.
 ///
 /// The order is what makes that true rather than merely likely: a reader
 /// started first is already pulling those keys out of the queue, so a discard
 /// that follows it empties a queue the reader has partly drained and the
-/// remainder lands on Virtui as commands the user never aimed at it.
+/// remainder lands on Tuivir as commands the user never aimed at it.
 #[test]
-fn keys_typed_at_the_shell_are_discarded_before_virtui_reads_again() {
+fn keys_typed_at_the_shell_are_discarded_before_tuivir_reads_again() {
     let mut app = app_awaiting_the_terminal();
     let handover = Handover::default();
     let mut terminal = FakeTerminal::new(handover.clone());
@@ -519,7 +608,7 @@ fn keys_typed_at_the_shell_are_discarded_before_virtui_reads_again() {
     let reading = steps
         .iter()
         .position(|step| step == "resume reading")
-        .expect("Virtui to read keys again");
+        .expect("Tuivir to read keys again");
     assert!(
         discarded < reading,
         "discarding must precede reading, got {steps:?}"
@@ -583,42 +672,61 @@ fn mouse_routing_resolves_each_region_without_a_terminal() {
         workspace: Rect::new(0, 1, 80, 22),
         status: Rect::new(0, 23, 80, 0),
         provider_selector: Rect::new(0, 0, 2, 1),
+        active_target: None,
         provider_workspaces: vec![Rect::new(10, 0, 6, 1), Rect::new(2, 0, 8, 1)],
         panes: Some(WorkspacePanes {
             resources: Rect::new(0, 1, 10, 5),
             resource_panels: vec![Rect::new(0, 1, 10, 5)],
             resource_rows: vec![vec![(3, Rect::new(1, 2, 8, 1))]],
             details: Rect::new(10, 1, 20, 5),
+            detail_content: Rect::new(11, 3, 18, 2),
             detail_views: vec![Rect::new(12, 2, 8, 1)],
+            pane_boundary: Rect::new(9, 1, 2, 5),
         }),
         overlay: None,
     };
 
     assert_eq!(
-        resolve_mouse(&layout, press(3, 0)),
+        resolve_mouse(&layout, press(3, 0), None),
         Some(Command::ActivateProviderWorkspace(1))
     );
     assert_eq!(
-        resolve_mouse(&layout, press(2, 2)),
+        resolve_mouse(&layout, press(2, 2), None),
         Some(Command::SelectResource {
             panel: 0,
             resource: 3
         })
     );
     assert_eq!(
-        resolve_mouse(&layout, press(13, 2)),
+        resolve_mouse(&layout, press(13, 2), None),
         Some(Command::ActivateDetailView(0))
     );
     assert_eq!(
-        resolve_mouse(&layout, press(29, 5)),
+        resolve_mouse(&layout, press(14, 3), None),
+        Some(Command::BeginDetailsSelection { line: 0, column: 3 })
+    );
+    assert_eq!(
+        resolve_mouse(
+            &layout,
+            tuivir::presentation::MouseInput {
+                action: tuivir::presentation::MouseAction::Drag,
+                column: 16,
+                row: 4,
+            },
+            None,
+        ),
+        Some(Command::ExtendDetailsSelection { line: 1, column: 5 })
+    );
+    assert_eq!(
+        resolve_mouse(&layout, press(29, 5), None),
         Some(Command::FocusDetails)
     );
-    assert_eq!(resolve_mouse(&layout, press(79, 23)), None);
+    assert_eq!(resolve_mouse(&layout, press(79, 23), None), None);
 }
 
-fn press(column: u16, row: u16) -> virtui::presentation::MouseInput {
-    virtui::presentation::MouseInput {
-        action: virtui::presentation::MouseAction::Press,
+fn press(column: u16, row: u16) -> tuivir::presentation::MouseInput {
+    tuivir::presentation::MouseInput {
+        action: tuivir::presentation::MouseAction::Press,
         column,
         row,
     }
@@ -632,13 +740,16 @@ fn mouse_detail_click_focuses_details_without_live_terminal() {
         workspace: Rect::new(0, 1, 80, 22),
         status: Rect::new(0, 23, 80, 0),
         provider_selector: Rect::new(0, 0, 0, 0),
+        active_target: None,
         provider_workspaces: Vec::new(),
         panes: Some(WorkspacePanes {
             resources: Rect::new(0, 1, 0, 0),
             resource_panels: Vec::new(),
             resource_rows: Vec::new(),
             details: Rect::new(0, 1, 0, 0),
+            detail_content: Rect::default(),
             detail_views: vec![Rect::new(0, 0, 8, 1)],
+            pane_boundary: Rect::new(0, 1, 0, 0),
         }),
         overlay: None,
     };
@@ -654,6 +765,6 @@ fn mouse_detail_click_focuses_details_without_live_terminal() {
     );
     assert_eq!(
         app.state().focused_pane,
-        virtui::application::FocusedPane::Details
+        tuivir::application::FocusedPane::Details
     );
 }

@@ -1,0 +1,6 @@
+[
+  {"name":"data","type":"custom","content_type":"filesystem","description":"Application data","project":"default","location":"none"},
+  {"name":"cache","type":"custom","content_type":"block","description":"Fast cache","project":"default","location":"member-1"},
+  {"name":"rootfs","type":"container","content_type":"filesystem","description":"Instance root","project":"default","location":"member-1"},
+  {"name":"base-image","type":"image","content_type":"block","description":"Image storage","project":"default","location":"member-1"}
+]

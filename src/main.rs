@@ -1,5 +1,6 @@
 use std::{
     future, io,
+    io::Write,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -16,7 +17,7 @@ use crossterm::{
 };
 use ratatui::DefaultTerminal;
 use tokio::sync::mpsc;
-use virtui::{
+use tuivir::{
     application::{
         App, AppEvent, Command, CommandRegistry, InteractiveShellOutcome, ProviderRequest,
     },
@@ -75,13 +76,59 @@ enum ShellControl {
 
 const DETAIL_DISPATCH_QUIET_PERIOD: Duration = Duration::from_millis(75);
 
-/// Host-owned dispatch timing for Detail View loads.
+/// Host-owned dispatch timing for Detail View Tab loads.
 ///
 /// Application request identity still decides which completion is valid; this
 /// queue prevents superseded Provider work from starting in the first place.
 struct DetailDispatchQueue {
     quiet_period: Duration,
     pending: Option<(Instant, ProviderRequest)>,
+}
+
+/// Host boundary for copying application-owned Details text.
+trait Clipboard {
+    fn copy(&mut self, text: &str) -> io::Result<()>;
+}
+
+/// OSC 52 lets capable terminals (including Ghostty) own the platform
+/// clipboard while keeping Tuivir independent of a desktop clipboard API.
+struct Osc52Clipboard<W>(W);
+
+impl<W: Write> Clipboard for Osc52Clipboard<W> {
+    fn copy(&mut self, text: &str) -> io::Result<()> {
+        const TABLE: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let bytes = text.as_bytes();
+        let mut encoded = String::with_capacity(bytes.len().div_ceil(3) * 4);
+        for chunk in bytes.chunks(3) {
+            let bits = (u32::from(chunk[0]) << 16)
+                | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8)
+                | u32::from(*chunk.get(2).unwrap_or(&0));
+            encoded.push(TABLE[(bits >> 18) as usize & 63] as char);
+            encoded.push(TABLE[(bits >> 12) as usize & 63] as char);
+            encoded.push(if chunk.len() > 1 {
+                TABLE[(bits >> 6) as usize & 63] as char
+            } else {
+                '='
+            });
+            encoded.push(if chunk.len() > 2 {
+                TABLE[bits as usize & 63] as char
+            } else {
+                '='
+            });
+        }
+        write!(self.0, "\x1b]52;c;{encoded}\x07")?;
+        self.0.flush()
+    }
+}
+
+fn copy_pending_details(app: &mut App, clipboard: &mut dyn Clipboard) {
+    let Some(text) = app.take_pending_details_copy() else {
+        return;
+    };
+    if let Err(error) = clipboard.copy(&text) {
+        app.report_details_copy_failure(error.to_string());
+    }
 }
 
 impl DetailDispatchQueue {
@@ -143,7 +190,10 @@ fn handle_mouse(
     let (Some(layout), Some(input)) = (layout, presentation::mouse_from_event(event)) else {
         return Vec::new();
     };
-    match presentation::resolve_mouse(layout, input) {
+    // Read before invoking: a drag names no region, so what the pointer is
+    // already holding is what tells the layout which gesture this is.
+    let boundary_grab = app.state().pane_boundary.grab();
+    match presentation::resolve_mouse(layout, input, boundary_grab) {
         Some(command) => app.invoke(command),
         None => Vec::new(),
     }
@@ -191,6 +241,7 @@ async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::R
     let runtime = ProviderRuntime::with_builtin_providers(cli);
     let (completion_tx, mut completion_rx) = mpsc::unbounded_channel();
     let mut app = App::with_registry(registry);
+    let mut clipboard = Osc52Clipboard(io::stdout());
     let mut detail_dispatch = DetailDispatchQueue::new(DETAIL_DISPATCH_QUIET_PERIOD);
 
     for discovered in runtime.discover().await {
@@ -223,11 +274,12 @@ async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::R
                     _ => (ShellControl::Continue, Vec::new()),
                 };
                 dispatch_all(&runtime, &completion_tx, &mut detail_dispatch, requests);
+                copy_pending_details(&mut app, &mut clipboard);
                 if control == ShellControl::Quit {
                     break Ok(());
                 }
                 // A key may have asked for the terminal. Handing it over blocks
-                // this loop until the shell exits, which is the point: Virtui
+                // this loop until the shell exits, which is the point: Tuivir
                 // has no screen to draw on until it comes back.
                 //
                 // Asked only when a shell is actually waiting: `block_in_place`
@@ -305,14 +357,14 @@ impl ShellTerminal for Host<'_> {
         // crossterm would swallow the keystrokes meant for the shell.
         self.input.stop();
         // Raw mode goes; the alternate screen stays. Leaving it would uncover
-        // the terminal Virtui was launched from, and the shell would open on
+        // the terminal Tuivir was launched from, and the shell would open on
         // top of whatever was already there — the user's own scrollback, with a
         // container's prompt in the middle of it. Wiping the alternate screen
         // instead opens the shell on nothing but itself, and leaves the real
-        // terminal untouched for Virtui to hand back whole at the end.
+        // terminal untouched for Tuivir to hand back whole at the end.
         disable_raw_mode()?;
         // Mouse capture goes with it: the Interactive Shell owns the whole
-        // terminal, and escape sequences meant for Virtui would otherwise be
+        // terminal, and escape sequences meant for Tuivir would otherwise be
         // typed into the shell.
         execute!(
             io::stdout(),
@@ -330,13 +382,13 @@ impl ShellTerminal for Host<'_> {
         enable_raw_mode()?;
         // Mouse capture comes back with the screen it belongs to.
         execute!(io::stdout(), EnableMouseCapture)?;
-        // Asking for the alternate screen Virtui never gave up costs nothing,
+        // Asking for the alternate screen Tuivir never gave up costs nothing,
         // and is what recovers the one case where it did lose it: a full-screen
         // program run inside the shell — an editor in the container — leaves the
         // alternate screen on its way out and drops the terminal back onto the
-        // screen Virtui must not draw over.
+        // screen Tuivir must not draw over.
         execute!(io::stdout(), EnterAlternateScreen)?;
-        // The shell wrote all over the screen Virtui last drew, so nothing that
+        // The shell wrote all over the screen Tuivir last drew, so nothing that
         // survives the handover is worth keeping — and without this the next
         // draw would diff against a buffer describing a screen that is gone.
         //
@@ -364,7 +416,7 @@ impl ShellTerminal for Host<'_> {
 /// The blocking terminal reader, publishing keys as application input.
 ///
 /// It is stoppable because an Interactive Shell needs the keystrokes more than
-/// Virtui does, and restartable because Virtui needs them back afterwards.
+/// Tuivir does, and restartable because Tuivir needs them back afterwards.
 struct InputThread {
     keys: mpsc::UnboundedSender<Event>,
     stop: Arc<AtomicBool>,

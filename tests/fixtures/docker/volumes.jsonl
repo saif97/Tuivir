@@ -1,0 +1,2 @@
+{"Driver":"nfs","Labels":"","Mountpoint":"/var/lib/docker/volumes/named-volume/_data","Name":"named-volume","Scope":"local"}
+{"Driver":"local","Labels":"","Mountpoint":"/var/lib/docker/volumes/anonymous-volume/_data","Name":"anonymous-volume","Scope":"local"}

@@ -179,7 +179,7 @@ impl fmt::Display for Key {
     }
 }
 
-/// A configured key string Virtui cannot represent.
+/// A configured key string Tuivir cannot represent.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct InvalidKey {
     pub input: String,
