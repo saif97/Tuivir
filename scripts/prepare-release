@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+
+# Prepares the versioned commit that a release pull request reviews. GitHub
+# concerns (authentication and opening the pull request) intentionally stay in
+# the workflow; this command is deterministic over a checked-out repository.
+set -euo pipefail
+
+fail() {
+  echo "release preparation: $*" >&2
+  exit 1
+}
+
+version="${1:-}"
+[[ $# -eq 1 ]] || fail 'usage: prepare-release X.Y.Z'
+[[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || \
+  fail "version must be an unprefixed stable X.Y.Z value: $version"
+
+source_ref="${GITHUB_REF:-refs/heads/$(git branch --show-current)}"
+[[ "$source_ref" = refs/heads/master ]] || fail 'preparation must start from master'
+
+master_ref='refs/remotes/origin/master'
+git rev-parse --verify --quiet "$master_ref" >/dev/null || master_ref='master'
+master_revision="$(git rev-parse "$master_ref")"
+[[ "$(git rev-parse HEAD)" = "$master_revision" ]] || fail 'preparation must start from current master'
+
+case "${RELEASE_PREPARATION_OPEN_RELEASE_PR:-false}" in
+  false|0|'') ;;
+  true|1) fail 'another release pull request is already open' ;;
+  *) fail 'RELEASE_PREPARATION_OPEN_RELEASE_PR must be true or false' ;;
+esac
+
+release_tag="v$version"
+release_branch="release/$release_tag"
+git rev-parse --verify --quiet "refs/tags/$release_tag" >/dev/null && \
+  fail "release tag already exists: $release_tag"
+git rev-parse --verify --quiet "refs/heads/$release_branch" >/dev/null && \
+  fail "release branch already exists: $release_branch"
+git rev-parse --verify --quiet "refs/remotes/origin/$release_branch" >/dev/null && \
+  fail "release branch already exists: $release_branch"
+
+latest_tag="$({ git tag --list 'v*' | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' || true; } | sort -V | tail -n 1)"
+if [[ -n "$latest_tag" ]]; then
+  latest_version="${latest_tag#v}"
+  [[ "$(printf '%s\n%s\n' "$latest_version" "$version" | sort -V | head -n 1)" = "$latest_version" ]] ||
+    fail "version must be newer than $latest_version"
+fi
+
+git switch --create "$release_branch"
+
+temporary_manifest="$(mktemp Cargo.toml.XXXXXX)"
+trap 'rm -f "$temporary_manifest"' EXIT
+awk -v version="$version" '
+  BEGIN { package = 0; updated = 0 }
+  /^\[package\]$/ { package = 1 }
+  /^\[/ && $0 != "[package]" { package = 0 }
+  package && /^version[[:space:]]*=/ {
+    print "version = \"" version "\""
+    updated = 1
+    next
+  }
+  { print }
+  END { if (!updated) exit 1 }
+' Cargo.toml >"$temporary_manifest" || fail 'Cargo.toml has no package version'
+mv "$temporary_manifest" Cargo.toml
+trap - EXIT
+
+cargo generate-lockfile
+
+mkdir -p docs/releases
+{
+  printf '# Tuivir v%s\n\n## Changes\n\n' "$version"
+  if [[ -n "$latest_tag" ]]; then
+    git log "$latest_tag..HEAD" --format='- %s'
+  else
+    git log --format='- %s'
+  fi
+} >"docs/releases/$release_tag.md"
+
+git add Cargo.toml Cargo.lock "docs/releases/$release_tag.md"
+git commit -m "Prepare $release_tag release"
+printf '%s\n' "$release_branch"
