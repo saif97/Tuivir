@@ -42,6 +42,16 @@ test "$(git -C "$first_release" branch --show-current)" = release/v0.1.0
 test "$(cat "$first_release/docs/releases/v0.1.0.md")" = $'# Tuivir v0.1.0\n\n## Changes\n\n- Create fixture'
 test "$(git -C "$first_release" log -1 --format=%s)" = 'Prepare v0.1.0 release'
 
+later_release="$(new_repository later-release)"
+git -C "$later_release" tag v0.1.0
+printf 'A documented change.\n' >"$later_release/README.md"
+git -C "$later_release" add README.md
+git -C "$later_release" commit --quiet -m 'Document later release'
+(cd "$later_release" && bash "$prepare_release" 0.2.0)
+grep -Fx 'version = "0.2.0"' "$later_release/Cargo.toml"
+grep -A1 -Fx 'name = "tuivir"' "$later_release/Cargo.lock" | grep -Fx 'version = "0.2.0"'
+test "$(cat "$later_release/docs/releases/v0.2.0.md")" = $'# Tuivir v0.2.0\n\n## Changes\n\n- Document later release'
+
 invalid_version="$(new_repository invalid-version)"
 assert_rejected "$invalid_version" v0.1.0 env
 
