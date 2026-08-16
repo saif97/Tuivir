@@ -56,10 +56,13 @@ jobs:
         run: |
           branch="release/v$VERSION"
           git push origin "$branch"
+          cat >release-pull-request.md <<'EOF'
+          This pull request is Tuivir's release approval boundary. It contains the exact Cargo version and immutable release notes that publication will use.
+
+          GitHub may require a maintainer to approve this bot-created pull request's workflows before its ordinary CI and production artifact build can run. Merge only after those checks pass.
+          EOF
           gh pr create \
             --base master \
             --head "$branch" \
             --title "Prepare v$VERSION release" \
-            --body "This pull request is Tuivir's release approval boundary. It contains the exact Cargo version and immutable release notes that publication will use.
-
-GitHub may require a maintainer to approve this bot-created pull request's workflows before its ordinary CI and production artifact build can run. Merge only after those checks pass."
+            --body-file release-pull-request.md
