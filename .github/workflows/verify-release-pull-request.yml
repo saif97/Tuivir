@@ -1,0 +1,31 @@
+name: Verify release pull request
+
+on:
+  pull_request:
+    branches:
+      - master
+    types:
+      - opened
+      - reopened
+      - synchronize
+
+permissions:
+  contents: read
+
+jobs:
+  metadata:
+    if: startsWith(github.head_ref, 'release/v')
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.package.outputs.version }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Read the release version
+        id: package
+        run: echo "version=$(grep -m1 '^version = ' Cargo.toml | tr -d '"' | awk '{ print $3 }')" >> "$GITHUB_OUTPUT"
+
+  artifacts:
+    needs: metadata
+    uses: ./.github/workflows/build-release-artifacts.yml
+    with:
+      version: ${{ needs.metadata.outputs.version }}

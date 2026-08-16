@@ -1,0 +1,65 @@
+name: Prepare release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Unprefixed stable version to prepare (X.Y.Z)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: prepare-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install "$(awk -F '"' '$1 ~ /^channel/ { print $2 }' rust-toolchain.toml)" --profile minimal --component rustfmt --component clippy
+
+      - name: Check the current master revision
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --all-targets --all-features --locked -- -D warnings
+          cargo test --all-targets --all-features --locked
+
+      - name: Count open release pull requests
+        id: release_pr
+        run: |
+          open_release_prs="$(gh pr list --base master --state open --json headRefName --jq '[.[] | select(.headRefName | startswith("release/v"))] | length')"
+          test "$open_release_prs" -le 1
+          echo "exists=$([[ "$open_release_prs" -eq 1 ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      - name: Create the release commit
+        env:
+          RELEASE_PREPARATION_OPEN_RELEASE_PR: ${{ steps.release_pr.outputs.exists }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          bash scripts/prepare-release "$VERSION"
+
+      - name: Open the release pull request
+        run: |
+          branch="release/v$VERSION"
+          git push origin "$branch"
+          gh pr create \
+            --base master \
+            --head "$branch" \
+            --title "Prepare v$VERSION release" \
+            --body "This pull request is Tuivir's release approval boundary. It contains the exact Cargo version and immutable release notes that publication will use.
+
+GitHub may require a maintainer to approve this bot-created pull request's workflows before its ordinary CI and production artifact build can run. Merge only after those checks pass."
