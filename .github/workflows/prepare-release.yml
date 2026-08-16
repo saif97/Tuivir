@@ -40,7 +40,7 @@ jobs:
       - name: Count open release pull requests
         id: release_pr
         run: |
-          open_release_prs="$(gh pr list --base master --state open --json headRefName --jq '[.[] | select(.headRefName | startswith("release/v"))] | length')"
+          open_release_prs="$(gh pr list --base master --state open --limit 1000 --json headRefName --jq '[.[] | select(.headRefName | startswith("release/v"))] | length')"
           test "$open_release_prs" -le 1
           echo "exists=$([[ "$open_release_prs" -eq 1 ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
