@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+version="$1"
+artifacts="$2"
+output="$3"
+tag="v$version"
+asset="tuivir-$tag-x86_64-unknown-linux-musl.tar.gz"
+checksum="$(awk -v asset="$asset" '$2 == asset { print $1 }' "$artifacts/SHA256SUMS")"
+test -n "$checksum"
+mkdir -p "$output"
+
+cat >"$output/PKGBUILD" <<EOF
+# Maintainer: Tuivir release automation <noreply@github.com>
+pkgname=tuivir-bin
+pkgver=$version
+pkgrel=1
+pkgdesc="Terminal environment for inspecting local virtualization resources"
+arch=('x86_64')
+url="https://github.com/saif97/Tuivir"
+license=('MIT' 'Apache-2.0')
+provides=("tuivir=\${pkgver}")
+conflicts=('tuivir')
+source_x86_64=("$asset::https://github.com/saif97/Tuivir/releases/download/v\${pkgver}/$asset")
+sha256sums_x86_64=('$checksum')
+
+package() {
+  install -Dm755 "$asset" "\${pkgdir}/usr/bin/tuivir"
+  install -Dm644 "tuivir-$tag-x86_64-unknown-linux-musl/LICENSE-MIT" "\${pkgdir}/usr/share/licenses/\${pkgname}/LICENSE-MIT"
+  install -Dm644 "tuivir-$tag-x86_64-unknown-linux-musl/LICENSE-APACHE" "\${pkgdir}/usr/share/licenses/\${pkgname}/LICENSE-APACHE"
+}
+EOF
+
+cat >"$output/.SRCINFO" <<EOF
+pkgbase = tuivir-bin
+	pkgdesc = Terminal environment for inspecting local virtualization resources
+	pkgver = $version
+	pkgrel = 1
+	url = https://github.com/saif97/Tuivir
+	arch = x86_64
+	license = MIT
+	license = Apache-2.0
+	provides = tuivir=$version
+	conflicts = tuivir
+	source_x86_64 = $asset::https://github.com/saif97/Tuivir/releases/download/v$version/$asset
+	sha256sums_x86_64 = $checksum
+
+pkgname = tuivir-bin
+EOF

@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+version="$1"
+artifacts="$2"
+output="$3"
+tag="v$version"
+
+checksum() {
+  awk -v asset="$1" '$2 == asset { print $1 }' "$artifacts/SHA256SUMS"
+}
+
+arm="tuivir-$tag-aarch64-apple-darwin.tar.gz"
+intel="tuivir-$tag-x86_64-apple-darwin.tar.gz"
+arm_sha="$(checksum "$arm")"
+intel_sha="$(checksum "$intel")"
+test -n "$arm_sha" && test -n "$intel_sha"
+
+cat >"$output" <<EOF
+class Tuivir < Formula
+  desc "Terminal environment for inspecting local virtualization resources"
+  homepage "https://github.com/saif97/Tuivir"
+  version "$version"
+
+  on_arm do
+    url "https://github.com/saif97/Tuivir/releases/download/$tag/$arm"
+    sha256 "$arm_sha"
+  end
+
+  on_intel do
+    url "https://github.com/saif97/Tuivir/releases/download/$tag/$intel"
+    sha256 "$intel_sha"
+  end
+
+  def install
+    bin.install Dir["*/tuivir"].first
+    prefix.install Dir["*/LICENSE-MIT"].first, Dir["*/LICENSE-APACHE"].first
+  end
+
+  test do
+    assert_equal version.to_s, shell_output("#{bin}/tuivir --version").strip
+  end
+end
+EOF
