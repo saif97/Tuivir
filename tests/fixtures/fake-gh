@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+state="${FAKE_GH_STATE:?FAKE_GH_STATE is required}"
+command="$1 $2"
+shift 2
+
+case "$command" in
+  'release view')
+    tag="$1"
+    release="$state/releases/$tag"
+    test -d "$release" || exit 1
+    assets="$(find "$release/assets" -maxdepth 1 -type f -printf '%f\n' | sort | jq -R . | jq -s '[.[] | {name: .}]')"
+    jq -n --rawfile body "$release/body" --argjson assets "$assets" '{body: $body, assets: $assets}'
+    ;;
+  'release create')
+    tag="$1"
+    shift
+    release="$state/releases/$tag"
+    test ! -e "$release" || exit 1
+    mkdir -p "$release/assets"
+    while (($#)); do
+      case "$1" in
+        --notes-file)
+          cp "$2" "$release/body"
+          shift 2
+          ;;
+        --title|--target)
+          shift 2
+          ;;
+        --verify-tag)
+          shift
+          ;;
+        *)
+          cp "$1" "$release/assets/$(basename "$1")"
+          shift
+          ;;
+      esac
+    done
+    ;;
+  'release upload')
+    tag="$1"
+    asset="$2"
+    release="$state/releases/$tag"
+    test -d "$release" || exit 1
+    test ! -e "$release/assets/$(basename "$asset")" || exit 1
+    cp "$asset" "$release/assets/$(basename "$asset")"
+    ;;
+  'release download')
+    tag="$1"
+    shift
+    pattern=''
+    directory='.'
+    while (($#)); do
+      case "$1" in
+        --pattern) pattern="$2"; shift 2 ;;
+        --dir) directory="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    mkdir -p "$directory"
+    cp "$state/releases/$tag/assets/$pattern" "$directory/$pattern"
+    ;;
+  *)
+    echo "unsupported fake gh invocation: $command $*" >&2
+    exit 2
+    ;;
+esac

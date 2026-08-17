@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+
+# Publishes the commit a reviewed release pull request merged. GitHub Actions
+# supplies the trusted branch identity and the verified archive directory.
+set -euo pipefail
+
+fail() {
+  echo "release publication: $*" >&2
+  exit 1
+}
+
+github_cli() {
+  if [[ -n "${RELEASE_GH:-}" ]]; then
+    bash "$RELEASE_GH" "$@"
+  else
+    gh "$@"
+  fi
+}
+
+version="${1:-}"
+[[ $# -eq 1 ]] || fail 'usage: publish-release X.Y.Z'
+[[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || \
+  fail "version must be an unprefixed stable X.Y.Z value: $version"
+
+tag="v$version"
+[[ "${RELEASE_BRANCH:-}" = "release/$tag" ]] || fail 'merged branch does not identify this release'
+
+git fetch --quiet origin master
+merge_commit="$(git rev-parse HEAD)"
+[[ "$merge_commit" = "$(git rev-parse origin/master)" ]] || \
+  fail 'release pull request is no longer current with master'
+
+cargo_version="$(grep -m1 '^version = ' Cargo.toml | tr -d '"' | awk '{ print $3 }')"
+[[ "$cargo_version" = "$version" ]] || fail 'Cargo version does not match release branch'
+
+notes="docs/releases/$tag.md"
+test -f "$notes" || fail "release notes are missing: $notes"
+grep -Fx "# Tuivir $tag" "$notes" >/dev/null || fail 'release notes identify another version'
+
+artifacts="${RELEASE_ARTIFACT_DIR:-}"
+test -d "$artifacts" || fail 'RELEASE_ARTIFACT_DIR must name verified release artifacts'
+expected=(
+  "tuivir-$tag-aarch64-apple-darwin.tar.gz"
+  "tuivir-$tag-x86_64-apple-darwin.tar.gz"
+  "tuivir-$tag-x86_64-unknown-linux-musl.tar.gz"
+  SHA256SUMS
+)
+actual="$(find "$artifacts" -maxdepth 1 -type f -printf '%f\n' | sort)"
+expected_names="$(printf '%s\n' "${expected[@]}" | sort)"
+[[ "$actual" = "$expected_names" ]] || fail 'verified artifacts are incomplete or unexpected'
+(cd "$artifacts" && sha256sum --check SHA256SUMS >/dev/null) || fail 'release artifact checksums do not match'
+
+if git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null; then
+  [[ "$(git rev-parse "$tag^{}")" = "$merge_commit" ]] || fail "tag $tag targets another commit"
+else
+  git tag --annotate "$tag" "$merge_commit" --message "Tuivir $tag"
+  git push origin "refs/tags/$tag"
+fi
+
+temporary_directory="$(mktemp -d)"
+trap 'rm -rf "$temporary_directory"' EXIT
+release_json="$temporary_directory/release.json"
+
+if github_cli release view "$tag" --json body,assets >"$release_json"; then
+  [[ "$(jq -r .body "$release_json")" = "$(cat "$notes")" ]] || \
+    fail 'existing release notes differ from the reviewed notes'
+
+  jq -r '.assets[].name' "$release_json" | sort >"$temporary_directory/assets"
+  printf '%s\n' "${expected[@]}" | sort >"$temporary_directory/expected-assets"
+  comm -23 "$temporary_directory/assets" "$temporary_directory/expected-assets" | grep -q . && \
+    fail 'existing release has an unexpected asset'
+
+  for asset in "${expected[@]}"; do
+    if grep -Fx "$asset" "$temporary_directory/assets" >/dev/null; then
+      github_cli release download "$tag" --pattern "$asset" --dir "$temporary_directory/download"
+      cmp --silent "$artifacts/$asset" "$temporary_directory/download/$asset" || \
+        fail "existing asset differs: $asset"
+    else
+      github_cli release upload "$tag" "$artifacts/$asset"
+    fi
+  done
+else
+  github_cli release create "$tag" \
+    --verify-tag \
+    --title "Tuivir $tag" \
+    --notes-file "$notes" \
+    "${expected[@]/#/$artifacts/}"
+fi
+
+printf '%s\n' "$tag"
