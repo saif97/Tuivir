@@ -29,3 +29,4 @@ jobs:
           cargo test --all-targets --all-features --locked
           bash tests/release-preparation.sh
           bash tests/release-publication.sh
+          bash tests/release-packages.sh

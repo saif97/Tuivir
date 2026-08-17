@@ -23,16 +23,18 @@ cargo run --locked -- --version
 Provider CLIs remain optional. Tuivir discovers Docker, Incus, and other
 supported Providers at runtime; they are not build or package dependencies.
 
-## Planned distribution
+## Distribution
 
-The following supported distribution surfaces are planned but are not live yet:
+GitHub Releases are the canonical source of verified archives. Package managers
+download those exact archives; they do not compile Tuivir from source.
 
-- Homebrew through the `saif97/homebrew-tap` tap for macOS.
-- Omarchy through the `tuivir-bin` package in the Arch User Repository (AUR).
-- Versioned release archives from GitHub Releases for manual installation.
+- Homebrew on supported Macs: `brew tap saif97/tap && brew install tuivir`
+- Omarchy/AUR: `yay -S tuivir-bin`
+- Other Linux distributions: download the x86-64 musl archive from GitHub
+  Releases and install `tuivir` manually.
 
-Until those surfaces are published, build Tuivir from source with the pinned
-toolchain above.
+Homebrew and AUR own upgrades: use their normal `brew upgrade` or AUR-helper
+commands. There is no in-app self-updater.
 
 Tuivir is available under either the MIT License or the Apache License, Version
 2.0. See [LICENSE-MIT](LICENSE-MIT) and [LICENSE-APACHE](LICENSE-APACHE).

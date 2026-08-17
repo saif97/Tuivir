@@ -81,3 +81,64 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           bash scripts/publish-release "$VERSION"
+
+  homebrew:
+    needs:
+      - validate
+      - publish
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.validate.outputs.version }}
+      DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+      KNOWN_HOSTS: ${{ secrets.HOMEBREW_TAP_KNOWN_HOSTS }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: tuivir-v${{ needs.validate.outputs.version }}-release-artifacts
+          path: release-artifacts
+      - name: Update the Homebrew tap
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_KEY" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" >~/.ssh/id_ed25519
+          printf '%s\n' "$KNOWN_HOSTS" >~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519
+          git clone git@github.com:saif97/homebrew-tap.git tap
+          mkdir -p tap/Formula
+          bash scripts/generate-homebrew-formula "$VERSION" release-artifacts tap/Formula/tuivir.rb
+          cd tap
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git diff --quiet || (git add Formula/tuivir.rb && git commit -m "Update tuivir to v$VERSION" && git push)
+
+  aur:
+    needs:
+      - validate
+      - publish
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.validate.outputs.version }}
+      DEPLOY_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+      KNOWN_HOSTS: ${{ secrets.AUR_SSH_KNOWN_HOSTS }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: tuivir-v${{ needs.validate.outputs.version }}-release-artifacts
+          path: release-artifacts
+      - name: Update the AUR package
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_KEY" && test -n "$KNOWN_HOSTS"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" >~/.ssh/id_ed25519
+          printf '%s\n' "$KNOWN_HOSTS" >~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519
+          git clone ssh://aur@aur.archlinux.org/tuivir-bin.git aur
+          bash scripts/generate-aur-package "$VERSION" release-artifacts aur
+          cd aur
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git diff --quiet || (git add PKGBUILD .SRCINFO && git commit -m "Update tuivir-bin to v$VERSION" && git push)
