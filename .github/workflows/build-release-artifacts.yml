@@ -13,6 +13,10 @@ on:
         description: Stable Cargo package version to package
         required: true
         type: string
+      ref:
+        description: Commit to build and package
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -42,6 +46,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
+          ref: ${{ inputs.ref || github.sha }}
 
       - name: Install the pinned Rust toolchain
         run: |
