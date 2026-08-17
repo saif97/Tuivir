@@ -52,12 +52,13 @@ EOF
 publish() {
   local repository="$1"
   local name="$2"
+  local branch="${3:-release/v0.1.0}"
   (
     cd "$repository"
     RELEASE_GH="$repository_root/tests/fixtures/fake-gh" \
       FAKE_GH_STATE="$temporary_root/$name/gh" \
       RELEASE_ARTIFACT_DIR="$temporary_root/$name/artifacts" \
-      RELEASE_BRANCH=release/v0.1.0 \
+      RELEASE_BRANCH="$branch" \
       bash "$publish_release" 0.1.0
   )
 }
@@ -79,6 +80,27 @@ conflicting_tag="$(new_release_repository conflicting-tag)"
 git -C "$conflicting_tag" tag -a v0.1.0 HEAD~1 -m 'Wrong release target'
 if publish "$conflicting_tag" conflicting-tag; then
   echo 'expected a conflicting tag to be rejected' >&2
+  exit 1
+fi
+
+wrong_branch="$(new_release_repository wrong-branch)"
+if publish "$wrong_branch" wrong-branch release/v0.2.0; then
+  echo 'expected a mismatched branch identity to be rejected' >&2
+  exit 1
+fi
+
+wrong_metadata="$(new_release_repository wrong-metadata)"
+sed -i 's/version = "0.1.0"/version = "0.2.0"/' "$wrong_metadata/Cargo.toml"
+if publish "$wrong_metadata" wrong-metadata; then
+  echo 'expected mismatched Cargo metadata to be rejected' >&2
+  exit 1
+fi
+
+conflicting_asset="$(new_release_repository conflicting-asset)"
+publish "$conflicting_asset" conflicting-asset
+printf 'conflict\n' >"$temporary_root/conflicting-asset/gh/releases/v0.1.0/assets/tuivir-v0.1.0-x86_64-apple-darwin.tar.gz"
+if publish "$conflicting_asset" conflicting-asset; then
+  echo 'expected a conflicting release asset to be rejected' >&2
   exit 1
 fi
 
