@@ -1,31 +1,38 @@
 # Tuivir
 
-Tuivir is a terminal environment for inspecting and operating resources managed
-by local virtualization and container Providers.
+A terminal interface for inspecting and operating resources managed by local
+virtualization and container providers.
 
-<img width="2173" height="1531" alt="image" src="https://github.com/user-attachments/assets/c6f9713c-a175-4d1a-961a-dd24618eaecc" />
+<p align="center">
+  <img
+    src="https://github.com/user-attachments/assets/c6f9713c-a175-4d1a-961a-dd24618eaecc"
+    alt="Tuivir displaying Docker containers, images, volumes, and resource details"
+    width="100%"
+  />
+</p>
 
-## Source builds
+Tuivir discovers supported providers at runtime and presents their resources in
+one keyboard-friendly workspace. Provider CLIs such as Docker and Incus remain
+separate, optional installations.
 
-Tuivir requires Rust `1.97.1`. With the pinned toolchain installed, build and
-test the locked dependency set with:
+## Installation
+
+### Homebrew
+
+On Apple Silicon or Intel macOS:
 
 ```sh
-cargo build --locked
-cargo test --locked
+brew install saif97/tap/tuivir
 ```
 
-Run the safe installation check without loading configuration, discovering a
-Provider, or initializing the terminal:
+Upgrade an existing installation with:
 
 ```sh
-cargo run --locked -- --version
+brew update
+brew upgrade tuivir
 ```
 
-Provider CLIs remain optional. Tuivir discovers Docker, Incus, and other
-supported Providers at runtime; they are not build or package dependencies.
-
-## Release archives
+### Release archives
 
 Download the archive for your system from
 [GitHub Releases](https://github.com/saif97/Tuivir/releases):
@@ -35,7 +42,7 @@ Download the archive for your system from
 - x86-64 Omarchy or Arch Linux: `x86_64-unknown-linux-musl`
 
 Compare the archive's SHA-256 value with the release's `SHA256SUMS`, then
-extract and install it. For example, replace `<version>` and `<target>` below:
+extract and install it. Replace `<version>` and `<target>` below:
 
 ```sh
 archive="tuivir-v<version>-<target>.tar.gz"
@@ -45,26 +52,36 @@ install -m 755 "${archive%.tar.gz}/tuivir" "$HOME/.local/bin/tuivir"
 tuivir --version
 ```
 
-`~/.local/bin` must be on `PATH`. Provider CLIs remain separate optional
-installations.
+`~/.local/bin` must be on `PATH`. Omarchy installation through the AUR package
+`tuivir-bin` is planned but is not live yet.
 
-## Homebrew
+### Build from source
 
-On Apple Silicon or Intel macOS, install Tuivir from its Homebrew tap:
-
-```sh
-brew install saif97/tap/tuivir
-```
-
-Upgrade it with:
+Tuivir requires Rust `1.97.1`. With the pinned toolchain installed, build and
+test the locked dependency set:
 
 ```sh
-brew update
-brew upgrade tuivir
+cargo build --locked
+cargo test --locked
 ```
 
-Omarchy installation through the AUR package `tuivir-bin` is planned but is
-not live yet.
+Check the resulting binary without loading configuration, discovering a
+provider, or initializing the terminal:
+
+```sh
+cargo run --locked -- --version
+```
+
+## Usage
+
+Run Tuivir in a terminal with a supported provider CLI installed:
+
+```sh
+tuivir
+```
+
+The interface shows the available commands and their key bindings in the
+footer. Run `tuivir --help` for command-line options.
 
 ## Releasing
 
