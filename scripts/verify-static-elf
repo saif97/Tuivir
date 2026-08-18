@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+binary="${1:-}"
+[[ $# -eq 1 && -f "$binary" ]] || {
+  echo 'usage: verify-static-elf BINARY' >&2
+  exit 1
+}
+
+program_headers="$(readelf --program-headers --wide "$binary")"
+if grep -Eq '^[[:space:]]*INTERP[[:space:]]' <<<"$program_headers"; then
+  echo "$binary uses a dynamic ELF interpreter" >&2
+  exit 1
+fi
