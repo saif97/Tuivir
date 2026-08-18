@@ -18,9 +18,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install the pinned Rust toolchain
-        run: rustup toolchain install "$(awk -F '"' '$1 ~ /^channel/ { print $2 }' rust-toolchain.toml)" --profile minimal
-
       - name: Validate the release tag
         id: release
         run: echo "version=$(bash scripts/release-version "$GITHUB_REF_NAME")" >> "$GITHUB_OUTPUT"

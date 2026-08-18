@@ -9,7 +9,7 @@ tag="${1:-}"
 }
 
 version="${tag#v}"
-cargo_version="$(cargo metadata --locked --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "tuivir") | .version')"
+cargo_version="$(awk -F '"' '$1 ~ /^version = / { print $2; exit }' Cargo.toml)"
 [[ "$cargo_version" = "$version" ]] || {
   echo "release tag $tag does not match Cargo version $cargo_version" >&2
   exit 1

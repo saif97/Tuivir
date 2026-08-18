@@ -5,7 +5,7 @@ set -euo pipefail
 repository_root="$(git rev-parse --show-toplevel)"
 cd "$repository_root"
 
-cargo_version="$(awk -F '"' '$1 ~ /^version = / { print $2; exit }' Cargo.toml)"
+cargo_version="$(cargo metadata --locked --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "tuivir") | .version')"
 test "$(bash scripts/release-version "v$cargo_version")" = "$cargo_version"
 
 mismatched_tag='v9.9.9'
