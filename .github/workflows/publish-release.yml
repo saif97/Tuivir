@@ -53,8 +53,7 @@ jobs:
         run: |
           set -euo pipefail
           gh release create "$GITHUB_REF_NAME" release-artifacts/* \
-            --draft \
             --generate-notes \
+            --latest \
             --title "Tuivir $GITHUB_REF_NAME" \
             --verify-tag
-          gh release edit "$GITHUB_REF_NAME" --draft=false --latest
