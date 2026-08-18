@@ -38,6 +38,7 @@ jobs:
     permissions:
       contents: write
     env:
+      GH_REPO: ${{ github.repository }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Download verified release artifacts
