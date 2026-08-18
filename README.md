@@ -46,8 +46,23 @@ tuivir --version
 `~/.local/bin` must be on `PATH`. Provider CLIs remain separate optional
 installations.
 
-Homebrew through `saif97/homebrew-tap` and Omarchy through the AUR package
-`tuivir-bin` are planned but are not live yet.
+## Homebrew
+
+On Apple Silicon or Intel macOS, install Tuivir from its Homebrew tap:
+
+```sh
+brew install saif97/tap/tuivir
+```
+
+Upgrade it with:
+
+```sh
+brew update
+brew upgrade tuivir
+```
+
+Omarchy installation through the AUR package `tuivir-bin` is planned but is
+not live yet.
 
 ## Releasing
 
