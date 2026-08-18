@@ -29,10 +29,10 @@ jobs:
       matrix:
         include:
           - name: macOS Intel
-            runner: macos-13
+            runner: macos-15-intel
             target: x86_64-apple-darwin
           - name: macOS Apple Silicon
-            runner: macos-14
+            runner: macos-15
             target: aarch64-apple-darwin
           - name: Omarchy x86-64
             runner: ubuntu-latest
@@ -55,10 +55,7 @@ jobs:
           sudo apt-get install --yes musl-tools
 
       - name: Verify the requested version
-        run: |
-          set -euo pipefail
-          cargo_version="$(cargo metadata --locked --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "tuivir") | .version')"
-          test "$cargo_version" = "$VERSION"
+        run: test "$(bash scripts/release-version "v$VERSION")" = "$VERSION"
 
       - name: Build the release binary
         env:
@@ -81,9 +78,10 @@ jobs:
           install -m 644 LICENSE-MIT LICENSE-APACHE "$stage"
           tar -czf "$archive" "$stage"
 
-          tar -tzf "$archive" | grep -Fx "$stage/tuivir"
-          tar -tzf "$archive" | grep -Fx "$stage/LICENSE-MIT"
-          tar -tzf "$archive" | grep -Fx "$stage/LICENSE-APACHE"
+          archive_members="$(tar -tzf "$archive")"
+          grep -Fx "$stage/tuivir" <<<"$archive_members"
+          grep -Fx "$stage/LICENSE-MIT" <<<"$archive_members"
+          grep -Fx "$stage/LICENSE-APACHE" <<<"$archive_members"
 
       - name: Verify static Omarchy linking
         if: matrix.target == 'x86_64-unknown-linux-musl'
