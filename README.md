@@ -3,6 +3,8 @@
 Tuivir is a terminal environment for inspecting and operating resources managed
 by local virtualization and container Providers.
 
+<img width="2173" height="1531" alt="image" src="https://github.com/user-attachments/assets/c6f9713c-a175-4d1a-961a-dd24618eaecc" />
+
 ## Source builds
 
 Tuivir requires Rust `1.97.1`. With the pinned toolchain installed, build and
