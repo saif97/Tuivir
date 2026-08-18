@@ -55,10 +55,7 @@ jobs:
           sudo apt-get install --yes musl-tools
 
       - name: Verify the requested version
-        run: |
-          set -euo pipefail
-          cargo_version="$(cargo metadata --locked --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "tuivir") | .version')"
-          test "$cargo_version" = "$VERSION"
+        run: test "$(bash scripts/release-version "v$VERSION")" = "$VERSION"
 
       - name: Build the release binary
         env:
