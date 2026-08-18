@@ -78,9 +78,10 @@ jobs:
           install -m 644 LICENSE-MIT LICENSE-APACHE "$stage"
           tar -czf "$archive" "$stage"
 
-          tar -tzf "$archive" | grep -Fx "$stage/tuivir"
-          tar -tzf "$archive" | grep -Fx "$stage/LICENSE-MIT"
-          tar -tzf "$archive" | grep -Fx "$stage/LICENSE-APACHE"
+          archive_members="$(tar -tzf "$archive")"
+          grep -Fx "$stage/tuivir" <<<"$archive_members"
+          grep -Fx "$stage/LICENSE-MIT" <<<"$archive_members"
+          grep -Fx "$stage/LICENSE-APACHE" <<<"$archive_members"
 
       - name: Verify static Omarchy linking
         if: matrix.target == 'x86_64-unknown-linux-musl'
