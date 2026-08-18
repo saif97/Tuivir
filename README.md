@@ -49,5 +49,12 @@ installations.
 Homebrew through `saif97/homebrew-tap` and Omarchy through the AUR package
 `tuivir-bin` are planned but are not live yet.
 
+## Releasing
+
+A maintainer publishes the Cargo version by pushing its matching stable tag,
+such as `v0.1.0`. If publication fails and leaves a draft GitHub Release,
+delete that draft and rerun the same GitHub Actions run. Correct an already
+published release with a new version rather than replacing its tag or assets.
+
 Tuivir is available under either the MIT License or the Apache License, Version
 2.0. See [LICENSE-MIT](LICENSE-MIT) and [LICENSE-APACHE](LICENSE-APACHE).
