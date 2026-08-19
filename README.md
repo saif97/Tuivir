@@ -32,45 +32,26 @@ brew update
 brew upgrade tuivir
 ```
 
-### Release archives
+### Build from source
 
-Download the archive for your system from
-[GitHub Releases](https://github.com/saif97/Tuivir/releases):
-
-- Apple Silicon macOS: `aarch64-apple-darwin`
-- Intel macOS: `x86_64-apple-darwin`
-- x86-64 Omarchy or Arch Linux: `x86_64-unknown-linux-musl`
-
-Compare the archive's SHA-256 value with the release's `SHA256SUMS`, then
-extract and install it. Replace `<version>` and `<target>` below:
+Tuivir requires Rust `1.97.1`. Clone the repository and install its locked
+dependency set with Cargo:
 
 ```sh
-archive="tuivir-v<version>-<target>.tar.gz"
-tar -xzf "$archive"
-mkdir -p "$HOME/.local/bin"
-install -m 755 "${archive%.tar.gz}/tuivir" "$HOME/.local/bin/tuivir"
+git clone https://github.com/saif97/Tuivir.git
+cd Tuivir
+cargo install --locked --path .
+```
+
+`cargo install` builds an optimized binary and installs it to Cargo's bin
+directory, normally `~/.cargo/bin`. Ensure that directory is on `PATH`, then
+check the installation:
+
+```sh
 tuivir --version
 ```
 
-`~/.local/bin` must be on `PATH`. Omarchy installation through the AUR package
-`tuivir-bin` is planned but is not live yet.
-
-### Build from source
-
-Tuivir requires Rust `1.97.1`. With the pinned toolchain installed, build and
-test the locked dependency set:
-
-```sh
-cargo build --locked
-cargo test --locked
-```
-
-Check the resulting binary without loading configuration, discovering a
-provider, or initializing the terminal:
-
-```sh
-cargo run --locked -- --version
-```
+Contributors can run the locked test suite with `cargo test --locked`.
 
 ## Usage
 
