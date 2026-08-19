@@ -49,7 +49,7 @@ fn an_explicit_config_file_overrides_one_binding_and_leaves_the_rest() {
         config_file: Some(path.clone()),
         ..Default::default()
     };
-    let fs = MemoryFs::with(path, "[keybindings]\n\"resource.delete\" = [\"x\"]\n");
+    let fs = MemoryFs::with(path, "[keybindings]\n\"resource_delete\" = [\"x\"]\n");
 
     let registry = load(&env, &fs).expect("a valid configuration");
 
@@ -122,7 +122,7 @@ fn xdg_config_home_is_used_when_no_explicit_file_is_set() {
         xdg_config_home: Some(PathBuf::from("/xdg")),
         ..Default::default()
     };
-    let fs = MemoryFs::with(path, "[keybindings]\n\"resource.restart\" = [\"x\"]\n");
+    let fs = MemoryFs::with(path, "[keybindings]\n\"resource_restart\" = [\"x\"]\n");
 
     let registry = load(&env, &fs).expect("a valid configuration");
 
@@ -144,7 +144,7 @@ fn home_config_is_used_when_xdg_is_unset() {
         home: Some(PathBuf::from("/home/me")),
         ..Default::default()
     };
-    let fs = MemoryFs::with(path, "[keybindings]\n\"resource.restart\" = [\"x\"]\n");
+    let fs = MemoryFs::with(path, "[keybindings]\n\"resource_restart\" = [\"x\"]\n");
 
     let registry = load(&env, &fs).expect("a valid configuration");
 
@@ -165,7 +165,7 @@ fn a_relative_xdg_config_home_is_fatal() {
     };
     let fs = MemoryFs::with(
         "/home/me/.config/tuivir/config.toml",
-        "[keybindings]\n\"resource.restart\" = [\"x\"]\n",
+        "[keybindings]\n\"resource_restart\" = [\"x\"]\n",
     );
 
     assert_eq!(
@@ -188,7 +188,7 @@ fn an_empty_xdg_config_home_means_unset_rather_than_relative() {
         home: Some(PathBuf::from("/home/me")),
         ..Default::default()
     };
-    let fs = MemoryFs::with(path, "[keybindings]\n\"resource.restart\" = [\"x\"]\n");
+    let fs = MemoryFs::with(path, "[keybindings]\n\"resource_restart\" = [\"x\"]\n");
 
     let registry = load(&env, &fs).expect("an empty XDG_CONFIG_HOME falls back to home");
 
@@ -208,7 +208,7 @@ fn an_explicit_file_is_unaffected_by_a_relative_xdg_config_home() {
         xdg_config_home: Some(PathBuf::from("relative-xdg")),
         home: Some(PathBuf::from("/home/me")),
     };
-    let fs = MemoryFs::with(path, "[keybindings]\n\"resource.restart\" = [\"x\"]\n");
+    let fs = MemoryFs::with(path, "[keybindings]\n\"resource_restart\" = [\"x\"]\n");
 
     let registry = load(&env, &fs).expect("a valid configuration");
 
@@ -276,7 +276,7 @@ fn an_unknown_field_is_rejected_and_names_itself() {
     };
     let fs = MemoryFs::with(
         path,
-        "theme = \"dark\"\n\n[keybindings]\n\"app.quit\" = [\"q\"]\n",
+        "theme = \"dark\"\n\n[keybindings]\n\"app_quit\" = [\"q\"]\n",
     );
 
     let error = load(&env, &fs).unwrap_err();
@@ -297,14 +297,14 @@ fn an_unknown_command_id_is_rejected() {
         config_file: Some(path.clone()),
         ..Default::default()
     };
-    let fs = MemoryFs::with(path, "[keybindings]\n\"no.such.command\" = [\"x\"]\n");
+    let fs = MemoryFs::with(path, "[keybindings]\n\"no_such_command\" = [\"x\"]\n");
 
     assert_eq!(
         load(&env, &fs).unwrap_err(),
         LoadError::Invalid {
             path: PathBuf::from("/cfg/tuivir.toml"),
             errors: vec![ConfigError::UnknownCommand {
-                id: "no.such.command".to_owned()
+                id: "no_such_command".to_owned()
             }]
         }
     );
@@ -317,14 +317,14 @@ fn an_unrecognised_key_is_rejected() {
         config_file: Some(path.clone()),
         ..Default::default()
     };
-    let fs = MemoryFs::with(path, "[keybindings]\n\"resource.restart\" = [\"f13\"]\n");
+    let fs = MemoryFs::with(path, "[keybindings]\n\"resource_restart\" = [\"f13\"]\n");
 
     assert_eq!(
         load(&env, &fs).unwrap_err(),
         LoadError::Invalid {
             path: PathBuf::from("/cfg/tuivir.toml"),
             errors: vec![ConfigError::InvalidKey {
-                id: "resource.restart".to_owned(),
+                id: "resource_restart".to_owned(),
                 key: "f13".to_owned()
             }]
         }
@@ -338,14 +338,14 @@ fn claiming_ctrl_c_for_another_command_is_rejected() {
         config_file: Some(path.clone()),
         ..Default::default()
     };
-    let fs = MemoryFs::with(path, "[keybindings]\n\"resource.delete\" = [\"ctrl+c\"]\n");
+    let fs = MemoryFs::with(path, "[keybindings]\n\"resource_delete\" = [\"ctrl+c\"]\n");
 
     assert_eq!(
         load(&env, &fs).unwrap_err(),
         LoadError::Invalid {
             path: PathBuf::from("/cfg/tuivir.toml"),
             errors: vec![ConfigError::ReservedKey {
-                id: "resource.delete".to_owned(),
+                id: "resource_delete".to_owned(),
                 key: "ctrl+c".to_owned()
             }]
         }
@@ -367,9 +367,9 @@ fn every_discoverable_failure_is_reported_together() {
     let fs = MemoryFs::with(
         path,
         "[keybindings]\n\
-         \"no.such.command\" = [\"x\"]\n\
-         \"resource.restart\" = [\"f13\"]\n\
-         \"resource.stop\" = [\"j\"]\n",
+         \"no_such_command\" = [\"x\"]\n\
+         \"resource_restart\" = [\"f13\"]\n\
+         \"resource_stop\" = [\"j\"]\n",
     );
 
     let error = load(&env, &fs).unwrap_err();
@@ -379,16 +379,16 @@ fn every_discoverable_failure_is_reported_together() {
 
     for expected in [
         ConfigError::UnknownCommand {
-            id: "no.such.command".to_owned(),
+            id: "no_such_command".to_owned(),
         },
         ConfigError::InvalidKey {
-            id: "resource.restart".to_owned(),
+            id: "resource_restart".to_owned(),
             key: "f13".to_owned(),
         },
         ConfigError::ConflictingKey {
             key: "j".to_owned(),
-            first: "selection.next".to_owned(),
-            second: "resource.stop".to_owned(),
+            first: "selection_next".to_owned(),
+            second: "resource_stop".to_owned(),
         },
     ] {
         assert!(
@@ -408,14 +408,14 @@ fn an_uppercase_command_id_is_rejected() {
         config_file: Some(path.clone()),
         ..Default::default()
     };
-    let fs = MemoryFs::with(path, "[keybindings]\n\"Resource.Delete\" = [\"x\"]\n");
+    let fs = MemoryFs::with(path, "[keybindings]\n\"Resource_Delete\" = [\"x\"]\n");
 
     assert_eq!(
         load(&env, &fs).unwrap_err(),
         LoadError::Invalid {
             path: PathBuf::from("/cfg/tuivir.toml"),
             errors: vec![ConfigError::UnknownCommand {
-                id: "Resource.Delete".to_owned()
+                id: "Resource_Delete".to_owned()
             }]
         }
     );
@@ -444,7 +444,7 @@ fn an_explicit_file_that_is_a_directory_is_fatal() {
 #[test]
 fn the_real_filesystem_reader_reads_a_file_from_disk() {
     let path = std::env::temp_dir().join("tuivir-fsreader-test.toml");
-    std::fs::write(&path, "[keybindings]\n\"resource.restart\" = [\"x\"]\n").unwrap();
+    std::fs::write(&path, "[keybindings]\n\"resource_restart\" = [\"x\"]\n").unwrap();
     let env = Env {
         config_file: Some(path.clone()),
         ..Default::default()

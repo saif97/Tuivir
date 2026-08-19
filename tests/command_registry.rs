@@ -46,8 +46,8 @@ fn rejected(overrides: &[(&str, &[&str])]) -> Vec<KeybindingError> {
 fn ctrl_c_always_quits() {
     for registry in [
         CommandRegistry::builtin(),
-        effective(&[("app.quit", &["ctrl+q"])]),
-        effective(&[("app.quit", &[])]),
+        effective(&[("app_quit", &["ctrl+q"])]),
+        effective(&[("app_quit", &[])]),
     ] {
         assert_eq!(registry.reserved(key("ctrl+c")), Some(Command::Quit));
     }
@@ -55,7 +55,7 @@ fn ctrl_c_always_quits() {
 
 #[test]
 fn configuring_ctrl_c_for_quit_preserves_the_position_the_user_gave_it() {
-    let registry = effective(&[("app.quit", &["ctrl+c", "ctrl+q"])]);
+    let registry = effective(&[("app_quit", &["ctrl+c", "ctrl+q"])]);
 
     assert_eq!(
         registry.first_key(Command::Quit),
@@ -66,10 +66,10 @@ fn configuring_ctrl_c_for_quit_preserves_the_position_the_user_gave_it() {
 
 #[test]
 fn ctrl_c_is_appended_to_quit_when_it_is_not_configured() {
-    let registry = effective(&[("app.quit", &["ctrl+q"])]);
+    let registry = effective(&[("app_quit", &["ctrl+q"])]);
     let quit = registry
         .in_scope(CommandScope::ResourceView)
-        .find(|entry| entry.id == "app.quit")
+        .find(|entry| entry.id == "app_quit")
         .expect("Quit stays bound");
 
     assert_eq!(quit.keys, vec![key("ctrl+q"), key("ctrl+c")]);
@@ -78,13 +78,13 @@ fn ctrl_c_is_appended_to_quit_when_it_is_not_configured() {
 #[test]
 fn no_other_command_may_claim_ctrl_c() {
     let errors =
-        CommandRegistry::effective(&[("resource.delete".to_owned(), vec!["ctrl+c".to_owned()])])
+        CommandRegistry::effective(&[("resource_delete".to_owned(), vec!["ctrl+c".to_owned()])])
             .expect_err("ctrl+c is reserved");
 
     assert_eq!(
         errors,
         vec![KeybindingError::ReservedKey {
-            id: "resource.delete".to_owned(),
+            id: "resource_delete".to_owned(),
             key: "ctrl+c".to_owned(),
         }]
     );
@@ -95,9 +95,9 @@ fn no_other_command_may_claim_ctrl_c() {
 #[test]
 fn a_key_repeated_within_one_command_is_rejected() {
     assert_eq!(
-        rejected(&[("resource.stop", &["x", "x"])]),
+        rejected(&[("resource_stop", &["x", "x"])]),
         vec![KeybindingError::DuplicateKey {
-            id: "resource.stop".to_owned(),
+            id: "resource_stop".to_owned(),
             key: "x".to_owned(),
         }]
     );
@@ -109,9 +109,9 @@ fn a_key_repeated_within_one_command_is_rejected() {
 #[test]
 fn two_spellings_of_one_key_are_still_a_duplicate() {
     assert_eq!(
-        rejected(&[("app.help", &["space", " "])]),
+        rejected(&[("app_help", &["space", " "])]),
         vec![KeybindingError::DuplicateKey {
-            id: "app.help".to_owned(),
+            id: "app_help".to_owned(),
             key: "space".to_owned(),
         }]
     );
@@ -123,11 +123,11 @@ fn two_spellings_of_one_key_are_still_a_duplicate() {
 #[test]
 fn one_key_bound_to_two_commands_in_one_scope_is_rejected() {
     assert_eq!(
-        rejected(&[("resource.stop", &["j"])]),
+        rejected(&[("resource_stop", &["j"])]),
         vec![KeybindingError::ConflictingKey {
             key: "j".to_owned(),
-            first: "selection.next".to_owned(),
-            second: "resource.stop".to_owned(),
+            first: "selection_next".to_owned(),
+            second: "resource_stop".to_owned(),
         }],
         "j already moves the selection in the resource view"
     );
@@ -137,7 +137,7 @@ fn one_key_bound_to_two_commands_in_one_scope_is_rejected() {
 /// never offered at the same time and can share a spelling.
 #[test]
 fn one_key_may_serve_commands_whose_scopes_cannot_overlap() {
-    let registry = effective(&[("resource.stop", &["y"])]);
+    let registry = effective(&[("resource_stop", &["y"])]);
 
     assert_eq!(
         registry.resolve(CommandScope::ResourceView, key("y")),
@@ -159,7 +159,7 @@ fn the_compiled_defaults_contain_no_conflict() {
 
 #[test]
 fn a_configured_command_replaces_its_complete_default_list() {
-    let registry = effective(&[("selection.next", &["ctrl+n"])]);
+    let registry = effective(&[("selection_next", &["ctrl+n"])]);
 
     assert_eq!(
         registry.resolve(CommandScope::ResourceView, key("ctrl+n")),
@@ -176,7 +176,7 @@ fn a_configured_command_replaces_its_complete_default_list() {
 
 #[test]
 fn an_unmentioned_command_keeps_its_defaults() {
-    let registry = effective(&[("selection.next", &["ctrl+n"])]);
+    let registry = effective(&[("selection_next", &["ctrl+n"])]);
 
     assert_eq!(
         registry.resolve(CommandScope::ResourceView, key("k")),
@@ -190,7 +190,7 @@ fn an_unmentioned_command_keeps_its_defaults() {
 
 #[test]
 fn an_empty_key_list_leaves_a_command_unbound() {
-    let registry = effective(&[("resource.delete", &[])]);
+    let registry = effective(&[("resource_delete", &[])]);
 
     assert_eq!(registry.resolve(CommandScope::ResourceView, key("d")), None);
     assert_eq!(
@@ -201,14 +201,14 @@ fn an_empty_key_list_leaves_a_command_unbound() {
     assert!(
         !registry
             .in_scope(CommandScope::ResourceView)
-            .any(|entry| entry.id == "resource.delete"),
+            .any(|entry| entry.id == "resource_delete"),
         "an unbound Command is omitted from its scope"
     );
 }
 
 #[test]
 fn several_keys_can_invoke_one_command() {
-    let registry = effective(&[("resource.restart", &["r", "f5"])]);
+    let registry = effective(&[("resource_restart", &["r", "f5"])]);
 
     for text in ["r", "f5"] {
         assert_eq!(
@@ -276,14 +276,14 @@ fn details_copy_defaults_to_y_and_remains_configurable() {
         Some(Command::CopyDetails)
     );
     assert_eq!(
-        effective(&[("details.copy", &["f8"])]).resolve(CommandScope::Details, key("f8")),
+        effective(&[("details_copy", &["f8"])]).resolve(CommandScope::Details, key("f8")),
         Some(Command::CopyDetails)
     );
 }
 
 #[test]
 fn every_direct_focus_command_exposes_its_effective_hint() {
-    let registry = effective(&[("focus.resources.2", &["f7"]), ("focus.details", &["f6"])]);
+    let registry = effective(&[("focus_resources_2", &["f7"]), ("focus_details", &["f6"])]);
 
     assert_eq!(
         registry.first_key(Command::FocusResourcePanel(1)),
@@ -447,8 +447,8 @@ fn the_pane_boundary_resizes_from_every_workspace_scope() {
 #[test]
 fn the_pane_boundary_commands_take_configured_keys() {
     let registry = effective(&[
-        ("layout.boundary.left", &["ctrl+left"]),
-        ("layout.boundary.right", &["ctrl+right"]),
+        ("layout_boundary_left", &["ctrl+left"]),
+        ("layout_boundary_right", &["ctrl+right"]),
     ]);
 
     assert_eq!(

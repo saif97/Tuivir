@@ -69,9 +69,9 @@ fn an_invalid_configuration_reports_every_diagnostic_and_exits_non_zero() {
     let output = start_with_config(
         "invalid",
         "[keybindings]\n\
-         \"no.such.command\" = [\"x\"]\n\
-         \"resource.restart\" = [\"f13\"]\n\
-         \"resource.stop\" = [\"j\"]\n",
+         \"no_such_command\" = [\"x\"]\n\
+         \"resource_restart\" = [\"f13\"]\n\
+         \"resource_stop\" = [\"j\"]\n",
     );
 
     assert!(
@@ -81,10 +81,10 @@ fn an_invalid_configuration_reports_every_diagnostic_and_exits_non_zero() {
     );
     let stderr = stderr(&output);
     for expected in [
-        "no.such.command",
+        "no_such_command",
         "f13",
-        "selection.next",
-        "resource.stop",
+        "selection_next",
+        "resource_stop",
         "tuivir-startup-invalid.toml",
     ] {
         assert!(

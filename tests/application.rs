@@ -2214,7 +2214,7 @@ fn docker_renders_every_provider_defined_resource_panel() {
 #[test]
 fn every_resource_panel_advertises_its_effective_focus_key() {
     let registry =
-        CommandRegistry::effective(&[("focus.resources.2".to_owned(), vec!["f7".to_owned()])])
+        CommandRegistry::effective(&[("focus_resources_2".to_owned(), vec!["f7".to_owned()])])
             .expect("a valid override");
     let mut app = App::with_registry(registry);
     ready_workspace(&mut app, docker_discovery(), docker_multi_panel_snapshot());
@@ -3174,7 +3174,7 @@ fn moving_to_another_resource_starts_its_detail_view_at_the_top() {
 #[test]
 fn configured_detail_view_keys_change_dispatch_and_help_together() {
     let registry =
-        CommandRegistry::effective(&[("detail.view.next".to_owned(), vec!["f12".to_owned()])])
+        CommandRegistry::effective(&[("detail_view_next".to_owned(), vec!["f12".to_owned()])])
             .expect("a valid override");
     let mut app = App::with_registry(registry);
     ready_workspace(
@@ -3426,7 +3426,7 @@ fn help_lists_fast_navigation_under_its_effective_bindings() {
     assert!(help.contains("K  Select five back"), "rendered:\n{help}");
 
     let registry =
-        CommandRegistry::effective(&[("selection.next.fast".to_owned(), vec!["f5".to_owned()])])
+        CommandRegistry::effective(&[("selection_next_fast".to_owned(), vec!["f5".to_owned()])])
             .expect("a valid override");
     let mut configured = App::with_registry(registry);
     let initial = refresh_request(configured.update(docker_discovery().into_event()));
@@ -3452,8 +3452,8 @@ fn help_lists_fast_navigation_under_its_effective_bindings() {
 #[test]
 fn configured_fast_navigation_keys_replace_the_capital_defaults() {
     let registry = CommandRegistry::effective(&[
-        ("selection.next.fast".to_owned(), vec!["f5".to_owned()]),
-        ("selection.previous.fast".to_owned(), vec!["f6".to_owned()]),
+        ("selection_next_fast".to_owned(), vec!["f5".to_owned()]),
+        ("selection_previous_fast".to_owned(), vec!["f6".to_owned()]),
     ])
     .expect("a valid override set");
     let mut app = App::with_registry(registry);
@@ -3489,8 +3489,8 @@ fn configured_fast_navigation_keys_replace_the_capital_defaults() {
 #[test]
 fn unbound_fast_navigation_neither_moves_the_selection_nor_appears_in_help() {
     let registry = CommandRegistry::effective(&[
-        ("selection.next.fast".to_owned(), vec![]),
-        ("selection.previous.fast".to_owned(), vec![]),
+        ("selection_next_fast".to_owned(), vec![]),
+        ("selection_previous_fast".to_owned(), vec![]),
     ])
     .expect("unbinding is valid");
     let mut app = App::with_registry(registry);
@@ -3600,7 +3600,7 @@ fn escape_does_not_quit_when_no_modal_is_open() {
 #[test]
 fn an_overridden_focus_key_renders_its_effective_hint() {
     let registry =
-        CommandRegistry::effective(&[("focus.providers".to_owned(), vec!["f10".to_owned()])])
+        CommandRegistry::effective(&[("focus_providers".to_owned(), vec!["f10".to_owned()])])
             .expect("a valid override");
     let mut app = App::with_registry(registry);
     ready_workspace(
@@ -3623,7 +3623,7 @@ fn an_overridden_focus_key_renders_its_effective_hint() {
 #[test]
 fn an_unbound_focus_command_omits_its_inline_hint() {
     let registry =
-        CommandRegistry::effective(&[("focus.resources".to_owned(), vec![])]).expect("unbinding");
+        CommandRegistry::effective(&[("focus_resources".to_owned(), vec![])]).expect("unbinding");
     let mut app = App::with_registry(registry);
     ready_workspace(
         &mut app,
@@ -3642,8 +3642,8 @@ fn an_unbound_focus_command_omits_its_inline_hint() {
 #[test]
 fn one_override_changes_dispatch_help_and_the_inline_hint_together() {
     let registry = CommandRegistry::effective(&[
-        ("resource.restart".to_owned(), vec!["x".to_owned()]),
-        ("focus.providers".to_owned(), vec!["f10".to_owned()]),
+        ("resource_restart".to_owned(), vec!["x".to_owned()]),
+        ("focus_providers".to_owned(), vec!["f10".to_owned()]),
     ])
     .expect("a valid override set");
     let mut app = App::with_registry(registry);
