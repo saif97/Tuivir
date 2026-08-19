@@ -53,6 +53,76 @@ tuivir --version
 
 Contributors can run the locked test suite with `cargo test --locked`.
 
+## Configuration
+
+Tuivir currently supports keybinding configuration. It does not create a
+configuration file automatically, so create the directory and file when you
+want to override a default:
+
+```sh
+mkdir -p "$HOME/.config/tuivir"
+${EDITOR:-vi} "$HOME/.config/tuivir/config.toml"
+```
+
+Tuivir reads `$XDG_CONFIG_HOME/tuivir/config.toml` when `XDG_CONFIG_HOME` is set
+to an absolute path; otherwise it reads `~/.config/tuivir/config.toml`. Set
+`TUIVIR_CONFIG_FILE` to an absolute file path to use a different location.
+A missing discovered file means the compiled defaults below are used.
+
+```toml
+[keybindings]
+"app.quit" = ["q"]
+"app.help" = ["?"]
+"app.refresh" = ["ctrl+r"]
+
+"focus.providers" = ["1"]
+"focus.resources" = ["2"]
+"focus.resources.2" = ["3"]
+"focus.resources.3" = ["4"]
+"focus.resources.4" = ["5"]
+"focus.resources.5" = ["6"]
+"focus.resources.6" = ["7"]
+"focus.resources.7" = ["8"]
+"focus.resources.8" = ["9"]
+"focus.resources.9" = ["0"]
+"focus.details" = ["enter"]
+"focus.next" = ["tab"]
+"focus.previous" = ["shift+tab"]
+
+"selection.next" = ["j", "down"]
+"selection.previous" = ["k", "up"]
+"selection.next.fast" = ["J"]
+"selection.previous.fast" = ["K"]
+"workspace.next" = ["]"]
+"workspace.previous" = ["["]
+
+"detail.view.next" = ["l", "right"]
+"detail.view.previous" = ["h", "left"]
+"detail.scroll.down" = ["ctrl+d", "pagedown"]
+"detail.scroll.up" = ["ctrl+u", "pageup"]
+"details.copy" = ["y"]
+"layout.boundary.left" = ["<"]
+"layout.boundary.right" = [">"]
+
+"modal.confirm" = ["y", "enter"]
+"modal.cancel" = ["esc", "n"]
+
+"resource.start" = ["S"]
+"resource.stop" = ["s"]
+"resource.restart" = ["r"]
+"resource.resume" = ["p"]
+"resource.shell" = ["E"]
+"resource.delete" = ["d"]
+```
+
+The file may contain only the commands you want to change. A configured list
+replaces that command's complete default list; an empty list disables the
+command. Keys are case-sensitive and support printable characters, named keys
+such as `enter` and `pagedown`, `f1` through `f12`, and `ctrl+` or `alt+`
+modifiers. `ctrl+c` is always reserved as an emergency way to quit Tuivir.
+Invalid or conflicting bindings are reported at startup and none of the file is
+applied.
+
 ## Usage
 
 Run Tuivir in a terminal with a supported provider CLI installed:
