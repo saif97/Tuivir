@@ -147,7 +147,7 @@ pub enum CommandScope {
 /// One Command with the keys that are actually bound to it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EffectiveCommand {
-    /// The stable, lowercase, dotted configuration identifier.
+    /// The stable, lowercase, underscore-separated configuration identifier.
     pub id: &'static str,
     pub description: &'static str,
     pub command: Command,
