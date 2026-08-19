@@ -69,6 +69,9 @@ to an absolute path; otherwise it reads `~/.config/tuivir/config.toml`. Set
 `TUIVIR_CONFIG_FILE` to an absolute file path to use a different location.
 A missing discovered file means the compiled defaults below are used.
 
+<details>
+<summary>Default keybindings</summary>
+
 ```toml
 [keybindings]
 "app.quit" = ["q"]
@@ -114,6 +117,8 @@ A missing discovered file means the compiled defaults below are used.
 "resource.shell" = ["E"]
 "resource.delete" = ["d"]
 ```
+
+</details>
 
 The file may contain only the commands you want to change. A configured list
 replaces that command's complete default list; an empty list disables the
