@@ -34,8 +34,8 @@ brew upgrade tuivir
 
 ### Build from source
 
-Tuivir requires Rust `1.97.1`. Clone the repository and install its locked
-dependency set with Cargo:
+Tuivir uses the Rust toolchain pinned in `rust-toolchain.toml`. Clone the
+repository and install its locked dependency set with Cargo:
 
 ```sh
 git clone https://github.com/saif97/Tuivir.git
