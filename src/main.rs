@@ -23,6 +23,9 @@ use tuivir::{
     },
     infrastructure::{
         config::{Env, FileSystemReader, load},
+        pane_boundary_state::{
+            Env as StateEnv, FileSystemState, StateStorage, save as save_pane_boundary,
+        },
         process::{CliRunner, InteractiveRunner, ProcessSpec, TokioCliRunner},
         runtime::{ProviderRuntime, RefreshTimer},
     },
@@ -48,6 +51,10 @@ async fn main() -> io::Result<()> {
             std::process::exit(1);
         }
     };
+    let pane_boundary = tuivir::infrastructure::pane_boundary_state::load(
+        &StateEnv::from_environment(),
+        &FileSystemState,
+    );
     let mut terminal = ratatui::init();
     if let Err(error) = execute!(io::stdout(), EnableMouseCapture) {
         ratatui::restore();
@@ -62,7 +69,7 @@ async fn main() -> io::Result<()> {
         let _ = execute!(io::stdout(), DisableMouseCapture);
         restore_screen(panic);
     }));
-    let result = run(&mut terminal, registry).await;
+    let result = run(&mut terminal, registry, pane_boundary).await;
     let _ = execute!(io::stdout(), DisableMouseCapture);
     ratatui::restore();
     result
@@ -177,6 +184,41 @@ fn handle_key(app: &mut App, event: KeyEvent) -> (ShellControl, Vec<ProviderRequ
     }
 }
 
+/// Keeps a mouse drag transient until its release, while keyboard resizing is
+/// already one completed user action per Command.
+#[derive(Default)]
+struct PaneBoundaryPersistence {
+    drag_start: Option<tuivir::application::PaneBoundary>,
+}
+
+fn persist_pane_boundary(
+    persistence: &mut PaneBoundaryPersistence,
+    command: Command,
+    before: tuivir::application::PaneBoundary,
+    app: &mut App,
+    env: &StateEnv,
+    storage: &dyn StateStorage,
+) {
+    let after = app.state().pane_boundary;
+    let should_save = match command {
+        Command::GrabPaneBoundary(_) => {
+            persistence.drag_start = Some(before);
+            false
+        }
+        Command::ReleasePaneBoundary => persistence
+            .drag_start
+            .take()
+            .is_some_and(|start| start.resources_percent() != after.resources_percent()),
+        Command::MovePaneBoundaryLeft | Command::MovePaneBoundaryRight => {
+            before.resources_percent() != after.resources_percent()
+        }
+        _ => false,
+    };
+    if should_save && let Err(error) = save_pane_boundary(env, storage, after) {
+        app.report_pane_boundary_persistence_failure(error.to_string());
+    }
+}
+
 /// Routes one terminal mouse event through the layout that drew the screen.
 ///
 /// The mouse resolves to a Command and goes through `App::invoke`, exactly as a
@@ -236,11 +278,18 @@ fn take_the_terminal_back(terminal: &mut dyn ShellTerminal) -> io::Result<()> {
     Ok(())
 }
 
-async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::Result<()> {
+async fn run(
+    terminal: &mut DefaultTerminal,
+    registry: CommandRegistry,
+    pane_boundary: tuivir::application::PaneBoundary,
+) -> io::Result<()> {
     let cli = Arc::new(TokioCliRunner) as Arc<dyn CliRunner>;
     let runtime = ProviderRuntime::with_builtin_providers(cli);
     let (completion_tx, mut completion_rx) = mpsc::unbounded_channel();
-    let mut app = App::with_registry(registry);
+    let mut app = App::with_registry_and_pane_boundary(registry, pane_boundary);
+    let state_env = StateEnv::from_environment();
+    let state_storage = FileSystemState;
+    let mut pane_boundary_persistence = PaneBoundaryPersistence::default();
     let mut clipboard = Osc52Clipboard(io::stdout());
     let mut detail_dispatch = DetailDispatchQueue::new(DETAIL_DISPATCH_QUIET_PERIOD);
 
@@ -268,11 +317,41 @@ async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::R
         tokio::select! {
             biased;
             Some(event) = key_rx.recv() => {
-                let (control, requests) = match event {
-                    Event::Key(key) => handle_key(&mut app, key),
-                    Event::Mouse(mouse) => (ShellControl::Continue, handle_mouse(&mut app, mouse, layout.as_ref())),
-                    _ => (ShellControl::Continue, Vec::new()),
+                let (control, requests, command, before) = match event {
+                    Event::Key(key) => {
+                        let before = app.state().pane_boundary;
+                        let command = presentation::key_from_event(key).and_then(|key| {
+                            (app.reserved(key) == Some(Command::Quit))
+                                .then_some(Command::Quit)
+                                .or_else(|| app.resolve_command(key))
+                        });
+                        let (control, requests) = handle_key(&mut app, key);
+                        (control, requests, command, before)
+                    }
+                    Event::Mouse(mouse) => {
+                        let before = app.state().pane_boundary;
+                        let boundary_grab = app.state().pane_boundary.grab();
+                        let command = layout
+                            .as_ref()
+                            .zip(presentation::mouse_from_event(mouse))
+                            .and_then(|(layout, input)| presentation::resolve_mouse(layout, input, boundary_grab));
+                        let requests = handle_mouse(&mut app, mouse, layout.as_ref());
+                        (ShellControl::Continue, requests, command, before)
+                    }
+                    _ => (ShellControl::Continue, Vec::new(), None, app.state().pane_boundary),
                 };
+                if let Some(command) = command {
+                    // `handle_*` already invoked it; this observes whether it
+                    // completed a resize and keeps I/O at the host boundary.
+                    persist_pane_boundary(
+                        &mut pane_boundary_persistence,
+                        command,
+                        before,
+                        &mut app,
+                        &state_env,
+                        &state_storage,
+                    );
+                }
                 dispatch_all(&runtime, &completion_tx, &mut detail_dispatch, requests);
                 copy_pending_details(&mut app, &mut clipboard);
                 if control == ShellControl::Quit {

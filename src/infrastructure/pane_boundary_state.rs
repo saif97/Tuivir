@@ -3,7 +3,10 @@
 //! It deliberately lives in the XDG state directory rather than the user's
 //! configuration file: resizing is application state, not hand-authored setup.
 
-use std::{io, path::{Path, PathBuf}};
+use std::{
+    io,
+    path::{Path, PathBuf},
+};
 
 use serde::Deserialize;
 
@@ -41,7 +44,10 @@ impl StateStorage for FileSystemState {
 
     fn write_atomically(&self, path: &Path, contents: &str) -> io::Result<()> {
         let parent = path.parent().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidInput, "state path has no parent directory")
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "state path has no parent directory",
+            )
         })?;
         std::fs::create_dir_all(parent)?;
         let temporary = parent.join(format!(".pane-boundary-{}.tmp", std::process::id()));
@@ -82,7 +88,10 @@ pub fn save(env: &Env, storage: &dyn StateStorage, boundary: PaneBoundary) -> io
     };
     storage.write_atomically(
         &path,
-        &format!(r#"{{"resources_percent":{}}}"#, boundary.resources_percent()),
+        &format!(
+            r#"{{"resources_percent":{}}}"#,
+            boundary.resources_percent()
+        ),
     )
 }
 

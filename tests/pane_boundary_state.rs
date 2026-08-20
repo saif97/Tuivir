@@ -16,6 +16,24 @@ struct MemoryState {
     files: RefCell<HashMap<PathBuf, String>>,
 }
 
+struct FailingState {
+    files: RefCell<HashMap<PathBuf, String>>,
+}
+
+impl StateStorage for FailingState {
+    fn read(&self, path: &Path) -> Result<String, Error> {
+        self.files
+            .borrow()
+            .get(path)
+            .cloned()
+            .ok_or_else(|| Error::new(ErrorKind::NotFound, "missing state"))
+    }
+
+    fn write_atomically(&self, _: &Path, _: &str) -> Result<(), Error> {
+        Err(Error::other("disk full"))
+    }
+}
+
 impl MemoryState {
     fn empty() -> Self {
         Self {
@@ -25,7 +43,10 @@ impl MemoryState {
 
     fn with(path: impl Into<PathBuf>, contents: impl Into<String>) -> Self {
         let state = Self::empty();
-        state.files.borrow_mut().insert(path.into(), contents.into());
+        state
+            .files
+            .borrow_mut()
+            .insert(path.into(), contents.into());
         state
     }
 }
@@ -94,10 +115,30 @@ fn saving_a_resized_pane_boundary_uses_the_state_path() {
     save(&env, &state, PaneBoundary::new(60)).expect("the preference saves");
 
     assert_eq!(
-        state
-            .files
-            .borrow()
-            .get(&PathBuf::from("/home/me/.local/state/tuivir/pane-boundary.json")),
+        state.files.borrow().get(&PathBuf::from(
+            "/home/me/.local/state/tuivir/pane-boundary.json"
+        )),
         Some(&r#"{"resources_percent":60}"#.to_owned())
+    );
+}
+
+#[test]
+fn a_failed_atomic_save_leaves_the_last_complete_preference_intact() {
+    let path = PathBuf::from("/state/tuivir/pane-boundary.json");
+    let state = FailingState {
+        files: RefCell::new(HashMap::from([(
+            path.clone(),
+            r#"{"resources_percent":48}"#.into(),
+        )])),
+    };
+    let env = Env {
+        xdg_state_home: Some(PathBuf::from("/state")),
+        ..Env::default()
+    };
+
+    assert!(save(&env, &state, PaneBoundary::new(60)).is_err());
+    assert_eq!(
+        state.files.borrow().get(&path),
+        Some(&r#"{"resources_percent":48}"#.to_owned())
     );
 }

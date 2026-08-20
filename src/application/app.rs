@@ -252,9 +252,19 @@ impl App {
     /// Builds the application around an effective registry, projecting its
     /// first bindings into the state the renderer reads.
     pub fn with_registry(commands: CommandRegistry) -> Self {
+        Self::with_registry_and_pane_boundary(commands, PaneBoundary::default())
+    }
+
+    /// Builds the application with the durable Pane Boundary restored by the
+    /// host before it owns the terminal.
+    pub fn with_registry_and_pane_boundary(
+        commands: CommandRegistry,
+        pane_boundary: PaneBoundary,
+    ) -> Self {
         let hints = KeyHints::from_registry(&commands);
         let state = AppState {
             hints,
+            pane_boundary,
             ..AppState::default()
         };
         Self {
@@ -377,6 +387,11 @@ impl App {
     /// Records a clipboard-adapter failure through the ordinary UI error path.
     pub fn report_details_copy_failure(&mut self, reason: String) {
         self.state.command_error = Some(format!("copy selected Details failed: {reason}"));
+    }
+
+    /// Records a state-write failure through the ordinary in-app error path.
+    pub fn report_pane_boundary_persistence_failure(&mut self, reason: String) {
+        self.state.command_error = Some(format!("saving Pane Boundary failed: {reason}"));
     }
 
     /// Carries out one resolved user intention and returns any provider work.
