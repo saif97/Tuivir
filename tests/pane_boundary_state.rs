@@ -5,11 +5,15 @@ use std::{
     collections::HashMap,
     io::{Error, ErrorKind},
     path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use tuivir::{
     application::PaneBoundary,
-    infrastructure::pane_boundary_state::{Env, StateStorage, load, save},
+    infrastructure::{
+        config::{FileSystemReader, ReadFile},
+        pane_boundary_state::{Env, StateStorage, load, save},
+    },
 };
 
 struct MemoryState {
@@ -20,7 +24,7 @@ struct FailingState {
     files: RefCell<HashMap<PathBuf, String>>,
 }
 
-impl StateStorage for FailingState {
+impl ReadFile for FailingState {
     fn read(&self, path: &Path) -> Result<String, Error> {
         self.files
             .borrow()
@@ -28,7 +32,9 @@ impl StateStorage for FailingState {
             .cloned()
             .ok_or_else(|| Error::new(ErrorKind::NotFound, "missing state"))
     }
+}
 
+impl StateStorage for FailingState {
     fn write_atomically(&self, _: &Path, _: &str) -> Result<(), Error> {
         Err(Error::other("disk full"))
     }
@@ -51,7 +57,7 @@ impl MemoryState {
     }
 }
 
-impl StateStorage for MemoryState {
+impl ReadFile for MemoryState {
     fn read(&self, path: &Path) -> Result<String, Error> {
         self.files
             .borrow()
@@ -59,7 +65,9 @@ impl StateStorage for MemoryState {
             .cloned()
             .ok_or_else(|| Error::new(ErrorKind::NotFound, "missing state"))
     }
+}
 
+impl StateStorage for MemoryState {
     fn write_atomically(&self, path: &Path, contents: &str) -> Result<(), Error> {
         self.files
             .borrow_mut()
@@ -141,4 +149,39 @@ fn a_failed_atomic_save_leaves_the_last_complete_preference_intact() {
         state.files.borrow().get(&path),
         Some(&r#"{"resources_percent":48}"#.to_owned())
     );
+}
+
+#[test]
+fn the_filesystem_adapter_replaces_state_without_leaving_a_temporary_file() {
+    let directory = std::env::temp_dir().join(format!(
+        "tuivir-state-test-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("the clock has an epoch")
+            .as_nanos()
+    ));
+    let env = Env {
+        xdg_state_home: Some(directory.clone()),
+        ..Env::default()
+    };
+
+    save(&env, &FileSystemReader, PaneBoundary::new(60)).expect("an atomic state write");
+
+    let state_directory = directory.join("tuivir");
+    assert_eq!(
+        std::fs::read_to_string(state_directory.join("pane-boundary.json")).unwrap(),
+        r#"{"resources_percent":60}"#
+    );
+    assert!(
+        std::fs::read_dir(&state_directory)
+            .unwrap()
+            .all(|entry| !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".tmp")),
+        "the rename left no partially-written temporary state behind"
+    );
+
+    std::fs::remove_dir_all(directory).expect("remove the test state directory");
 }

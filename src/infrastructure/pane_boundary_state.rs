@@ -10,7 +10,10 @@ use std::{
 
 use serde::Deserialize;
 
-use crate::application::PaneBoundary;
+use crate::{
+    application::PaneBoundary,
+    infrastructure::config::{FileSystemReader, ReadFile},
+};
 
 /// Environment values used to locate Tuivir's XDG state file.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -29,19 +32,11 @@ impl Env {
 }
 
 /// The host filesystem operations needed by state loading and saving.
-pub trait StateStorage {
-    fn read(&self, path: &Path) -> io::Result<String>;
+pub trait StateStorage: ReadFile {
     fn write_atomically(&self, path: &Path, contents: &str) -> io::Result<()>;
 }
 
-/// The production state filesystem adapter.
-pub struct FileSystemState;
-
-impl StateStorage for FileSystemState {
-    fn read(&self, path: &Path) -> io::Result<String> {
-        std::fs::read_to_string(path)
-    }
-
+impl StateStorage for FileSystemReader {
     fn write_atomically(&self, path: &Path, contents: &str) -> io::Result<()> {
         let parent = path.parent().ok_or_else(|| {
             io::Error::new(
@@ -74,7 +69,7 @@ pub fn load(env: &Env, storage: &dyn StateStorage) -> PaneBoundary {
     let Ok(saved) = serde_json::from_str::<SavedPaneBoundary>(&contents) else {
         return PaneBoundary::default();
     };
-    if !(25..=75).contains(&saved.resources_percent) {
+    if !PaneBoundary::is_valid_percent(saved.resources_percent) {
         return PaneBoundary::default();
     }
     PaneBoundary::new(saved.resources_percent)

@@ -14,8 +14,8 @@ use std::{
 };
 
 use super::{
-    Clipboard, DetailDispatchQueue, Osc52Clipboard, PaneBoundaryPersistence, ShellTerminal,
-    handle_key, handle_mouse, open_pending_shell, persist_pane_boundary,
+    Clipboard, DetailDispatchQueue, Osc52Clipboard, ShellTerminal, handle_key, handle_mouse,
+    open_pending_shell, persist_pane_boundary,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
@@ -26,26 +26,45 @@ use tuivir::{
         ResourceCommand, ResourcePanel, WorkspaceSnapshot,
     },
     domain::{Provider, ProviderId, ResourceId, ResourcePanelId, ResourceState, TargetEnvironment},
-    infrastructure::pane_boundary_state::{Env as StateEnv, StateStorage},
     infrastructure::process::{InteractiveRunner, ProcessError, ProcessFailure, ProcessSpec},
     infrastructure::provider::ProviderDiscovery,
+    infrastructure::{
+        config::ReadFile,
+        pane_boundary_state::{Env as StateEnv, StateStorage},
+    },
     presentation::{ScreenLayout, WorkspacePanes, render_to_text, resolve_mouse},
 };
 
 #[derive(Default)]
 struct RecordingState(Mutex<Vec<String>>);
 
-impl StateStorage for RecordingState {
+impl ReadFile for RecordingState {
     fn read(&self, _: &Path) -> io::Result<String> {
         Err(io::Error::new(io::ErrorKind::NotFound, "no saved state"))
     }
+}
 
+impl StateStorage for RecordingState {
     fn write_atomically(&self, _: &Path, contents: &str) -> io::Result<()> {
         self.0
             .lock()
             .expect("state writes")
             .push(contents.to_owned());
         Ok(())
+    }
+}
+
+struct FailingState;
+
+impl ReadFile for FailingState {
+    fn read(&self, _: &Path) -> io::Result<String> {
+        Err(io::Error::new(io::ErrorKind::NotFound, "no saved state"))
+    }
+}
+
+impl StateStorage for FailingState {
+    fn write_atomically(&self, _: &Path, _: &str) -> io::Result<()> {
+        Err(io::Error::other("disk full"))
     }
 }
 
@@ -134,22 +153,37 @@ fn releasing_a_resized_pane_boundary_persists_one_preference() {
         home: Some("/home/me".into()),
         ..StateEnv::default()
     };
-    let mut persistence = PaneBoundaryPersistence::default();
 
     for command in [
         Command::GrabPaneBoundary(0),
         Command::SetPaneBoundary(60),
         Command::ReleasePaneBoundary,
     ] {
-        let before = app.state().pane_boundary;
         app.invoke(command);
-        persist_pane_boundary(&mut persistence, command, before, &mut app, &env, &state);
+        persist_pane_boundary(&mut app, &env, &state);
     }
 
     assert_eq!(
         *state.0.lock().expect("state writes"),
         vec![r#"{"resources_percent":60}"#],
         "drag updates reach durable state only once the user lets go"
+    );
+}
+
+#[test]
+fn a_pane_boundary_write_failure_uses_the_normal_in_app_error() {
+    let mut app = App::new();
+    let env = StateEnv {
+        home: Some("/home/me".into()),
+        ..StateEnv::default()
+    };
+
+    app.invoke(Command::MovePaneBoundaryRight);
+    persist_pane_boundary(&mut app, &env, &FailingState);
+
+    assert_eq!(
+        app.state().command_error.as_deref(),
+        Some("saving Pane Boundary failed: disk full")
     );
 }
 

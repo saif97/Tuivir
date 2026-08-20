@@ -236,6 +236,11 @@ pub struct App {
     /// away from a Provider Workspace drops its entries so a stale snapshot
     /// cannot overwrite newer application state.
     pending_refreshes: HashMap<ProviderRequestId, ProviderId>,
+    /// The preference at the start of the current drag, if any.
+    pane_boundary_before_drag: Option<PaneBoundary>,
+    /// A completed user resize for the host to persist outside application
+    /// state, following the same effect-taking pattern as clipboard work.
+    pending_pane_boundary_save: Option<PaneBoundary>,
 }
 
 impl Default for App {
@@ -272,6 +277,8 @@ impl App {
             commands,
             next_request_id: 1,
             pending_refreshes: HashMap::new(),
+            pane_boundary_before_drag: None,
+            pending_pane_boundary_save: None,
         }
     }
 
@@ -384,6 +391,11 @@ impl App {
         self.state.pending_details_copy.take()
     }
 
+    /// Takes a completed Pane Boundary preference for the host to persist.
+    pub fn take_pending_pane_boundary_save(&mut self) -> Option<PaneBoundary> {
+        self.pending_pane_boundary_save.take()
+    }
+
     /// Records a clipboard-adapter failure through the ordinary UI error path.
     pub fn report_details_copy_failure(&mut self, reason: String) {
         self.state.command_error = Some(format!("copy selected Details failed: {reason}"));
@@ -465,6 +477,18 @@ impl App {
         Vec::new()
     }
 
+    fn resize_pane_boundary(
+        &mut self,
+        moved: impl FnOnce(PaneBoundary) -> PaneBoundary,
+    ) -> Vec<ProviderRequest> {
+        let before = self.state.pane_boundary.resources_percent();
+        let requests = self.move_pane_boundary(moved);
+        if before != self.state.pane_boundary.resources_percent() {
+            self.pending_pane_boundary_save = Some(self.state.pane_boundary);
+        }
+        requests
+    }
+
     fn scroll_resource_panel(&mut self, panel: usize, delta: isize) -> Vec<ProviderRequest> {
         if let Some(workspace) = self.state.active_workspace_mut() {
             workspace.move_resource_selection_at(panel, delta);
@@ -490,15 +514,24 @@ impl App {
                 Vec::new()
             }
             Command::Refresh => self.refresh_active_provider(),
-            Command::MovePaneBoundaryLeft => self.move_pane_boundary(PaneBoundary::moved_left),
-            Command::MovePaneBoundaryRight => self.move_pane_boundary(PaneBoundary::moved_right),
+            Command::MovePaneBoundaryLeft => self.resize_pane_boundary(PaneBoundary::moved_left),
+            Command::MovePaneBoundaryRight => self.resize_pane_boundary(PaneBoundary::moved_right),
             Command::GrabPaneBoundary(column) => {
+                self.pane_boundary_before_drag = Some(self.state.pane_boundary);
                 self.move_pane_boundary(|boundary| boundary.grabbed_at(column))
             }
             Command::SetPaneBoundary(share) => {
                 self.move_pane_boundary(|boundary| boundary.dragged_to(share))
             }
-            Command::ReleasePaneBoundary => self.move_pane_boundary(PaneBoundary::released),
+            Command::ReleasePaneBoundary => {
+                let requests = self.move_pane_boundary(PaneBoundary::released);
+                if self.pane_boundary_before_drag.take().is_some_and(|before| {
+                    before.resources_percent() != self.state.pane_boundary.resources_percent()
+                }) {
+                    self.pending_pane_boundary_save = Some(self.state.pane_boundary);
+                }
+                requests
+            }
             Command::FocusProviders => {
                 self.state.focused_pane = FocusedPane::Providers;
                 Vec::new()
