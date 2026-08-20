@@ -152,13 +152,10 @@ pub fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
 
 fn measure_panes(state: &AppState, workspace: Rect) -> Option<WorkspacePanes> {
     let provider = state.active_workspace()?;
-    let resources_share = state.pane_boundary.resources_percent();
+    let resources_width = state.pane_boundary.resources_width(workspace.width);
     let columns = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(resources_share),
-            Constraint::Percentage(100_u16.saturating_sub(resources_share)),
-        ])
+        .constraints([Constraint::Length(resources_width), Constraint::Min(0)])
         .split(workspace);
     let (resources, details) = (columns[0], columns[1]);
     let pane_boundary = Rect::new(

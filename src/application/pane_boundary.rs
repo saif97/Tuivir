@@ -35,6 +35,19 @@ impl PaneBoundary {
         self.resources_percent
     }
 
+    /// The Resource Pane width that fits this terminal while leaving both
+    /// Panes usable. This is a presentation-time clamp: it never changes the
+    /// preference the user chose or the value persisted for a larger terminal.
+    pub fn resources_width(self, terminal_width: u16) -> u16 {
+        let preferred = terminal_width.saturating_mul(self.resources_percent) / 100;
+        let minimum = MINIMUM_PANE_WIDTH.min(terminal_width / 2);
+        preferred.clamp(minimum, terminal_width.saturating_sub(minimum))
+    }
+
+    pub fn is_valid_percent(resources_percent: u16) -> bool {
+        (MINIMUM_PERCENT..=MAXIMUM_PERCENT).contains(&resources_percent)
+    }
+
     /// Which of the boundary's two columns the pointer is holding.
     pub fn grab(self) -> Option<u16> {
         self.grab
@@ -95,3 +108,6 @@ const STEP: u16 = 5;
 /// twenty columns, which still holds a Resource name inside its borders.
 const MINIMUM_PERCENT: u16 = 25;
 const MAXIMUM_PERCENT: u16 = 100 - MINIMUM_PERCENT;
+/// The smallest useful Pane on a normal terminal. Smaller terminals split
+/// evenly rather than allowing either Pane to disappear.
+const MINIMUM_PANE_WIDTH: u16 = 20;

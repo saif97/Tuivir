@@ -86,6 +86,23 @@ fn a_terminal_that_changes_size_keeps_the_share_the_user_chose() {
     assert_eq!(large.pane_boundary.x, 59);
 }
 
+#[test]
+fn a_small_terminal_clamps_the_drawn_panes_without_changing_the_preference() {
+    let state = workspace_at(PaneBoundary::new(75));
+
+    let panes = ScreenLayout::measure(&state, Rect::new(0, 0, 30, 24))
+        .panes
+        .expect("a Provider Workspace is active");
+
+    assert_eq!(panes.resources.width, 15, "neither Pane gets squeezed out");
+    assert_eq!(panes.details.width, 15);
+    assert_eq!(
+        state.pane_boundary.resources_percent(),
+        75,
+        "the temporary small-terminal clamp never changes the saved preference"
+    );
+}
+
 /// The two border columns the user sees between the Panes are the two the mouse
 /// can grab. A Pane Boundary measured anywhere else would be a line the user
 /// cannot see and cannot aim at.

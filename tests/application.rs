@@ -11,8 +11,8 @@ use tokio::sync::{Barrier, Notify, mpsc};
 use tuivir::{
     application::{
         App, AppEvent, AppState, Command, CommandRegistry, CommandScope, DetailView, FocusedPane,
-        InteractiveShellOutcome, InteractiveShellProcess, LifecycleCommandPolicy, ProviderRequest,
-        Resource, ResourceCommand, ResourceDetails, ResourcePanel, WorkspaceError,
+        InteractiveShellOutcome, InteractiveShellProcess, LifecycleCommandPolicy, PaneBoundary,
+        ProviderRequest, Resource, ResourceCommand, ResourceDetails, ResourcePanel, WorkspaceError,
         WorkspaceLoadState, WorkspaceSnapshot, lifecycle_commands,
     },
     domain::{
@@ -3714,6 +3714,18 @@ fn moving_the_pane_boundary_steps_it_by_five_points_each_way() {
         start - 5,
         "moving left gives the Details Pane more of the width"
     );
+}
+
+#[test]
+fn a_restored_pane_boundary_is_the_starting_dimension_for_every_workspace() {
+    let mut app =
+        App::with_registry_and_pane_boundary(CommandRegistry::builtin(), PaneBoundary::new(60));
+    app.update(docker_discovery().into_event());
+    app.update(incus_discovery().into_event());
+
+    assert_eq!(app.state().pane_boundary.resources_percent(), 60);
+    app.invoke(Command::NextWorkspace);
+    assert_eq!(app.state().pane_boundary.resources_percent(), 60);
 }
 
 /// Neither Pane may be squeezed out of usefulness, however long the user holds

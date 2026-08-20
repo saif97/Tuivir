@@ -33,7 +33,7 @@ A focusable region of the application shell, such as the Provider selector, a Re
 _Avoid_: Area, section, focus region
 
 **Pane Boundary**:
-The movable edge between two Panes, held as the share of the width or height it leaves the first of them rather than as a column or row count — so a terminal that changes size keeps the split the user chose. It is moved by dragging the borders that draw it or by its own Commands, and it holds itself inside a range that leaves both Panes usable. One share serves the whole Tuivir run and every Provider Workspace in it; it is not written to a file.
+The movable edge between two Panes, held as the share of the width or height it leaves the first of them rather than as a column or row count — so a terminal that changes size keeps the split the user chose. It is moved by dragging the borders that draw it or by its own Commands, and it holds itself inside a range that leaves both Panes usable. One share serves the whole Tuivir run and every Provider Workspace in it. A completed resize records that preference in Tuivir's XDG state directory; a small terminal may temporarily clamp the drawn width without changing the preference.
 _Avoid_: Divider, splitter, split ratio
 
 **Resource**:

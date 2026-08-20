@@ -23,6 +23,7 @@ use tuivir::{
     },
     infrastructure::{
         config::{Env, FileSystemReader, load},
+        pane_boundary_state::{Env as StateEnv, StateStorage, save as save_pane_boundary},
         process::{CliRunner, InteractiveRunner, ProcessSpec, TokioCliRunner},
         runtime::{ProviderRuntime, RefreshTimer},
     },
@@ -48,6 +49,9 @@ async fn main() -> io::Result<()> {
             std::process::exit(1);
         }
     };
+    let state_env = StateEnv::from_environment();
+    let pane_boundary =
+        tuivir::infrastructure::pane_boundary_state::load(&state_env, &FileSystemReader);
     let mut terminal = ratatui::init();
     if let Err(error) = execute!(io::stdout(), EnableMouseCapture) {
         ratatui::restore();
@@ -62,7 +66,7 @@ async fn main() -> io::Result<()> {
         let _ = execute!(io::stdout(), DisableMouseCapture);
         restore_screen(panic);
     }));
-    let result = run(&mut terminal, registry).await;
+    let result = run(&mut terminal, registry, pane_boundary, state_env).await;
     let _ = execute!(io::stdout(), DisableMouseCapture);
     ratatui::restore();
     result
@@ -163,14 +167,22 @@ impl DetailDispatchQueue {
 
 /// Maps terminal input at the host boundary, then asks the application to
 /// resolve and invoke the resulting logical command.
+#[cfg(test)]
 fn handle_key(app: &mut App, event: KeyEvent) -> (ShellControl, Vec<ProviderRequest>) {
-    let Some(key) = presentation::key_from_event(event) else {
-        return (ShellControl::Continue, Vec::new());
-    };
+    handle_command(app, resolve_key_command(app, event))
+}
+
+fn resolve_key_command(app: &App, event: KeyEvent) -> Option<Command> {
+    let key = presentation::key_from_event(event)?;
     if app.reserved(key) == Some(Command::Quit) {
-        return (ShellControl::Quit, Vec::new());
+        Some(Command::Quit)
+    } else {
+        app.resolve_command(key)
     }
-    match app.resolve_command(key) {
+}
+
+fn handle_command(app: &mut App, command: Option<Command>) -> (ShellControl, Vec<ProviderRequest>) {
+    match command {
         Some(Command::Quit) => (ShellControl::Quit, Vec::new()),
         Some(command) => (ShellControl::Continue, app.invoke(command)),
         None => (ShellControl::Continue, Vec::new()),
@@ -182,20 +194,30 @@ fn handle_key(app: &mut App, event: KeyEvent) -> (ShellControl, Vec<ProviderRequ
 /// The mouse resolves to a Command and goes through `App::invoke`, exactly as a
 /// Keybinding does, so it can never take a shortcut past the work a Command
 /// carries with it.
+#[cfg(test)]
 fn handle_mouse(
     app: &mut App,
     event: crossterm::event::MouseEvent,
     layout: Option<&presentation::ScreenLayout>,
 ) -> Vec<ProviderRequest> {
-    let (Some(layout), Some(input)) = (layout, presentation::mouse_from_event(event)) else {
-        return Vec::new();
+    resolve_mouse_command(app, event, layout).map_or_else(Vec::new, |command| app.invoke(command))
+}
+
+fn resolve_mouse_command(
+    app: &App,
+    event: crossterm::event::MouseEvent,
+    layout: Option<&presentation::ScreenLayout>,
+) -> Option<Command> {
+    let (layout, input) = (layout?, presentation::mouse_from_event(event)?);
+    presentation::resolve_mouse(layout, input, app.state().pane_boundary.grab())
+}
+
+fn persist_pane_boundary(app: &mut App, env: &StateEnv, storage: &dyn StateStorage) {
+    let Some(boundary) = app.take_pending_pane_boundary_save() else {
+        return;
     };
-    // Read before invoking: a drag names no region, so what the pointer is
-    // already holding is what tells the layout which gesture this is.
-    let boundary_grab = app.state().pane_boundary.grab();
-    match presentation::resolve_mouse(layout, input, boundary_grab) {
-        Some(command) => app.invoke(command),
-        None => Vec::new(),
+    if let Err(error) = save_pane_boundary(env, storage, boundary) {
+        app.report_pane_boundary_persistence_failure(error.to_string());
     }
 }
 
@@ -236,11 +258,17 @@ fn take_the_terminal_back(terminal: &mut dyn ShellTerminal) -> io::Result<()> {
     Ok(())
 }
 
-async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::Result<()> {
+async fn run(
+    terminal: &mut DefaultTerminal,
+    registry: CommandRegistry,
+    pane_boundary: tuivir::application::PaneBoundary,
+    state_env: StateEnv,
+) -> io::Result<()> {
     let cli = Arc::new(TokioCliRunner) as Arc<dyn CliRunner>;
     let runtime = ProviderRuntime::with_builtin_providers(cli);
     let (completion_tx, mut completion_rx) = mpsc::unbounded_channel();
-    let mut app = App::with_registry(registry);
+    let mut app = App::with_registry_and_pane_boundary(registry, pane_boundary);
+    let state_storage = FileSystemReader;
     let mut clipboard = Osc52Clipboard(io::stdout());
     let mut detail_dispatch = DetailDispatchQueue::new(DETAIL_DISPATCH_QUIET_PERIOD);
 
@@ -269,10 +297,19 @@ async fn run(terminal: &mut DefaultTerminal, registry: CommandRegistry) -> io::R
             biased;
             Some(event) = key_rx.recv() => {
                 let (control, requests) = match event {
-                    Event::Key(key) => handle_key(&mut app, key),
-                    Event::Mouse(mouse) => (ShellControl::Continue, handle_mouse(&mut app, mouse, layout.as_ref())),
+                    Event::Key(key) => {
+                        let command = resolve_key_command(&app, key);
+                        let (control, requests) = handle_command(&mut app, command);
+                        (control, requests)
+                    }
+                    Event::Mouse(mouse) => {
+                        let command = resolve_mouse_command(&app, mouse, layout.as_ref());
+                        let requests = command.map_or_else(Vec::new, |command| app.invoke(command));
+                        (ShellControl::Continue, requests)
+                    }
                     _ => (ShellControl::Continue, Vec::new()),
                 };
+                persist_pane_boundary(&mut app, &state_env, &state_storage);
                 dispatch_all(&runtime, &completion_tx, &mut detail_dispatch, requests);
                 copy_pending_details(&mut app, &mut clipboard);
                 if control == ShellControl::Quit {
