@@ -22,7 +22,10 @@ pub use provider::{
     DetailView, LifecycleCommandPolicy, ProviderRequest, ProviderRequestId, Resource,
     ResourceDetails, ResourcePanel, WorkspaceError, WorkspaceSnapshot, lifecycle_commands,
 };
-pub use shell::{InteractiveShellOutcome, InteractiveShellProcess};
+pub use shell::{
+    InteractiveShellOutcome, InteractiveShellProcess, ResourceShellEffect, ResourceShellSession,
+    ResourceShellSessionId, ResourceShellSessionLifecycle,
+};
 pub use workspace::{
     DetailCompletion, DetailContent, DetailLoad, DetailPosition, DetailSelection,
     ProviderWorkspaceState, ResourceDetailsView, ResourcePanelView, WorkspaceLoadState,

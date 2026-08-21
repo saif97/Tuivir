@@ -4,7 +4,8 @@ use super::workspace::{DetailCompletion, ProviderWorkspaceState};
 use super::{
     Command, CommandRegistry, CommandScope, InteractiveShellOutcome, InteractiveShellProcess, Key,
     NUMBERED_RESOURCE_PANEL_CAPACITY, PaneBoundary, ProviderRequest, ProviderRequestId,
-    ResourceCommand, ResourceDetails, WorkspaceError, WorkspaceSnapshot,
+    ResourceCommand, ResourceDetails, ResourceShellEffect, ResourceShellSession,
+    ResourceShellSessionId, ResourceShellSessionLifecycle, WorkspaceError, WorkspaceSnapshot,
 };
 use crate::domain::{DetailViewId, Provider, ProviderId, ResourceState, ResourceTarget};
 
@@ -111,6 +112,9 @@ pub struct AppState {
     /// it asks: the host takes the shell, hands the terminal over, and reports
     /// back with [`AppEvent::ShellClosed`].
     pub pending_shell: Option<PendingShell>,
+    /// Stable Resource Shell Session identities and user-visible lifecycles.
+    /// The host owns all live terminal and process objects keyed by these IDs.
+    pub resource_shell_sessions: Vec<ResourceShellSession>,
     /// Dispatched Resource Commands that have not completed yet, in dispatch
     /// order.
     ///
@@ -241,6 +245,8 @@ pub struct App {
     /// A completed user resize for the host to persist outside application
     /// state, following the same effect-taking pattern as clipboard work.
     pending_pane_boundary_save: Option<PaneBoundary>,
+    next_resource_shell_session_id: u64,
+    pending_resource_shell_effects: Vec<ResourceShellEffect>,
 }
 
 impl Default for App {
@@ -279,6 +285,8 @@ impl App {
             pending_refreshes: HashMap::new(),
             pane_boundary_before_drag: None,
             pending_pane_boundary_save: None,
+            next_resource_shell_session_id: 1,
+            pending_resource_shell_effects: Vec::new(),
         }
     }
 
@@ -394,6 +402,12 @@ impl App {
     /// Takes a completed Pane Boundary preference for the host to persist.
     pub fn take_pending_pane_boundary_save(&mut self) -> Option<PaneBoundary> {
         self.pending_pane_boundary_save.take()
+    }
+
+    /// Takes all host work requested by application-owned Resource Shell
+    /// Session transitions.
+    pub fn take_resource_shell_effects(&mut self) -> Vec<ResourceShellEffect> {
+        std::mem::take(&mut self.pending_resource_shell_effects)
     }
 
     /// Records a clipboard-adapter failure through the ordinary UI error path.
@@ -622,6 +636,10 @@ impl App {
             }
             Command::OpenShell => {
                 self.open_shell();
+                Vec::new()
+            }
+            Command::StartResourceShell => {
+                self.start_selected_resource_shell();
                 Vec::new()
             }
             Command::Confirm => self.confirm_or_dismiss(),
@@ -982,6 +1000,52 @@ impl App {
             resource_name,
             process,
         });
+    }
+
+    fn start_selected_resource_shell(&mut self) {
+        let Some(provider) = self.state.active_workspace() else {
+            return;
+        };
+        if !provider.selected_resource_shell_tab() {
+            return;
+        }
+        let provider_id = provider.id().clone();
+        let provider_name = provider.name().to_owned();
+        let Some(target) = provider.selected_resource_target() else {
+            return;
+        };
+        let Some(resource) = provider.selected_resource() else {
+            return;
+        };
+        let Some(process) = resource.shell.clone() else {
+            return;
+        };
+        let resource_name = resource.name.clone();
+        if self.state.resource_shell_sessions.iter().any(|session| {
+            session.provider_id == provider_id
+                && session.target == target
+                && matches!(
+                    session.lifecycle,
+                    ResourceShellSessionLifecycle::Starting | ResourceShellSessionLifecycle::Running
+                )
+        }) {
+            return;
+        }
+        self.state.resource_shell_sessions.retain(|session| {
+            session.provider_id != provider_id || session.target != target
+        });
+        let session = ResourceShellSession {
+            id: ResourceShellSessionId(self.next_resource_shell_session_id),
+            provider_id,
+            provider_name,
+            target,
+            resource_name,
+            lifecycle: ResourceShellSessionLifecycle::Starting,
+        };
+        self.next_resource_shell_session_id += 1;
+        self.state.resource_shell_sessions.push(session.clone());
+        self.pending_resource_shell_effects
+            .push(ResourceShellEffect::Start { session, process });
     }
 
     fn toggle_help(&mut self) {

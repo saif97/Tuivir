@@ -129,7 +129,7 @@ pub(super) const BUILTIN_COMMANDS: &[CommandDefinition] = &[
         id: "focus_details",
         description: "Focus Details",
         command: Command::FocusDetails,
-        scopes: WORKSPACE,
+        scopes: SELECTABLE,
         default_keys: &["enter"],
     },
     CommandDefinition {
@@ -224,6 +224,13 @@ pub(super) const BUILTIN_COMMANDS: &[CommandDefinition] = &[
         command: Command::CopyDetails,
         scopes: DETAILS,
         default_keys: &["y"],
+    },
+    CommandDefinition {
+        id: "resource_shell_start",
+        description: "Start Shell",
+        command: Command::StartResourceShell,
+        scopes: DETAILS,
+        default_keys: &["enter"],
     },
     // The Pane Boundary is the shell's, not one Pane's, so it answers in every
     // workspace scope. `<` and `>` point the way the boundary travels.

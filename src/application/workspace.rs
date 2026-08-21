@@ -767,6 +767,14 @@ impl ProviderWorkspaceState {
         snapshot.resource(&target)
     }
 
+    /// Whether the selected Resource is showing Tuivir's Shell Detail View
+    /// Tab. The application uses this as the explicit start gate.
+    pub fn selected_resource_shell_tab(&self) -> bool {
+        self.selected_detail_view
+            .as_ref()
+            .is_some_and(|view| view.0 == RESOURCE_SHELL_DETAIL_VIEW_ID)
+    }
+
     fn invalidate_detail_when_target_changes<R>(
         &mut self,
         update: impl FnOnce(&mut Self) -> R,

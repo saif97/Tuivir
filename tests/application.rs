@@ -12,8 +12,9 @@ use tuivir::{
     application::{
         App, AppEvent, AppState, Command, CommandRegistry, CommandScope, DetailView, FocusedPane,
         InteractiveShellOutcome, InteractiveShellProcess, LifecycleCommandPolicy, PaneBoundary,
-        ProviderRequest, Resource, ResourceCommand, ResourceDetails, ResourcePanel, WorkspaceError,
-        WorkspaceLoadState, WorkspaceSnapshot, lifecycle_commands,
+        ProviderRequest, Resource, ResourceCommand, ResourceDetails, ResourcePanel,
+        ResourceShellEffect, ResourceShellSessionLifecycle, WorkspaceError, WorkspaceLoadState,
+        WorkspaceSnapshot, lifecycle_commands,
     },
     domain::{
         DetailViewId, Provider, ProviderId, ResourceId, ResourcePanelId, ResourceState,
@@ -1392,6 +1393,41 @@ fn selecting_the_shell_detail_view_tab_is_inert() {
 }
 
 #[test]
+fn enter_on_the_shell_tab_starts_one_session_with_the_provider_command() {
+    let mut app = App::new();
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
+    app.invoke(Command::ActivateDetailView(4));
+
+    let (_, requests) = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+    );
+
+    assert!(requests.is_empty(), "a Resource Shell Session is host work");
+    let session = app
+        .state()
+        .resource_shell_sessions
+        .first()
+        .expect("a starting Resource Shell Session")
+        .clone();
+    assert_eq!(session.lifecycle, ResourceShellSessionLifecycle::Starting);
+    assert_eq!(
+        app.take_resource_shell_effects(),
+        vec![ResourceShellEffect::Start {
+            session,
+            process: InteractiveShellProcess::new(
+                "docker",
+                &["exec", "-it", "container-a", "/bin/sh"],
+            ),
+        }]
+    );
+}
+
+#[test]
 fn unavailable_resource_command_is_disabled_in_help_and_does_not_dispatch() {
     let mut app = App::new();
     ready_workspace(
@@ -2648,10 +2684,14 @@ fn detail_views_wrap_around_at_both_ends() {
     );
 
     app.invoke(Command::PreviousDetailView);
-    assert!(render_to_text(app.state(), 100, 24).contains("Logs  Stats  [ Inspect ]"));
+    assert!(
+        render_to_text(app.state(), 100, 24).contains("Logs  Stats  Inspect  [ Shell ]")
+    );
 
     app.invoke(Command::NextDetailView);
-    assert!(render_to_text(app.state(), 100, 24).contains("[ Overview ]  Logs  Stats  Inspect"));
+    assert!(
+        render_to_text(app.state(), 100, 24).contains("[ Overview ]  Logs  Stats  Inspect  Shell")
+    );
 }
 
 /// The view survives moving between Resources, so reading one kind of detail

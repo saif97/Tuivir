@@ -88,6 +88,8 @@ pub enum Command {
     /// Hands the terminal to the Provider CLI for an Interactive Shell inside
     /// the selected Resource.
     OpenShell,
+    /// Explicitly starts the selected Resource's Shell Detail View Tab.
+    StartResourceShell,
     /// Accepts the open modal.
     Confirm,
     /// Cancels or returns from the open modal.
