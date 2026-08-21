@@ -21,6 +21,11 @@ impl ResourceShellSessionId {
     pub fn new(value: u64) -> Self {
         Self(value)
     }
+
+    /// Numeric value used only to give the host's PTY a distinct identity.
+    pub fn value(self) -> u64 {
+        self.0
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

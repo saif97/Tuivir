@@ -17,20 +17,23 @@ use crossterm::{
 };
 use ratatui::DefaultTerminal;
 use tokio::sync::mpsc;
+
+mod resource_shell_runtime;
+
 use tuivir::{
     application::{
         App, AppEvent, Command, CommandRegistry, ProviderRequest, ResourceShellEffect,
-        ResourceShellSessionLifecycle,
+        ResourceShellSessionId, ResourceShellSessionLifecycle,
     },
     infrastructure::{
         config::{Env, FileSystemReader, load},
         pane_boundary_state::{Env as StateEnv, StateStorage, save as save_pane_boundary},
         process::{CliRunner, TokioCliRunner},
-        resource_shell::{ResourceShellRuntime, ResourceShellRuntimeEvent},
         runtime::{ProviderRuntime, RefreshTimer},
     },
     presentation,
 };
+use resource_shell_runtime::{ResourceShellRuntime, ResourceShellRuntimeEvent};
 
 #[cfg(test)]
 mod host_tests;
@@ -78,6 +81,50 @@ async fn main() -> io::Result<()> {
 enum ShellControl {
     Continue,
     Quit,
+}
+
+/// Host-local keyboard focus for the currently visible PTY. `Ctrl-B q`
+/// releases it, returning ordinary keys to Tuivir without ever sending the
+/// prefix or release gesture to the provider process.
+#[derive(Default)]
+struct ShellInputRouter {
+    active_session: Option<ResourceShellSessionId>,
+    focused: bool,
+    prefix_pending: bool,
+}
+
+enum ShellKeyRoute {
+    ToPty(Vec<u8>),
+    ToTuivir,
+}
+
+impl ShellInputRouter {
+    fn route(&mut self, session_id: ResourceShellSessionId, key: KeyEvent) -> ShellKeyRoute {
+        if self.active_session != Some(session_id) {
+            self.active_session = Some(session_id);
+            self.focused = true;
+            self.prefix_pending = false;
+        }
+        if self.prefix_pending {
+            self.prefix_pending = false;
+            if key.code == KeyCode::Char('q') && key.modifiers.is_empty() {
+                self.focused = false;
+                return ShellKeyRoute::ToTuivir;
+            }
+        }
+        if !self.focused {
+            if key.code == KeyCode::Enter && key.modifiers.is_empty() {
+                self.focused = true;
+                return ShellKeyRoute::ToPty(b"\r".to_vec());
+            }
+            return ShellKeyRoute::ToTuivir;
+        }
+        if key.code == KeyCode::Char('b') && key.modifiers == KeyModifiers::CONTROL {
+            self.prefix_pending = true;
+            return ShellKeyRoute::ToTuivir;
+        }
+        terminal_key_bytes(key).map_or(ShellKeyRoute::ToTuivir, ShellKeyRoute::ToPty)
+    }
 }
 
 const DETAIL_DISPATCH_QUIET_PERIOD: Duration = Duration::from_millis(75);
@@ -302,6 +349,7 @@ async fn run(
     let mut detail_dispatch = DetailDispatchQueue::new(DETAIL_DISPATCH_QUIET_PERIOD);
     let (resource_shell_events, mut resource_shell_event_rx) = mpsc::unbounded_channel();
     let mut resource_shell_runtime = ResourceShellRuntime::default();
+    let mut shell_input = ShellInputRouter::default();
 
     for discovered in runtime.discover().await {
         let requests = app.update(discovered.into_event());
@@ -343,16 +391,20 @@ async fn run(
             Some(event) = key_rx.recv() => {
                 let (control, requests) = match event {
                     Event::Key(key) => {
-                        if let Some(session) = app.state().visible_resource_shell_session()
-                            && session.lifecycle == ResourceShellSessionLifecycle::Running
-                            && let Some(bytes) = terminal_key_bytes(key)
-                        {
-                            let _ = resource_shell_runtime.write(session.id, bytes);
-                            (ShellControl::Continue, Vec::new())
-                        } else {
-                            let command = resolve_key_command(&app, key);
-                            let (control, requests) = handle_command(&mut app, command);
-                            (control, requests)
+                        let route = app.state().visible_resource_shell_session()
+                            .filter(|session| session.lifecycle == ResourceShellSessionLifecycle::Running)
+                            .map(|session| shell_input.route(session.id, key));
+                        match route {
+                            Some(ShellKeyRoute::ToPty(bytes)) => {
+                                let session = app.state().visible_resource_shell_session()
+                                    .expect("a routed Resource Shell Session stays visible");
+                                let _ = resource_shell_runtime.write(session.id, bytes);
+                                (ShellControl::Continue, Vec::new())
+                            }
+                            Some(ShellKeyRoute::ToTuivir) | None => {
+                                let command = resolve_key_command(&app, key);
+                                handle_command(&mut app, command)
+                            }
                         }
                     }
                     Event::Mouse(mouse) => {

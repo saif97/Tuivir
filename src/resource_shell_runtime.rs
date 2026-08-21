@@ -1,4 +1,4 @@
-//! The host-owned Alacritty PTY and terminal-emulator runtime.
+//! The binary host's Alacritty PTY and terminal-emulator runtime.
 //!
 //! Application state sees stable [`ResourceShellSessionId`] values and lifecycle
 //! facts only. This registry owns the child process, PTY, event-loop thread,
@@ -23,7 +23,7 @@ use alacritty_terminal::{
 };
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::application::{InteractiveShellProcess, ResourceShellSessionId};
+use tuivir::application::{InteractiveShellProcess, ResourceShellSessionId};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// A fact the private PTY runtime publishes to its host.
@@ -144,7 +144,7 @@ impl ResourceShellRuntime {
             cell_width: 1,
             cell_height: 1,
         };
-        let pty = tty::new(&pty_options, window_size, session_id.0)?;
+        let pty = tty::new(&pty_options, window_size, session_id.value())?;
         let event_loop = EventLoop::new(Arc::clone(&terminal), listener, pty, true, false)?;
         let event_loop_sender = event_loop.channel();
         *input.lock().expect("terminal input lock") = Some(event_loop_sender.clone());
