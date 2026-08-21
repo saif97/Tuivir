@@ -23,7 +23,7 @@ use alacritty_terminal::{
 };
 use tokio::sync::mpsc::UnboundedSender;
 
-use tuivir::application::{InteractiveShellProcess, ResourceShellSessionId};
+use tuivir::application::{ResourceShellProcess, ResourceShellSessionId};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// A fact the private PTY runtime publishes to its host.
@@ -42,7 +42,7 @@ pub struct ResourceShellRuntime {
 struct LiveResourceShell {
     terminal: Arc<FairMutex<Term<SessionListener>>>,
     input: EventLoopSender,
-    _event_loop: JoinHandle<(EventLoop<tty::Pty, SessionListener>, State)>,
+    event_loop: JoinHandle<(EventLoop<tty::Pty, SessionListener>, State)>,
 }
 
 #[derive(Clone)]
@@ -103,7 +103,7 @@ impl ResourceShellRuntime {
     pub fn start(
         &mut self,
         session_id: ResourceShellSessionId,
-        process: &InteractiveShellProcess,
+        process: &ResourceShellProcess,
         columns: u16,
         lines: u16,
         events: UnboundedSender<ResourceShellRuntimeEvent>,
@@ -154,7 +154,7 @@ impl ResourceShellRuntime {
             LiveResourceShell {
                 terminal,
                 input: event_loop_sender,
-                _event_loop: event_loop,
+                event_loop,
             },
         );
         Ok(())
@@ -213,7 +213,7 @@ impl ResourceShellRuntime {
             return;
         };
         let _ = session.input.send(Msg::Shutdown);
-        let _ = session._event_loop.join();
+        let _ = session.event_loop.join();
     }
 
     /// Flattens the emulator's visible grid for a presentation adapter or

@@ -6,7 +6,7 @@ use crate::domain::{ProviderId, ResourceTarget};
 ///
 /// This value describes the application request without exposing a process
 /// runner or its failure types. The host hands it to an infrastructure adapter.
-pub struct InteractiveShellProcess {
+pub struct ResourceShellProcess {
     program: String,
     args: Vec<String>,
 }
@@ -45,9 +45,7 @@ pub enum ResourceShellSessionLifecycle {
 pub struct ResourceShellSession {
     pub id: ResourceShellSessionId,
     pub provider_id: ProviderId,
-    pub provider_name: String,
     pub target: ResourceTarget,
-    pub resource_name: String,
     pub lifecycle: ResourceShellSessionLifecycle,
 }
 
@@ -56,7 +54,7 @@ pub struct ResourceShellSession {
 pub enum ResourceShellEffect {
     Start {
         session: ResourceShellSession,
-        process: InteractiveShellProcess,
+        process: ResourceShellProcess,
     },
     /// The session's Resource disappeared from an accepted Provider snapshot.
     /// The host must terminate and reap its private runtime before forgetting
@@ -64,7 +62,7 @@ pub enum ResourceShellEffect {
     Stop { session_id: ResourceShellSessionId },
 }
 
-impl InteractiveShellProcess {
+impl ResourceShellProcess {
     pub fn new(program: &str, args: &[&str]) -> Self {
         Self {
             program: program.to_owned(),

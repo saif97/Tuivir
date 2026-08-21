@@ -1,10 +1,4 @@
-//! The terminal handover, at the seam that can show its ordering without a real
-//! terminal, container, or instance.
-//!
-//! Suspending a screen and running a process that owns the user's streams are
-//! both things only the host can do, so both are traits here. A fake of each,
-//! writing to one shared log, is what makes "suspend, then run, then resume"
-//! an assertion rather than a hope.
+//! Host-adapter tests for terminal I/O, event dispatch, and durable UI state.
 
 use std::{
     io,
@@ -23,8 +17,8 @@ use ratatui::layout::Rect;
 use tuivir::{
     application::Command,
     application::{
-        App, AppEvent, DetailView, InteractiveShellProcess, ProviderRequest, Resource,
-        ResourceCommand, ResourcePanel, WorkspaceSnapshot,
+        App, AppEvent, DetailView, ProviderRequest, Resource, ResourceCommand, ResourcePanel,
+        ResourceShellProcess, WorkspaceSnapshot,
     },
     domain::{Provider, ProviderId, ResourceId, ResourcePanelId, ResourceState, TargetEnvironment},
     infrastructure::provider::ProviderDiscovery,
@@ -118,7 +112,7 @@ fn a_real_pty_shell_wakes_the_host_and_keeps_its_rendered_output() {
     runtime
         .start(
             session,
-            &InteractiveShellProcess::new("/bin/sh", &["-c", "printf 'hello from pty\\n'"]),
+            &ResourceShellProcess::new("/bin/sh", &["-c", "printf 'hello from pty\\n'"]),
             80,
             24,
             events,
@@ -129,7 +123,12 @@ fn a_real_pty_shell_wakes_the_host_and_keeps_its_rendered_output() {
         receiver.blocking_recv().expect("PTY output wakes the host"),
         ResourceShellRuntimeEvent::OutputReady { session_id } if session_id == session
     )));
-    assert!(runtime.screen_text(session).expect("live session screen").contains("hello from pty"));
+    assert!(
+        runtime
+            .screen_text(session)
+            .expect("live session screen")
+            .contains("hello from pty")
+    );
 }
 
 #[test]
@@ -140,7 +139,7 @@ fn stopping_a_live_session_forgets_and_reaps_its_pty() {
     runtime
         .start(
             session,
-            &InteractiveShellProcess::new("/bin/sh", &["-c", "sleep 30"]),
+            &ResourceShellProcess::new("/bin/sh", &["-c", "sleep 30"]),
             80,
             24,
             events,
@@ -161,15 +160,24 @@ fn ctrl_b_q_releases_a_resource_shell_sessions_keyboard_focus() {
         ShellKeyRoute::ToPty(bytes) if bytes == b"l"
     ));
     assert!(matches!(
-        router.route(session, KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)),
+        router.route(
+            session,
+            KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)
+        ),
         ShellKeyRoute::ToTuivir
     ));
     assert!(matches!(
-        router.route(session, KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)),
+        router.route(
+            session,
+            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)
+        ),
         ShellKeyRoute::ToTuivir
     ));
     assert!(matches!(
-        router.route(session, KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)),
+        router.route(
+            session,
+            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)
+        ),
         ShellKeyRoute::ToTuivir
     ));
 }
@@ -243,7 +251,7 @@ fn a_navigation_burst_dispatches_only_the_detail_view_where_selection_settles() 
     );
 }
 
-/// One running container, carrying the Interactive Shell Docker offers inside
+/// One running container, carrying the Resource Shell Session Docker offers inside
 /// it.
 fn running_container() -> WorkspaceSnapshot {
     WorkspaceSnapshot {
@@ -260,7 +268,7 @@ fn running_container() -> WorkspaceSnapshot {
                 fields: vec![("Image", "nginx:1.27".to_owned())],
                 snapshot_details: Vec::new(),
                 available_commands: &[ResourceCommand::Stop],
-                shell: Some(InteractiveShellProcess::new(
+                shell: Some(ResourceShellProcess::new(
                     "docker",
                     &["exec", "-it", "container-a", "/bin/sh"],
                 )),
@@ -489,7 +497,6 @@ fn a_click_on_an_open_overlay_changes_nothing_beneath_it() {
 
     assert_eq!(app.state().focused_pane, focus_before);
 }
-
 
 /// Every region resolves to the Command it means, with no terminal involved.
 #[test]

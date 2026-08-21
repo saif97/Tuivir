@@ -11,8 +11,8 @@ use tokio::sync::{Barrier, Notify, mpsc};
 use tuivir::{
     application::{
         App, AppEvent, AppState, Command, CommandRegistry, CommandScope, DetailView, FocusedPane,
-        InteractiveShellProcess, LifecycleCommandPolicy, PaneBoundary, ProviderRequest, Resource,
-        ResourceCommand, ResourceDetails, ResourcePanel, ResourceShellEffect,
+        LifecycleCommandPolicy, PaneBoundary, ProviderRequest, Resource, ResourceCommand,
+        ResourceDetails, ResourcePanel, ResourceShellEffect, ResourceShellProcess,
         ResourceShellSessionLifecycle, WorkspaceError, WorkspaceLoadState, WorkspaceSnapshot,
         lifecycle_commands,
     },
@@ -1257,7 +1257,7 @@ fn help_offers_resume_only_while_the_resource_is_suspended() {
     );
 }
 
-/// A Resource whose Provider offers no Interactive Shell must not look as
+/// A Resource whose Provider offers no Resource Shell Session must not look as
 /// though pressing the key would do something. Nothing is asked for, and help
 /// says why the key is there but idle.
 #[test]
@@ -1361,7 +1361,6 @@ fn the_shell_key_starts_a_session_for_the_selected_container() {
         .expect("a Resource Shell Session waiting for the host")
         .clone();
     assert_eq!(session.provider_id, ProviderId::new("docker"));
-    assert_eq!(session.provider_name, "Docker");
     assert_eq!(
         session.target,
         ResourceTarget::new(
@@ -1369,12 +1368,11 @@ fn the_shell_key_starts_a_session_for_the_selected_container() {
             ResourceId::new("container-a"),
         )
     );
-    assert_eq!(session.resource_name, "api");
     assert_eq!(
         app.take_resource_shell_effects(),
         vec![ResourceShellEffect::Start {
             session: session.clone(),
-            process: InteractiveShellProcess::new(
+            process: ResourceShellProcess::new(
                 "docker",
                 &["exec", "-it", "container-a", "/bin/sh"],
             ),
@@ -1432,7 +1430,7 @@ fn enter_on_the_shell_tab_starts_one_session_with_the_provider_command() {
         app.take_resource_shell_effects(),
         vec![ResourceShellEffect::Start {
             session,
-            process: InteractiveShellProcess::new(
+            process: ResourceShellProcess::new(
                 "docker",
                 &["exec", "-it", "container-a", "/bin/sh"],
             ),
@@ -1484,7 +1482,8 @@ fn an_accepted_refresh_stops_the_shell_for_a_removed_resource() {
     let ProviderRequest::RefreshWorkspace {
         request_id,
         provider_id,
-    } = requests.into_iter().next().expect("a refresh request") else {
+    } = requests.into_iter().next().expect("a refresh request")
+    else {
         panic!("refresh timer requests the active workspace");
     };
     app.update(AppEvent::RefreshCompleted {
@@ -2153,7 +2152,7 @@ fn container_snapshot(
                     snapshot_details: Vec::new(),
                     available_commands,
                     shell: (state == ResourceState::Running).then(|| {
-                        InteractiveShellProcess::new("docker", &["exec", "-it", *id, "/bin/sh"])
+                        ResourceShellProcess::new("docker", &["exec", "-it", *id, "/bin/sh"])
                     }),
                 })
                 .collect(),
@@ -2196,10 +2195,7 @@ fn incus_snapshot(instances: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
                             LifecycleCommandPolicy::RestartAndResume,
                         ),
                         shell: running.then(|| {
-                            InteractiveShellProcess::new(
-                                "incus",
-                                &["exec", *name, "--", "su", "-l"],
-                            )
+                            ResourceShellProcess::new("incus", &["exec", *name, "--", "su", "-l"])
                         }),
                     }
                 })
@@ -2235,7 +2231,7 @@ fn docker_multi_panel_snapshot() -> WorkspaceSnapshot {
                         ResourceCommand::Restart,
                         ResourceCommand::Delete,
                     ],
-                    shell: Some(InteractiveShellProcess::new(
+                    shell: Some(ResourceShellProcess::new(
                         "docker",
                         &["exec", "-it", "shared-id", "/bin/sh"],
                     )),

@@ -23,7 +23,7 @@ pub use provider::{
     ResourceDetails, ResourcePanel, WorkspaceError, WorkspaceSnapshot, lifecycle_commands,
 };
 pub use shell::{
-    InteractiveShellProcess, ResourceShellEffect, ResourceShellSession, ResourceShellSessionId,
+    ResourceShellEffect, ResourceShellProcess, ResourceShellSession, ResourceShellSessionId,
     ResourceShellSessionLifecycle,
 };
 pub use workspace::{

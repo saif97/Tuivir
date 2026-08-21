@@ -20,6 +20,7 @@ use tokio::sync::mpsc;
 
 mod resource_shell_runtime;
 
+use resource_shell_runtime::{ResourceShellRuntime, ResourceShellRuntimeEvent};
 use tuivir::{
     application::{
         App, AppEvent, Command, CommandRegistry, ProviderRequest, ResourceShellEffect,
@@ -33,7 +34,6 @@ use tuivir::{
     },
     presentation,
 };
-use resource_shell_runtime::{ResourceShellRuntime, ResourceShellRuntimeEvent};
 
 #[cfg(test)]
 mod host_tests;

@@ -82,7 +82,7 @@ const DETAIL_SCROLL_LINES: isize = 10;
 /// One sentence for every operation Tuivir asked a Provider for and did not
 /// get.
 ///
-/// Lifecycle Commands and Interactive Shells fail in different places and are
+/// Lifecycle Commands and Resource Shell Sessions fail in different places and are
 /// worded by different code, but they identify their target the same way, so
 /// the user reads one sentence rather than two dialects of one.
 fn operation_failure(
@@ -1046,7 +1046,6 @@ impl App {
             return;
         }
         let provider_id = provider.id().clone();
-        let provider_name = provider.name().to_owned();
         let Some(target) = provider.selected_resource_target() else {
             return;
         };
@@ -1056,7 +1055,6 @@ impl App {
         let Some(process) = resource.shell.clone() else {
             return;
         };
-        let resource_name = resource.name.clone();
         if self.state.resource_shell_sessions.iter().any(|session| {
             session.provider_id == provider_id
                 && session.target == target
@@ -1074,9 +1072,7 @@ impl App {
         let session = ResourceShellSession {
             id: ResourceShellSessionId(self.next_resource_shell_session_id),
             provider_id,
-            provider_name,
             target,
-            resource_name,
             lifecycle: ResourceShellSessionLifecycle::Starting,
         };
         self.next_resource_shell_session_id += 1;
