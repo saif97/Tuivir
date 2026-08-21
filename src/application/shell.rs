@@ -71,12 +71,3 @@ impl InteractiveShellProcess {
         &self.args
     }
 }
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-/// What the application needs to know after an Interactive Shell handover.
-pub enum InteractiveShellOutcome {
-    /// The shell started; its eventual exit status belongs to the user.
-    Exited,
-    /// The host could not start the Provider CLI process.
-    StartFailed(String),
-}

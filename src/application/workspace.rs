@@ -783,6 +783,27 @@ impl ProviderWorkspaceState {
             .is_some_and(|view| view.0 == RESOURCE_SHELL_DETAIL_VIEW_ID)
     }
 
+    /// Selects Tuivir's Shell Detail View Tab when the selected Resource has a
+    /// Provider-declared shell. This is the direct-entry path for the `E`
+    /// command; it remains inert until the application explicitly starts the
+    /// session.
+    pub fn select_resource_shell_tab(&mut self) -> bool {
+        self.invalidate_detail_when_target_changes(|workspace| {
+            let WorkspaceLoadState::Ready(snapshot) = &workspace.load_state else {
+                return false;
+            };
+            let offers_shell = workspace
+                .selected_resource_target()
+                .and_then(|target| snapshot.resource(&target))
+                .is_some_and(|resource| resource.shell.is_some());
+            if offers_shell {
+                workspace.selected_detail_view =
+                    Some(DetailViewId::new(RESOURCE_SHELL_DETAIL_VIEW_ID));
+            }
+            offers_shell
+        })
+    }
+
     fn invalidate_detail_when_target_changes<R>(
         &mut self,
         update: impl FnOnce(&mut Self) -> R,

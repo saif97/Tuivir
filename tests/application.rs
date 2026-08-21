@@ -11,10 +11,10 @@ use tokio::sync::{Barrier, Notify, mpsc};
 use tuivir::{
     application::{
         App, AppEvent, AppState, Command, CommandRegistry, CommandScope, DetailView, FocusedPane,
-        InteractiveShellOutcome, InteractiveShellProcess, LifecycleCommandPolicy, PaneBoundary,
-        ProviderRequest, Resource, ResourceCommand, ResourceDetails, ResourcePanel,
-        ResourceShellEffect, ResourceShellSessionLifecycle, WorkspaceError, WorkspaceLoadState,
-        WorkspaceSnapshot, lifecycle_commands,
+        InteractiveShellProcess, LifecycleCommandPolicy, PaneBoundary, ProviderRequest, Resource,
+        ResourceCommand, ResourceDetails, ResourcePanel, ResourceShellEffect,
+        ResourceShellSessionLifecycle, WorkspaceError, WorkspaceLoadState, WorkspaceSnapshot,
+        lifecycle_commands,
     },
     domain::{
         DetailViewId, Provider, ProviderId, ResourceId, ResourcePanelId, ResourceState,
@@ -746,7 +746,12 @@ fn returning_from_a_shell_refreshes_the_active_workspace_and_preserves_selection
         &mut app,
         KeyEvent::new(KeyCode::Char('E'), KeyModifiers::NONE),
     );
-    let shell = app.take_pending_shell().expect("a shell to hand over to");
+    let shell = app
+        .state()
+        .resource_shell_sessions
+        .first()
+        .expect("a Resource Shell Session to start")
+        .clone();
     assert_eq!(
         shell.target,
         ResourceTarget::new(
@@ -755,9 +760,11 @@ fn returning_from_a_shell_refreshes_the_active_workspace_and_preserves_selection
         )
     );
 
-    let requests = app.update(AppEvent::ShellClosed {
-        shell,
-        outcome: InteractiveShellOutcome::Exited,
+    app.update(AppEvent::ResourceShellStarted {
+        session_id: shell.id,
+    });
+    let requests = app.update(AppEvent::ResourceShellExited {
+        session_id: shell.id,
     });
 
     let refresh = requests
@@ -1267,7 +1274,7 @@ fn help_offers_a_shell_only_while_the_resource_can_host_one() {
         KeyEvent::new(KeyCode::Char('E'), KeyModifiers::NONE),
     );
     assert!(
-        stopped.state().pending_shell.is_none(),
+        stopped.state().resource_shell_sessions.is_empty(),
         "a stopped container has no shell to open"
     );
 
@@ -1327,11 +1334,10 @@ fn question_mark_closes_the_help_overlay_when_it_is_already_open() {
     assert!(screen.contains("api"), "rendered screen:\n{screen}");
 }
 
-/// An Interactive Shell is not work Tuivir can run behind its own screen, so
-/// the shell key produces no provider request at all. It asks for the terminal
-/// instead, naming what the shell was opened for so a failure can say so later.
+/// `E` is the direct Resource Shell Session path. It selects Shell and emits a
+/// host effect, never taking the outer terminal away from Tuivir.
 #[test]
-fn the_shell_key_asks_for_the_terminal_for_the_selected_container() {
+fn the_shell_key_starts_a_session_for_the_selected_container() {
     let mut app = App::new();
     ready_workspace(
         &mut app,
@@ -1346,26 +1352,33 @@ fn the_shell_key_asks_for_the_terminal_for_the_selected_container() {
 
     assert!(
         requests.is_empty(),
-        "an Interactive Shell is never dispatched as background work"
+        "a Resource Shell Session is never provider background work"
     );
-    let pending = app
+    let session = app
         .state()
-        .pending_shell
-        .as_ref()
-        .expect("a shell waiting for the terminal");
-    assert_eq!(pending.provider_id, ProviderId::new("docker"));
-    assert_eq!(pending.provider_name, "Docker");
+        .resource_shell_sessions
+        .first()
+        .expect("a Resource Shell Session waiting for the host")
+        .clone();
+    assert_eq!(session.provider_id, ProviderId::new("docker"));
+    assert_eq!(session.provider_name, "Docker");
     assert_eq!(
-        pending.target,
+        session.target,
         ResourceTarget::new(
             ResourcePanelId::new("containers"),
             ResourceId::new("container-a"),
         )
     );
-    assert_eq!(pending.resource_name, "api");
+    assert_eq!(session.resource_name, "api");
     assert_eq!(
-        pending.process,
-        InteractiveShellProcess::new("docker", &["exec", "-it", "container-a", "/bin/sh"])
+        app.take_resource_shell_effects(),
+        vec![ResourceShellEffect::Start {
+            session: session.clone(),
+            process: InteractiveShellProcess::new(
+                "docker",
+                &["exec", "-it", "container-a", "/bin/sh"],
+            ),
+        }]
     );
 }
 
@@ -1388,7 +1401,7 @@ fn selecting_the_shell_detail_view_tab_is_inert() {
         "selecting Shell must not load provider details"
     );
     assert!(
-        app.state().pending_shell.is_none(),
+        app.state().resource_shell_sessions.is_empty(),
         "selecting Shell must not start a session"
     );
     let screen = render_to_text(app.state(), 100, 24);

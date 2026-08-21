@@ -174,6 +174,37 @@ impl ResourceShellRuntime {
             .map_err(|error| io::Error::other(error.to_string()))
     }
 
+    /// Keeps the emulator and its private PTY aligned with the Details
+    /// rectangle currently visible to the user.
+    pub fn resize(
+        &mut self,
+        session_id: ResourceShellSessionId,
+        columns: u16,
+        lines: u16,
+    ) -> io::Result<()> {
+        let Some(session) = self.sessions.get_mut(&session_id) else {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "unknown Resource Shell Session",
+            ));
+        };
+        let columns = columns.max(2);
+        let lines = lines.max(1);
+        session.terminal.lock().resize(TerminalSize {
+            columns: usize::from(columns),
+            lines: usize::from(lines),
+        });
+        session
+            .input
+            .send(Msg::Resize(WindowSize {
+                num_lines: lines,
+                num_cols: columns,
+                cell_width: 1,
+                cell_height: 1,
+            }))
+            .map_err(|error| io::Error::other(error.to_string()))
+    }
+
     /// Flattens the emulator's visible grid for a presentation adapter or
     /// acceptance test. Rich cell styling remains in the emulator.
     pub fn screen_text(&self, session_id: ResourceShellSessionId) -> Option<String> {

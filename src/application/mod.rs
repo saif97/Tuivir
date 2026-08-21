@@ -8,7 +8,7 @@ mod shell;
 mod workspace;
 
 pub use app::{
-    App, AppEvent, AppState, FocusedPane, HelpEntry, HelpOverlay, KeyHints, PendingShell,
+    App, AppEvent, AppState, FocusedPane, HelpEntry, HelpOverlay, KeyHints,
     ResourceCommandInvocation, RunningResourceCommand,
 };
 pub use command::{
@@ -23,8 +23,8 @@ pub use provider::{
     ResourceDetails, ResourcePanel, WorkspaceError, WorkspaceSnapshot, lifecycle_commands,
 };
 pub use shell::{
-    InteractiveShellOutcome, InteractiveShellProcess, ResourceShellEffect, ResourceShellSession,
-    ResourceShellSessionId, ResourceShellSessionLifecycle,
+    InteractiveShellProcess, ResourceShellEffect, ResourceShellSession, ResourceShellSessionId,
+    ResourceShellSessionLifecycle,
 };
 pub use workspace::{
     DetailCompletion, DetailContent, DetailLoad, DetailPosition, DetailSelection,

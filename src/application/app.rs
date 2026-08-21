@@ -2,10 +2,10 @@ use std::collections::HashMap;
 
 use super::workspace::{DetailCompletion, ProviderWorkspaceState};
 use super::{
-    Command, CommandRegistry, CommandScope, InteractiveShellOutcome, InteractiveShellProcess, Key,
-    NUMBERED_RESOURCE_PANEL_CAPACITY, PaneBoundary, ProviderRequest, ProviderRequestId,
-    ResourceCommand, ResourceDetails, ResourceShellEffect, ResourceShellSession,
-    ResourceShellSessionId, ResourceShellSessionLifecycle, WorkspaceError, WorkspaceSnapshot,
+    Command, CommandRegistry, CommandScope, Key, NUMBERED_RESOURCE_PANEL_CAPACITY, PaneBoundary,
+    ProviderRequest, ProviderRequestId, ResourceCommand, ResourceDetails, ResourceShellEffect,
+    ResourceShellSession, ResourceShellSessionId, ResourceShellSessionLifecycle, WorkspaceError,
+    WorkspaceSnapshot,
 };
 use crate::domain::{DetailViewId, Provider, ProviderId, ResourceState, ResourceTarget};
 
@@ -28,15 +28,6 @@ pub enum AppEvent {
         request_id: ProviderRequestId,
         provider_id: ProviderId,
         result: Result<WorkspaceSnapshot, WorkspaceError>,
-    },
-    /// An Interactive Shell has given the terminal back, however it ended.
-    ///
-    /// The shell it was opened for travels with the event, so what happened can
-    /// be reported against its Provider and Resource even though the pending
-    /// shell is long gone by then.
-    ShellClosed {
-        shell: PendingShell,
-        outcome: InteractiveShellOutcome,
     },
     /// The host created the live PTY runtime for this application-owned
     /// Resource Shell Session identity.
@@ -121,12 +112,6 @@ pub struct AppState {
     pub help_overlay: Option<HelpOverlay>,
     pub confirmation: Option<ResourceCommandInvocation>,
     pub command_error: Option<String>,
-    /// The Interactive Shell waiting to be given the terminal.
-    ///
-    /// The application cannot suspend a screen or run a process, so this is how
-    /// it asks: the host takes the shell, hands the terminal over, and reports
-    /// back with [`AppEvent::ShellClosed`].
-    pub pending_shell: Option<PendingShell>,
     /// Stable Resource Shell Session identities and user-visible lifecycles.
     /// The host owns all live terminal and process objects keyed by these IDs.
     pub resource_shell_sessions: Vec<ResourceShellSession>,
@@ -213,22 +198,6 @@ pub struct RunningResourceCommand {
     pub target: ResourceTarget,
     pub resource_name: String,
     pub command: ResourceCommand,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-/// One Interactive Shell the application wants the terminal for.
-///
-/// The Provider and Resource travel with the process because the application
-/// state cannot be consulted for them: by the time the shell ends, the shell
-/// has been taken out of the state and the refreshed snapshot may no longer
-/// contain the Resource at all.
-pub struct PendingShell {
-    pub provider_id: ProviderId,
-    pub provider_name: String,
-    pub target: ResourceTarget,
-    pub resource_name: String,
-    /// The Provider CLI process that takes over the terminal.
-    pub process: InteractiveShellProcess,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -356,7 +325,6 @@ impl App {
                 self.handle_provider_discovered(provider, error)
             }
             AppEvent::RefreshTimerElapsed => self.refresh_active_provider(),
-            AppEvent::ShellClosed { shell, outcome } => self.apply_shell_closed(shell, outcome),
             AppEvent::ResourceShellStarted { session_id } => {
                 self.apply_resource_shell_started(session_id);
                 Vec::new()
@@ -366,8 +334,7 @@ impl App {
                 Vec::new()
             }
             AppEvent::ResourceShellExited { session_id } => {
-                self.apply_resource_shell_exited(session_id);
-                Vec::new()
+                self.apply_resource_shell_exited(session_id)
             }
             AppEvent::RefreshCompleted {
                 request_id,
@@ -908,40 +875,6 @@ impl App {
         self.refresh_active_provider()
     }
 
-    /// Takes the Interactive Shell that is waiting for the terminal, if any.
-    ///
-    /// Taking it is what commits the application to the handover: a second call
-    /// finds nothing, so one keypress can only ever hand the terminal over once.
-    pub fn take_pending_shell(&mut self) -> Option<PendingShell> {
-        self.state.pending_shell.take()
-    }
-
-    /// Brings the Active Workspace back into line with whatever the user did
-    /// inside the shell.
-    ///
-    /// Only the Active Workspace is asked, and it is always the one the shell
-    /// was opened in: the handover blocks the event loop from the moment the
-    /// shell is taken until this runs, so nothing can have moved in between.
-    fn apply_shell_closed(
-        &mut self,
-        shell: PendingShell,
-        outcome: InteractiveShellOutcome,
-    ) -> Vec<ProviderRequest> {
-        // Only a shell that never started is reported. One that ran did what
-        // was asked of it whatever status it left, and clearing here would
-        // dismiss a failure the user has not read yet.
-        if let InteractiveShellOutcome::StartFailed(reason) = outcome {
-            self.state.command_error = Some(operation_failure(
-                &shell.provider_name,
-                "shell",
-                &shell.resource_name,
-                &shell.target,
-                &reason,
-            ));
-        }
-        self.refresh_active_provider()
-    }
-
     fn apply_resource_shell_started(&mut self, session_id: ResourceShellSessionId) {
         if let Some(session) = self
             .state
@@ -970,14 +903,24 @@ impl App {
         }
     }
 
-    fn apply_resource_shell_exited(&mut self, session_id: ResourceShellSessionId) {
-        if let Some(session) = self
+    fn apply_resource_shell_exited(
+        &mut self,
+        session_id: ResourceShellSessionId,
+    ) -> Vec<ProviderRequest> {
+        let Some(session) = self
             .state
             .resource_shell_sessions
             .iter_mut()
             .find(|session| session.id == session_id)
-        {
-            session.lifecycle = ResourceShellSessionLifecycle::Exited;
+        else {
+            return Vec::new();
+        };
+        let provider_id = session.provider_id.clone();
+        session.lifecycle = ResourceShellSessionLifecycle::Exited;
+        if self.is_active_provider(&provider_id) {
+            self.refresh_active_provider()
+        } else {
+            Vec::new()
         }
     }
 
@@ -1057,28 +1000,14 @@ impl App {
     /// unsupported operation stays unsupported rather than being attempted and
     /// refused.
     fn open_shell(&mut self) {
-        let Some(provider) = self.state.active_workspace() else {
-            return;
-        };
-        let provider_id = provider.id().clone();
-        let provider_name = provider.name().to_owned();
-        let Some(target) = provider.selected_resource_target() else {
-            return;
-        };
-        let Some(resource) = self.selected_resource() else {
-            return;
-        };
-        let Some(process) = resource.shell.clone() else {
-            return;
-        };
-        let resource_name = resource.name.clone();
-        self.state.pending_shell = Some(PendingShell {
-            provider_id,
-            provider_name,
-            target,
-            resource_name,
-            process,
-        });
+        let started = self
+            .state
+            .active_workspace_mut()
+            .is_some_and(ProviderWorkspaceState::select_resource_shell_tab);
+        if started {
+            self.state.focused_pane = FocusedPane::Details;
+            self.start_selected_resource_shell();
+        }
     }
 
     fn start_selected_resource_shell(&mut self) {

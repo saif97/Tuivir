@@ -10,24 +10,22 @@ use std::{
 };
 
 use crossterm::{
-    cursor::MoveTo,
     event::{
         self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
     },
     execute,
-    terminal::{Clear, ClearType, EnterAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::DefaultTerminal;
 use tokio::sync::mpsc;
 use tuivir::{
     application::{
-        App, AppEvent, Command, CommandRegistry, InteractiveShellOutcome, ProviderRequest,
-        ResourceShellEffect, ResourceShellSessionLifecycle,
+        App, AppEvent, Command, CommandRegistry, ProviderRequest, ResourceShellEffect,
+        ResourceShellSessionLifecycle,
     },
     infrastructure::{
         config::{Env, FileSystemReader, load},
         pane_boundary_state::{Env as StateEnv, StateStorage, save as save_pane_boundary},
-        process::{CliRunner, InteractiveRunner, ProcessSpec, TokioCliRunner},
+        process::{CliRunner, TokioCliRunner},
         resource_shell::{ResourceShellRuntime, ResourceShellRuntimeEvent},
         runtime::{ProviderRuntime, RefreshTimer},
     },
@@ -285,43 +283,6 @@ fn terminal_key_bytes(event: KeyEvent) -> Option<Vec<u8>> {
     Some(bytes)
 }
 
-/// The terminal and input-reader operations ordered by an interactive-shell
-/// handover. This is a host seam: neither application nor infrastructure owns
-/// the user's terminal lifecycle.
-trait ShellTerminal {
-    fn suspend(&mut self) -> io::Result<()>;
-    fn resume(&mut self) -> io::Result<()>;
-    fn discard_keys(&mut self);
-    fn resume_reading(&mut self);
-}
-
-fn open_pending_shell(
-    app: &mut App,
-    terminal: &mut dyn ShellTerminal,
-    runner: &dyn InteractiveRunner,
-) -> io::Result<Vec<ProviderRequest>> {
-    let Some(shell) = app.take_pending_shell() else {
-        return Ok(Vec::new());
-    };
-    terminal.suspend()?;
-    let result = runner.run_interactive(&ProcessSpec::from(&shell.process));
-    let resumed = take_the_terminal_back(terminal);
-    let outcome = result.err().and_then(|error| error.start_failure()).map_or(
-        InteractiveShellOutcome::Exited,
-        InteractiveShellOutcome::StartFailed,
-    );
-    let requests = app.update(AppEvent::ShellClosed { shell, outcome });
-    resumed?;
-    Ok(requests)
-}
-
-fn take_the_terminal_back(terminal: &mut dyn ShellTerminal) -> io::Result<()> {
-    terminal.resume()?;
-    terminal.discard_keys();
-    terminal.resume_reading();
-    Ok(())
-}
-
 async fn run(
     terminal: &mut DefaultTerminal,
     registry: CommandRegistry,
@@ -357,9 +318,15 @@ async fn run(
                 app.state().visible_resource_shell_session(),
                 measured.panes.as_ref(),
             ) && session.lifecycle == ResourceShellSessionLifecycle::Running
-                && let Some(screen) = resource_shell_runtime.screen_text(session.id)
             {
-                presentation::render_resource_shell_text(&screen, frame, panes.detail_content);
+                let _ = resource_shell_runtime.resize(
+                    session.id,
+                    panes.detail_content.width,
+                    panes.detail_content.height,
+                );
+                if let Some(screen) = resource_shell_runtime.screen_text(session.id) {
+                    presentation::render_resource_shell_text(&screen, frame, panes.detail_content);
+                }
             }
             layout = Some(measured);
         }) {
@@ -404,47 +371,6 @@ async fn run(
                 if control == ShellControl::Quit {
                     break Ok(());
                 }
-                // A key may have asked for the terminal. Handing it over blocks
-                // this loop until the shell exits, which is the point: Tuivir
-                // has no screen to draw on until it comes back.
-                //
-                // Asked only when a shell is actually waiting: `block_in_place`
-                // hands this worker's remaining tasks to another thread, which
-                // is worth doing for a shell and worth nothing for the `j` that
-                // moved the selection.
-                if app.state().pending_shell.is_some() {
-                    let mut host = Host {
-                        terminal: &mut *terminal,
-                        input: &mut input,
-                        keys: &mut key_rx,
-                    };
-                    // Moving those tasks aside is what keeps provider work
-                    // already in flight running while the shell holds the
-                    // terminal. It also makes the multi-threaded runtime a
-                    // stated requirement rather than a silent one: it panics on
-                    // a current-thread runtime.
-                    let handover = tokio::task::block_in_place(|| {
-                        open_pending_shell(&mut app, &mut host, &TokioCliRunner)
-                    });
-                    match handover {
-                        Ok(requests) => dispatch_all(
-                            &runtime,
-                            &completion_tx,
-                            &mut detail_dispatch,
-                            requests,
-                        ),
-                        // The screen never came back, so the modal that would
-                        // have carried the shell's own failure will never be
-                        // drawn. This exit line is the last place left to say
-                        // it, and it is printed once the terminal is restored.
-                        Err(error) => break Err(match app.state().command_error.as_deref() {
-                            Some(shell) => {
-                                io::Error::new(error.kind(), format!("{error}; {shell}"))
-                            }
-                            None => error,
-                        }),
-                    }
-                }
             }
             Some(event) = completion_rx.recv() => {
                 let requests = app.update(event);
@@ -484,83 +410,8 @@ async fn run(
     result
 }
 
-/// The real terminal and the thread competing with a shell for its keystrokes.
-struct Host<'a> {
-    terminal: &'a mut DefaultTerminal,
-    input: &'a mut InputThread,
-    /// The keys the reader has already published, which the discard step empties
-    /// before anything is allowed to read again.
-    keys: &'a mut mpsc::UnboundedReceiver<Event>,
-}
-
-impl ShellTerminal for Host<'_> {
-    fn suspend(&mut self) -> io::Result<()> {
-        // Reading stops before the screen is given up: a thread still polling
-        // crossterm would swallow the keystrokes meant for the shell.
-        self.input.stop();
-        // Raw mode goes; the alternate screen stays. Leaving it would uncover
-        // the terminal Tuivir was launched from, and the shell would open on
-        // top of whatever was already there — the user's own scrollback, with a
-        // container's prompt in the middle of it. Wiping the alternate screen
-        // instead opens the shell on nothing but itself, and leaves the real
-        // terminal untouched for Tuivir to hand back whole at the end.
-        disable_raw_mode()?;
-        // Mouse capture goes with it: the Interactive Shell owns the whole
-        // terminal, and escape sequences meant for Tuivir would otherwise be
-        // typed into the shell.
-        execute!(
-            io::stdout(),
-            DisableMouseCapture,
-            Clear(ClearType::All),
-            MoveTo(0, 0)
-        )
-    }
-
-    fn resume(&mut self) -> io::Result<()> {
-        // Re-entering raw mode and the alternate screen directly rather than
-        // building a second terminal with `try_init`: that installs a panic hook
-        // wrapping the previous one, so a session with several shells in it
-        // would nest a fresh hook per shell.
-        enable_raw_mode()?;
-        // Mouse capture comes back with the screen it belongs to.
-        execute!(io::stdout(), EnableMouseCapture)?;
-        // Asking for the alternate screen Tuivir never gave up costs nothing,
-        // and is what recovers the one case where it did lose it: a full-screen
-        // program run inside the shell — an editor in the container — leaves the
-        // alternate screen on its way out and drops the terminal back onto the
-        // screen Tuivir must not draw over.
-        execute!(io::stdout(), EnterAlternateScreen)?;
-        // The shell wrote all over the screen Tuivir last drew, so nothing that
-        // survives the handover is worth keeping — and without this the next
-        // draw would diff against a buffer describing a screen that is gone.
-        //
-        // Clearing asks the terminal where its cursor is and waits for the
-        // answer, which is a second reason this step must finish before
-        // `resume_reading`: an input thread would take that answer for a
-        // keystroke and leave the clear waiting for a reply already eaten.
-        self.terminal.clear()?;
-        Ok(())
-    }
-
-    fn discard_keys(&mut self) {
-        // Draining what the reader published rather than what the terminal
-        // still holds: the reader is stopped, so anything it had time to send
-        // before noticing is already here, and nothing new can arrive until
-        // `resume_reading`.
-        while self.keys.try_recv().is_ok() {}
-    }
-
-    fn resume_reading(&mut self) {
-        self.input.start_again();
-    }
-}
-
-/// The blocking terminal reader, publishing keys as application input.
-///
-/// It is stoppable because an Interactive Shell needs the keystrokes more than
-/// Tuivir does, and restartable because Tuivir needs them back afterwards.
+/// The blocking terminal reader publishes ordinary Tuivir input events.
 struct InputThread {
-    keys: mpsc::UnboundedSender<Event>,
     stop: Arc<AtomicBool>,
     handle: Option<thread::JoinHandle<()>>,
 }
@@ -570,7 +421,6 @@ impl InputThread {
         let stop = Arc::new(AtomicBool::new(false));
         let handle = spawn_input_thread(keys.clone(), Arc::clone(&stop));
         Self {
-            keys,
             stop,
             handle: Some(handle),
         }
@@ -583,14 +433,6 @@ impl InputThread {
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();
         }
-    }
-
-    fn start_again(&mut self) {
-        self.stop.store(false, Ordering::Relaxed);
-        self.handle = Some(spawn_input_thread(
-            self.keys.clone(),
-            Arc::clone(&self.stop),
-        ));
     }
 }
 
