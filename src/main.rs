@@ -376,8 +376,12 @@ async fn run(
                     panes.detail_content.width,
                     panes.detail_content.height,
                 );
-                if let Some(screen) = resource_shell_runtime.screen_text(session.id) {
-                    presentation::render_resource_shell_text(&screen, frame, panes.detail_content);
+                if let Some(screen) = resource_shell_runtime.screen(session.id) {
+                    presentation::render_resource_shell_screen(
+                        &screen,
+                        frame,
+                        panes.detail_content,
+                    );
                 }
             }
             layout = Some(measured);

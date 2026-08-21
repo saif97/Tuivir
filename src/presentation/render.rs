@@ -16,6 +16,21 @@ use crate::application::{
 };
 use crate::domain::{ResourceState, ResourceTarget};
 
+/// A host-adapted terminal screen. The presentation layer owns no PTY or
+/// emulator object; it only receives visible cells and their resolved style.
+#[derive(Clone, Debug)]
+pub struct ResourceShellScreen {
+    pub lines: Vec<Vec<ResourceShellCell>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ResourceShellCell {
+    pub text: String,
+    pub foreground: Option<Color>,
+    pub background: Option<Color>,
+    pub cursor: bool,
+}
+
 use super::screen_layout::{
     DETAIL_VIEW_GAP, ScreenLayout, active_target_label, command_error_area, confirmation_area,
     detail_view_label, gap, help_overlay_area, provider_selector_label, provider_workspace_label,
@@ -651,6 +666,40 @@ fn render_resource_shell_state(
 /// by the host adapter without giving application state terminal-engine types.
 pub fn render_resource_shell_text(text: &str, frame: &mut Frame<'_>, area: Rect) {
     frame.render_widget(Paragraph::new(text), area);
+}
+
+/// Renders the host-adapted terminal grid without flattening terminal colour
+/// or cursor state into ordinary Details text.
+pub fn render_resource_shell_screen(
+    screen: &ResourceShellScreen,
+    frame: &mut Frame<'_>,
+    area: Rect,
+) {
+    let lines = screen
+        .lines
+        .iter()
+        .map(|cells| {
+            Line::from(
+                cells
+                    .iter()
+                    .map(|cell| {
+                        let mut style = Style::default();
+                        if let Some(foreground) = cell.foreground {
+                            style = style.fg(foreground);
+                        }
+                        if let Some(background) = cell.background {
+                            style = style.bg(background);
+                        }
+                        if cell.cursor {
+                            style = style.add_modifier(Modifier::REVERSED);
+                        }
+                        Span::styled(cell.text.clone(), style)
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect::<Vec<_>>();
+    frame.render_widget(Paragraph::new(lines), area);
 }
 
 fn detail_view_tab(title: &str, selected: bool) -> Span<'static> {

@@ -14,6 +14,7 @@ use super::{
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
+use ratatui::style::Color;
 use tuivir::{
     application::Command,
     application::{
@@ -129,6 +130,33 @@ fn a_real_pty_shell_wakes_the_host_and_keeps_its_rendered_output() {
             .expect("live session screen")
             .contains("hello from pty")
     );
+}
+
+#[test]
+fn a_real_pty_shell_keeps_colour_unicode_and_cursor_in_its_screen() {
+    let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    let mut runtime = ResourceShellRuntime::default();
+    let session = tuivir::application::ResourceShellSessionId::new(8);
+    runtime
+        .start(
+            session,
+            &ResourceShellProcess::new("/bin/sh", &["-c", "printf '\\033[31mred\\033[0m 鮫'"]),
+            80,
+            24,
+            events,
+        )
+        .expect("local shell starts in a PTY");
+    let _ = receiver.blocking_recv().expect("PTY output wakes the host");
+
+    let screen = runtime.screen(session).expect("live session screen");
+    let cells = screen.lines.into_iter().flatten().collect::<Vec<_>>();
+    assert!(
+        cells
+            .iter()
+            .any(|cell| cell.text == "r" && cell.foreground == Some(Color::Red))
+    );
+    assert!(cells.iter().any(|cell| cell.text == "鮫"));
+    assert!(cells.iter().any(|cell| cell.cursor));
 }
 
 #[test]

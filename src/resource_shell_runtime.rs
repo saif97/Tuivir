@@ -20,10 +20,13 @@ use alacritty_terminal::{
     sync::FairMutex,
     term::{Config as TermConfig, Osc52},
     tty::{self, Options, Shell},
+    vte::ansi::{Color as AnsiColor, NamedColor},
 };
+use ratatui::style::Color;
 use tokio::sync::mpsc::UnboundedSender;
 
 use tuivir::application::{ResourceShellProcess, ResourceShellSessionId};
+use tuivir::presentation::{ResourceShellCell, ResourceShellScreen};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// A fact the private PTY runtime publishes to its host.
@@ -216,8 +219,39 @@ impl ResourceShellRuntime {
         let _ = session.event_loop.join();
     }
 
-    /// Flattens the emulator's visible grid for a presentation adapter or
-    /// acceptance test. Rich cell styling remains in the emulator.
+    /// Adapts the emulator's visible grid into presentation-neutral cells.
+    pub fn screen(&self, session_id: ResourceShellSessionId) -> Option<ResourceShellScreen> {
+        let session = self.sessions.get(&session_id)?;
+        let terminal = session.terminal.lock();
+        let content = terminal.renderable_content();
+        let columns = terminal.grid().columns();
+        let cursor = content.cursor.point;
+        let cursor_index = usize::try_from(cursor.line.0)
+            .ok()
+            .and_then(|line| line.checked_mul(columns))
+            .and_then(|offset| offset.checked_add(cursor.column.0));
+        let mut lines = Vec::new();
+        let mut line = Vec::new();
+        for (index, cell) in content.display_iter.enumerate() {
+            let mut text = cell.c.to_string();
+            if let Some(zerowidth) = cell.zerowidth() {
+                text.extend(zerowidth);
+            }
+            line.push(ResourceShellCell {
+                text,
+                foreground: terminal_color(cell.fg),
+                background: terminal_color(cell.bg),
+                cursor: cursor_index == Some(index),
+            });
+            if (index + 1) % columns == 0 {
+                lines.push(line);
+                line = Vec::new();
+            }
+        }
+        Some(ResourceShellScreen { lines })
+    }
+
+    /// Flattens the emulator's visible grid for focused acceptance tests.
     pub fn screen_text(&self, session_id: ResourceShellSessionId) -> Option<String> {
         let session = self.sessions.get(&session_id)?;
         let terminal = session.terminal.lock();
@@ -235,5 +269,29 @@ impl ResourceShellRuntime {
             }
         }
         Some(lines.join("\n"))
+    }
+}
+
+fn terminal_color(color: AnsiColor) -> Option<Color> {
+    match color {
+        AnsiColor::Spec(rgb) => Some(Color::Rgb(rgb.r, rgb.g, rgb.b)),
+        AnsiColor::Indexed(index) => Some(Color::Indexed(index)),
+        AnsiColor::Named(NamedColor::Black) => Some(Color::Black),
+        AnsiColor::Named(NamedColor::Red) => Some(Color::Red),
+        AnsiColor::Named(NamedColor::Green) => Some(Color::Green),
+        AnsiColor::Named(NamedColor::Yellow) => Some(Color::Yellow),
+        AnsiColor::Named(NamedColor::Blue) => Some(Color::Blue),
+        AnsiColor::Named(NamedColor::Magenta) => Some(Color::Magenta),
+        AnsiColor::Named(NamedColor::Cyan) => Some(Color::Cyan),
+        AnsiColor::Named(NamedColor::White) => Some(Color::Gray),
+        AnsiColor::Named(NamedColor::BrightBlack) => Some(Color::DarkGray),
+        AnsiColor::Named(NamedColor::BrightRed) => Some(Color::LightRed),
+        AnsiColor::Named(NamedColor::BrightGreen) => Some(Color::LightGreen),
+        AnsiColor::Named(NamedColor::BrightYellow) => Some(Color::LightYellow),
+        AnsiColor::Named(NamedColor::BrightBlue) => Some(Color::LightBlue),
+        AnsiColor::Named(NamedColor::BrightMagenta) => Some(Color::LightMagenta),
+        AnsiColor::Named(NamedColor::BrightCyan) => Some(Color::LightCyan),
+        AnsiColor::Named(NamedColor::BrightWhite) => Some(Color::White),
+        AnsiColor::Named(_) => None,
     }
 }
