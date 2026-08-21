@@ -53,6 +53,10 @@ pub enum ResourceShellEffect {
         session: ResourceShellSession,
         process: InteractiveShellProcess,
     },
+    /// The session's Resource disappeared from an accepted Provider snapshot.
+    /// The host must terminate and reap its private runtime before forgetting
+    /// the matching application identity.
+    Stop { session_id: ResourceShellSessionId },
 }
 
 impl InteractiveShellProcess {

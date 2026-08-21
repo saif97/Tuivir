@@ -769,11 +769,39 @@ impl App {
                 )));
             }
             Ok(snapshot) => {
-                provider.reconcile_snapshot(snapshot);
+                provider.reconcile_snapshot(snapshot.clone());
+                self.stop_sessions_for_missing_resources(&provider_id, &snapshot);
             }
             Err(error) => provider.record_load_error(error),
         }
         Vec::new()
+    }
+
+    /// Ends sessions whose stable Resource identity is no longer present in an
+    /// accepted snapshot. A failed refresh deliberately does not pass here:
+    /// uncertainty must never kill a live user session.
+    fn stop_sessions_for_missing_resources(
+        &mut self,
+        provider_id: &ProviderId,
+        snapshot: &WorkspaceSnapshot,
+    ) {
+        let stopped: Vec<_> = self
+            .state
+            .resource_shell_sessions
+            .iter()
+            .filter(|session| {
+                &session.provider_id == provider_id && snapshot.resource(&session.target).is_none()
+            })
+            .map(|session| session.id)
+            .collect();
+        self.state.resource_shell_sessions.retain(|session| {
+            &session.provider_id != provider_id || snapshot.resource(&session.target).is_some()
+        });
+        self.pending_resource_shell_effects.extend(
+            stopped
+                .into_iter()
+                .map(|session_id| ResourceShellEffect::Stop { session_id }),
+        );
     }
 
     /// Brings the loaded detail view into line with what is on screen.

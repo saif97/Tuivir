@@ -205,6 +205,17 @@ impl ResourceShellRuntime {
             .map_err(|error| io::Error::other(error.to_string()))
     }
 
+    /// Terminates and reaps the private PTY event loop for one session.
+    /// Dropping Alacritty's Unix PTY sends SIGHUP to the child and waits for it,
+    /// so no provider process outlives the Resource that owned it.
+    pub fn stop(&mut self, session_id: ResourceShellSessionId) {
+        let Some(session) = self.sessions.remove(&session_id) else {
+            return;
+        };
+        let _ = session.input.send(Msg::Shutdown);
+        let _ = session._event_loop.join();
+    }
+
     /// Flattens the emulator's visible grid for a presentation adapter or
     /// acceptance test. Rich cell styling remains in the emulator.
     pub fn screen_text(&self, session_id: ResourceShellSessionId) -> Option<String> {

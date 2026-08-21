@@ -237,23 +237,27 @@ fn dispatch_resource_shell_effects(
         .unwrap_or(ratatui::layout::Rect::new(0, 0, 80, 24));
     let mut requests = Vec::new();
     for effect in app.take_resource_shell_effects() {
-        let ResourceShellEffect::Start { session, process } = effect;
-        let event = match runtime.start(
-            session.id,
-            &process,
-            size.width.max(2),
-            size.height.max(1),
-            events.clone(),
-        ) {
-            Ok(()) => AppEvent::ResourceShellStarted {
-                session_id: session.id,
-            },
-            Err(error) => AppEvent::ResourceShellStartFailed {
-                session_id: session.id,
-                reason: error.to_string(),
-            },
-        };
-        requests.extend(app.update(event));
+        match effect {
+            ResourceShellEffect::Start { session, process } => {
+                let event = match runtime.start(
+                    session.id,
+                    &process,
+                    size.width.max(2),
+                    size.height.max(1),
+                    events.clone(),
+                ) {
+                    Ok(()) => AppEvent::ResourceShellStarted {
+                        session_id: session.id,
+                    },
+                    Err(error) => AppEvent::ResourceShellStartFailed {
+                        session_id: session.id,
+                        reason: error.to_string(),
+                    },
+                };
+                requests.extend(app.update(event));
+            }
+            ResourceShellEffect::Stop { session_id } => runtime.stop(session_id),
+        }
     }
     requests
 }

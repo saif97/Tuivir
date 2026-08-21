@@ -69,3 +69,23 @@ fn resizing_a_live_session_updates_its_pty_before_the_next_command() {
     let screen = runtime.screen_text(session).expect("live session screen");
     panic!("resized terminal never reported its dimensions:\n{screen}");
 }
+
+#[test]
+fn stopping_a_live_session_forgets_and_reaps_its_pty() {
+    let (events, _receiver) = tokio::sync::mpsc::unbounded_channel();
+    let mut runtime = ResourceShellRuntime::default();
+    let session = ResourceShellSessionId::new(3);
+    runtime
+        .start(
+            session,
+            &InteractiveShellProcess::new("/bin/sh", &["-c", "sleep 30"]),
+            80,
+            24,
+            events,
+        )
+        .expect("local shell starts in a PTY");
+
+    runtime.stop(session);
+
+    assert!(runtime.screen_text(session).is_none());
+}
