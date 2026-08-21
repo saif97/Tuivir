@@ -16,6 +16,13 @@ pub struct InteractiveShellProcess {
 /// Session lifetime.
 pub struct ResourceShellSessionId(pub(crate) u64);
 
+impl ResourceShellSessionId {
+    /// Reconstructs an application-allocated identity at a host seam.
+    pub fn new(value: u64) -> Self {
+        Self(value)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// The user-visible lifecycle of a Resource Shell Session.
 pub enum ResourceShellSessionLifecycle {
