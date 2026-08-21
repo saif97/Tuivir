@@ -611,6 +611,13 @@ fn render_details_panel(
             .is_some_and(|selected| selected.id == detail_view.id);
         spans.push(detail_view_tab(&detail_view.title, selected));
     }
+    if view.is_some_and(|view| view.offers_shell) {
+        spans.push(Span::raw(gap(DETAIL_VIEW_GAP)));
+        spans.push(detail_view_tab(
+            "Shell",
+            view.is_some_and(|view| view.shell_selected),
+        ));
+    }
     frame.render_widget(Paragraph::new(Line::from(spans)), rows[0]);
 }
 

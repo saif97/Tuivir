@@ -1368,6 +1368,29 @@ fn the_shell_key_asks_for_the_terminal_for_the_selected_container() {
     );
 }
 
+/// Shell availability is provider-declared, but the Shell Detail View Tab is
+/// supplied by Tuivir. Selecting it is purely navigational: a persistent
+/// Resource Shell Session starts only after an explicit Enter gesture.
+#[test]
+fn selecting_the_shell_detail_view_tab_is_inert() {
+    let mut app = App::new();
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
+
+    let requests = app.invoke(Command::ActivateDetailView(4));
+
+    assert!(requests.is_empty(), "selecting Shell must not load provider details");
+    assert!(
+        app.state().pending_shell.is_none(),
+        "selecting Shell must not start a session"
+    );
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(screen.contains("[ Shell ]"), "rendered screen:\n{screen}");
+}
+
 #[test]
 fn unavailable_resource_command_is_disabled_in_help_and_does_not_dispatch() {
     let mut app = App::new();
