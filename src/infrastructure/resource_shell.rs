@@ -8,7 +8,7 @@ use std::{
     borrow::Cow,
     collections::HashMap,
     io,
-    sync::{Arc, Mutex, mpsc::Sender},
+    sync::{Arc, Mutex},
     thread::JoinHandle,
 };
 
@@ -21,6 +21,7 @@ use alacritty_terminal::{
     term::{Config as TermConfig, Osc52},
     tty::{self, Options, Shell},
 };
+use tokio::sync::mpsc::UnboundedSender;
 
 use crate::application::{InteractiveShellProcess, ResourceShellSessionId};
 
@@ -47,7 +48,7 @@ struct LiveResourceShell {
 #[derive(Clone)]
 struct SessionListener {
     session_id: ResourceShellSessionId,
-    events: Sender<ResourceShellRuntimeEvent>,
+    events: UnboundedSender<ResourceShellRuntimeEvent>,
     input: Arc<Mutex<Option<EventLoopSender>>>,
 }
 
@@ -55,14 +56,14 @@ impl EventListener for SessionListener {
     fn send_event(&self, event: Event) {
         match event {
             Event::Wakeup => {
-                let _ = self
-                    .events
-                    .send(ResourceShellRuntimeEvent::OutputReady { session_id: self.session_id });
+                let _ = self.events.send(ResourceShellRuntimeEvent::OutputReady {
+                    session_id: self.session_id,
+                });
             }
             Event::ChildExit(_) => {
-                let _ = self
-                    .events
-                    .send(ResourceShellRuntimeEvent::Exited { session_id: self.session_id });
+                let _ = self.events.send(ResourceShellRuntimeEvent::Exited {
+                    session_id: self.session_id,
+                });
             }
             // Terminal queries are part of the bidirectional terminal
             // protocol. Clipboard requests are intentionally ignored.
@@ -105,7 +106,7 @@ impl ResourceShellRuntime {
         process: &InteractiveShellProcess,
         columns: u16,
         lines: u16,
-        events: Sender<ResourceShellRuntimeEvent>,
+        events: UnboundedSender<ResourceShellRuntimeEvent>,
     ) -> io::Result<()> {
         if self.sessions.contains_key(&session_id) {
             return Err(io::Error::new(
@@ -162,7 +163,10 @@ impl ResourceShellRuntime {
     /// Encodes input bytes supplied by the host into the session's PTY.
     pub fn write(&self, session_id: ResourceShellSessionId, bytes: Vec<u8>) -> io::Result<()> {
         let Some(session) = self.sessions.get(&session_id) else {
-            return Err(io::Error::new(io::ErrorKind::NotFound, "unknown Resource Shell Session"));
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "unknown Resource Shell Session",
+            ));
         };
         session
             .input

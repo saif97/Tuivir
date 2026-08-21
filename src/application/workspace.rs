@@ -388,7 +388,12 @@ impl ProviderWorkspaceState {
                 .iter()
                 .find(|navigation| navigation.panel_id == panel.id)
                 .and_then(|navigation| navigation.selected_resource.as_ref())
-                .and_then(|selected| panel.resources.iter().find(|resource| &resource.id == selected))
+                .and_then(|selected| {
+                    panel
+                        .resources
+                        .iter()
+                        .find(|resource| &resource.id == selected)
+                })
                 .is_some_and(|resource| resource.shell.is_some());
             let current = workspace
                 .selected_detail_view
@@ -410,9 +415,7 @@ impl ProviderWorkspaceState {
                 })
                 .unwrap_or(0);
             let tab_count = panel.detail_views.len() + 1 + usize::from(offers_shell);
-            let next = (current as isize + delta)
-                .rem_euclid(tab_count as isize)
-                as usize;
+            let next = (current as isize + delta).rem_euclid(tab_count as isize) as usize;
             workspace.selected_detail_view = Some(if next == 0 {
                 DetailViewId::new(OVERVIEW_DETAIL_VIEW_ID)
             } else if offers_shell && next == panel.detail_views.len() + 1 {
@@ -439,7 +442,12 @@ impl ProviderWorkspaceState {
                 .iter()
                 .find(|navigation| navigation.panel_id == panel.id)
                 .and_then(|navigation| navigation.selected_resource.as_ref())
-                .and_then(|selected| panel.resources.iter().find(|resource| &resource.id == selected))
+                .and_then(|selected| {
+                    panel
+                        .resources
+                        .iter()
+                        .find(|resource| &resource.id == selected)
+                })
                 .is_some_and(|resource| resource.shell.is_some());
             let Some(view_id) = (index == 0)
                 .then(|| DetailViewId::new(OVERVIEW_DETAIL_VIEW_ID))
@@ -800,7 +808,9 @@ impl ProviderWorkspaceState {
             .as_ref()
             .and_then(|selected| snapshot.panel_for(selected))
             .map_or(&[][..], |panel| panel.detail_views.as_slice());
-        let offers_shell = self.selected_resource().is_some_and(|resource| resource.shell.is_some());
+        let offers_shell = self
+            .selected_resource()
+            .is_some_and(|resource| resource.shell.is_some());
         let still_offered = self.selected_detail_view.as_ref().is_some_and(|selected| {
             selected.0 == OVERVIEW_DETAIL_VIEW_ID
                 || (selected.0 == RESOURCE_SHELL_DETAIL_VIEW_ID && offers_shell)

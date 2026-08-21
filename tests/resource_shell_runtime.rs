@@ -1,5 +1,3 @@
-use std::{sync::mpsc, time::Duration};
-
 use tuivir::{
     application::{InteractiveShellProcess, ResourceShellSessionId},
     infrastructure::resource_shell::{ResourceShellRuntime, ResourceShellRuntimeEvent},
@@ -7,7 +5,7 @@ use tuivir::{
 
 #[test]
 fn a_real_pty_shell_wakes_the_host_and_keeps_its_rendered_output() {
-    let (events, receiver) = mpsc::channel();
+    let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel();
     let mut runtime = ResourceShellRuntime::default();
     let session = ResourceShellSessionId::new(1);
 
@@ -23,9 +21,7 @@ fn a_real_pty_shell_wakes_the_host_and_keeps_its_rendered_output() {
 
     let woke_for_output = (0..3).any(|_| {
         matches!(
-            receiver
-                .recv_timeout(Duration::from_secs(2))
-                .expect("PTY output wakes the host"),
+            receiver.blocking_recv().expect("PTY output wakes the host"),
             ResourceShellRuntimeEvent::OutputReady { session_id } if session_id == session
         )
     });

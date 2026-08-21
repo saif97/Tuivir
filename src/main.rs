@@ -11,7 +11,9 @@ use std::{
 
 use crossterm::{
     cursor::MoveTo,
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEvent},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
+    },
     execute,
     terminal::{Clear, ClearType, EnterAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -20,11 +22,13 @@ use tokio::sync::mpsc;
 use tuivir::{
     application::{
         App, AppEvent, Command, CommandRegistry, InteractiveShellOutcome, ProviderRequest,
+        ResourceShellEffect, ResourceShellSessionLifecycle,
     },
     infrastructure::{
         config::{Env, FileSystemReader, load},
         pane_boundary_state::{Env as StateEnv, StateStorage, save as save_pane_boundary},
         process::{CliRunner, InteractiveRunner, ProcessSpec, TokioCliRunner},
+        resource_shell::{ResourceShellRuntime, ResourceShellRuntimeEvent},
         runtime::{ProviderRuntime, RefreshTimer},
     },
     presentation,
@@ -221,6 +225,66 @@ fn persist_pane_boundary(app: &mut App, env: &StateEnv, storage: &dyn StateStora
     }
 }
 
+/// Starts application-requested sessions at the host boundary. Process, PTY,
+/// event-loop, and emulator ownership never enter `AppState`.
+fn dispatch_resource_shell_effects(
+    app: &mut App,
+    runtime: &mut ResourceShellRuntime,
+    events: &mpsc::UnboundedSender<ResourceShellRuntimeEvent>,
+    layout: Option<&presentation::ScreenLayout>,
+) -> Vec<ProviderRequest> {
+    let size = layout
+        .and_then(|layout| layout.panes.as_ref())
+        .map(|panes| panes.detail_content)
+        .unwrap_or(ratatui::layout::Rect::new(0, 0, 80, 24));
+    let mut requests = Vec::new();
+    for effect in app.take_resource_shell_effects() {
+        let ResourceShellEffect::Start { session, process } = effect;
+        let event = match runtime.start(
+            session.id,
+            &process,
+            size.width.max(2),
+            size.height.max(1),
+            events.clone(),
+        ) {
+            Ok(()) => AppEvent::ResourceShellStarted {
+                session_id: session.id,
+            },
+            Err(error) => AppEvent::ResourceShellStartFailed {
+                session_id: session.id,
+                reason: error.to_string(),
+            },
+        };
+        requests.extend(app.update(event));
+    }
+    requests
+}
+
+/// Encodes the common interactive keys without asking the application to know
+/// about PTYs or terminal engines. Alacritty remains the owner of output
+/// parsing and terminal state.
+fn terminal_key_bytes(event: KeyEvent) -> Option<Vec<u8>> {
+    let bytes = match event.code {
+        KeyCode::Char(character) if event.modifiers.contains(KeyModifiers::CONTROL) => {
+            vec![(character.to_ascii_uppercase() as u8) & 0x1f]
+        }
+        KeyCode::Char(character) => character.to_string().into_bytes(),
+        KeyCode::Enter => vec![b'\r'],
+        KeyCode::Backspace => vec![0x7f],
+        KeyCode::Esc => vec![0x1b],
+        KeyCode::Tab => vec![b'\t'],
+        KeyCode::Up => b"\x1b[A".to_vec(),
+        KeyCode::Down => b"\x1b[B".to_vec(),
+        KeyCode::Right => b"\x1b[C".to_vec(),
+        KeyCode::Left => b"\x1b[D".to_vec(),
+        KeyCode::Home => b"\x1b[H".to_vec(),
+        KeyCode::End => b"\x1b[F".to_vec(),
+        KeyCode::Delete => b"\x1b[3~".to_vec(),
+        _ => return None,
+    };
+    Some(bytes)
+}
+
 /// The terminal and input-reader operations ordered by an interactive-shell
 /// handover. This is a host seam: neither application nor infrastructure owns
 /// the user's terminal lifecycle.
@@ -271,6 +335,8 @@ async fn run(
     let state_storage = FileSystemReader;
     let mut clipboard = Osc52Clipboard(io::stdout());
     let mut detail_dispatch = DetailDispatchQueue::new(DETAIL_DISPATCH_QUIET_PERIOD);
+    let (resource_shell_events, mut resource_shell_event_rx) = mpsc::unbounded_channel();
+    let mut resource_shell_runtime = ResourceShellRuntime::default();
 
     for discovered in runtime.discover().await {
         let requests = app.update(discovered.into_event());
@@ -287,6 +353,14 @@ async fn run(
         if let Err(error) = terminal.draw(|frame| {
             let measured = presentation::ScreenLayout::measure(app.state(), frame.area());
             presentation::render_with_layout(app.state(), frame, &measured);
+            if let (Some(session), Some(panes)) = (
+                app.state().visible_resource_shell_session(),
+                measured.panes.as_ref(),
+            ) && session.lifecycle == ResourceShellSessionLifecycle::Running
+                && let Some(screen) = resource_shell_runtime.screen_text(session.id)
+            {
+                presentation::render_resource_shell_text(&screen, frame, panes.detail_content);
+            }
             layout = Some(measured);
         }) {
             break Err(error);
@@ -298,9 +372,17 @@ async fn run(
             Some(event) = key_rx.recv() => {
                 let (control, requests) = match event {
                     Event::Key(key) => {
-                        let command = resolve_key_command(&app, key);
-                        let (control, requests) = handle_command(&mut app, command);
-                        (control, requests)
+                        if let Some(session) = app.state().visible_resource_shell_session()
+                            && session.lifecycle == ResourceShellSessionLifecycle::Running
+                            && let Some(bytes) = terminal_key_bytes(key)
+                        {
+                            let _ = resource_shell_runtime.write(session.id, bytes);
+                            (ShellControl::Continue, Vec::new())
+                        } else {
+                            let command = resolve_key_command(&app, key);
+                            let (control, requests) = handle_command(&mut app, command);
+                            (control, requests)
+                        }
                     }
                     Event::Mouse(mouse) => {
                         let command = resolve_mouse_command(&app, mouse, layout.as_ref());
@@ -310,6 +392,13 @@ async fn run(
                     _ => (ShellControl::Continue, Vec::new()),
                 };
                 persist_pane_boundary(&mut app, &state_env, &state_storage);
+                dispatch_all(&runtime, &completion_tx, &mut detail_dispatch, requests);
+                let requests = dispatch_resource_shell_effects(
+                    &mut app,
+                    &mut resource_shell_runtime,
+                    &resource_shell_events,
+                    layout.as_ref(),
+                );
                 dispatch_all(&runtime, &completion_tx, &mut detail_dispatch, requests);
                 copy_pending_details(&mut app, &mut clipboard);
                 if control == ShellControl::Quit {
@@ -359,6 +448,22 @@ async fn run(
             }
             Some(event) = completion_rx.recv() => {
                 let requests = app.update(event);
+                dispatch_all(&runtime, &completion_tx, &mut detail_dispatch, requests);
+                let requests = dispatch_resource_shell_effects(
+                    &mut app,
+                    &mut resource_shell_runtime,
+                    &resource_shell_events,
+                    layout.as_ref(),
+                );
+                dispatch_all(&runtime, &completion_tx, &mut detail_dispatch, requests);
+            }
+            Some(event) = resource_shell_event_rx.recv() => {
+                let requests = match event {
+                    ResourceShellRuntimeEvent::OutputReady { .. } => Vec::new(),
+                    ResourceShellRuntimeEvent::Exited { session_id } => {
+                        app.update(AppEvent::ResourceShellExited { session_id })
+                    }
+                };
                 dispatch_all(&runtime, &completion_tx, &mut detail_dispatch, requests);
             }
             _ = refresh_timer.tick() => {

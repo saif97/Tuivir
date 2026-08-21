@@ -38,6 +38,21 @@ pub enum AppEvent {
         shell: PendingShell,
         outcome: InteractiveShellOutcome,
     },
+    /// The host created the live PTY runtime for this application-owned
+    /// Resource Shell Session identity.
+    ResourceShellStarted {
+        session_id: ResourceShellSessionId,
+    },
+    /// The host could not create the PTY or provider process. The session
+    /// remains visible so Enter can retry it.
+    ResourceShellStartFailed {
+        session_id: ResourceShellSessionId,
+        reason: String,
+    },
+    /// The private child process ended after it had started.
+    ResourceShellExited {
+        session_id: ResourceShellSessionId,
+    },
     ResourceCommandCompleted {
         request_id: ProviderRequestId,
         provider_id: ProviderId,
@@ -140,6 +155,19 @@ impl AppState {
     pub fn active_workspace(&self) -> Option<&ProviderWorkspaceState> {
         self.active_provider
             .and_then(|active| self.providers.get(active))
+    }
+
+    /// The session whose Shell Detail View Tab is currently visible, if it has
+    /// already been explicitly started.
+    pub fn visible_resource_shell_session(&self) -> Option<&ResourceShellSession> {
+        let workspace = self.active_workspace()?;
+        if !workspace.selected_resource_shell_tab() {
+            return None;
+        }
+        let target = workspace.selected_resource_target()?;
+        self.resource_shell_sessions
+            .iter()
+            .find(|session| session.provider_id == *workspace.id() && session.target == target)
     }
 
     fn active_workspace_mut(&mut self) -> Option<&mut ProviderWorkspaceState> {
@@ -329,6 +357,18 @@ impl App {
             }
             AppEvent::RefreshTimerElapsed => self.refresh_active_provider(),
             AppEvent::ShellClosed { shell, outcome } => self.apply_shell_closed(shell, outcome),
+            AppEvent::ResourceShellStarted { session_id } => {
+                self.apply_resource_shell_started(session_id);
+                Vec::new()
+            }
+            AppEvent::ResourceShellStartFailed { session_id, reason } => {
+                self.apply_resource_shell_start_failed(session_id, reason);
+                Vec::new()
+            }
+            AppEvent::ResourceShellExited { session_id } => {
+                self.apply_resource_shell_exited(session_id);
+                Vec::new()
+            }
             AppEvent::RefreshCompleted {
                 request_id,
                 provider_id,
@@ -902,6 +942,45 @@ impl App {
         self.refresh_active_provider()
     }
 
+    fn apply_resource_shell_started(&mut self, session_id: ResourceShellSessionId) {
+        if let Some(session) = self
+            .state
+            .resource_shell_sessions
+            .iter_mut()
+            .find(|session| session.id == session_id)
+            && session.lifecycle == ResourceShellSessionLifecycle::Starting
+        {
+            session.lifecycle = ResourceShellSessionLifecycle::Running;
+        }
+    }
+
+    fn apply_resource_shell_start_failed(
+        &mut self,
+        session_id: ResourceShellSessionId,
+        reason: String,
+    ) {
+        if let Some(session) = self
+            .state
+            .resource_shell_sessions
+            .iter_mut()
+            .find(|session| session.id == session_id)
+            && session.lifecycle == ResourceShellSessionLifecycle::Starting
+        {
+            session.lifecycle = ResourceShellSessionLifecycle::StartFailed(reason);
+        }
+    }
+
+    fn apply_resource_shell_exited(&mut self, session_id: ResourceShellSessionId) {
+        if let Some(session) = self
+            .state
+            .resource_shell_sessions
+            .iter_mut()
+            .find(|session| session.id == session_id)
+        {
+            session.lifecycle = ResourceShellSessionLifecycle::Exited;
+        }
+    }
+
     fn is_active_provider(&self, provider_id: &ProviderId) -> bool {
         self.state
             .active_workspace()
@@ -1026,14 +1105,15 @@ impl App {
                 && session.target == target
                 && matches!(
                     session.lifecycle,
-                    ResourceShellSessionLifecycle::Starting | ResourceShellSessionLifecycle::Running
+                    ResourceShellSessionLifecycle::Starting
+                        | ResourceShellSessionLifecycle::Running
                 )
         }) {
             return;
         }
-        self.state.resource_shell_sessions.retain(|session| {
-            session.provider_id != provider_id || session.target != target
-        });
+        self.state
+            .resource_shell_sessions
+            .retain(|session| session.provider_id != provider_id || session.target != target);
         let session = ResourceShellSession {
             id: ResourceShellSessionId(self.next_resource_shell_session_id),
             provider_id,

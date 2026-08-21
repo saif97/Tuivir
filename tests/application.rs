@@ -1383,7 +1383,10 @@ fn selecting_the_shell_detail_view_tab_is_inert() {
 
     let requests = app.invoke(Command::ActivateDetailView(4));
 
-    assert!(requests.is_empty(), "selecting Shell must not load provider details");
+    assert!(
+        requests.is_empty(),
+        "selecting Shell must not load provider details"
+    );
     assert!(
         app.state().pending_shell.is_none(),
         "selecting Shell must not start a session"
@@ -1402,10 +1405,7 @@ fn enter_on_the_shell_tab_starts_one_session_with_the_provider_command() {
     );
     app.invoke(Command::ActivateDetailView(4));
 
-    let (_, requests) = handle_key(
-        &mut app,
-        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
-    );
+    let (_, requests) = handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
     assert!(requests.is_empty(), "a Resource Shell Session is host work");
     let session = app
@@ -1425,6 +1425,32 @@ fn enter_on_the_shell_tab_starts_one_session_with_the_provider_command() {
             ),
         }]
     );
+}
+
+#[test]
+fn resource_shell_runtime_events_update_only_the_matching_session_lifecycle() {
+    let mut app = App::new();
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
+    app.invoke(Command::ActivateDetailView(4));
+    app.invoke(Command::StartResourceShell);
+    let session_id = app.state().resource_shell_sessions[0].id;
+
+    app.update(AppEvent::ResourceShellStarted { session_id });
+    assert_eq!(
+        app.state().resource_shell_sessions[0].lifecycle,
+        ResourceShellSessionLifecycle::Running
+    );
+
+    app.update(AppEvent::ResourceShellExited { session_id });
+    assert_eq!(
+        app.state().resource_shell_sessions[0].lifecycle,
+        ResourceShellSessionLifecycle::Exited
+    );
+    assert!(render_to_text(app.state(), 100, 24).contains("Session exited"));
 }
 
 #[test]
@@ -2684,9 +2710,7 @@ fn detail_views_wrap_around_at_both_ends() {
     );
 
     app.invoke(Command::PreviousDetailView);
-    assert!(
-        render_to_text(app.state(), 100, 24).contains("Logs  Stats  Inspect  [ Shell ]")
-    );
+    assert!(render_to_text(app.state(), 100, 24).contains("Logs  Stats  Inspect  [ Shell ]"));
 
     app.invoke(Command::NextDetailView);
     assert!(
