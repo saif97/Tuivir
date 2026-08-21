@@ -540,6 +540,7 @@ pub(super) fn pane_block(title: String, focused: bool, chrome: PaneChrome) -> Bl
         .borders(borders)
 }
 
+#[allow(clippy::too_many_arguments)] // Rendering receives the already-measured host frame.
 fn render_details_panel(
     provider_name: &str,
     view: Option<&WorkspaceView<'_>>,
