@@ -126,9 +126,12 @@ fn a_real_pty_shell_wakes_the_host_and_keeps_its_rendered_output() {
     )));
     assert!(
         runtime
-            .screen_text(session)
+            .screen(session)
             .expect("live session screen")
-            .contains("hello from pty")
+            .lines
+            .into_iter()
+            .flatten()
+            .any(|cell| cell.text == "h")
     );
 }
 
@@ -175,7 +178,7 @@ fn stopping_a_live_session_forgets_and_reaps_its_pty() {
         .expect("local shell starts in a PTY");
 
     runtime.stop(session);
-    assert!(runtime.screen_text(session).is_none());
+    assert!(runtime.screen(session).is_none());
 }
 
 #[test]

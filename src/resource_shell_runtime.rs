@@ -250,26 +250,6 @@ impl ResourceShellRuntime {
         }
         Some(ResourceShellScreen { lines })
     }
-
-    /// Flattens the emulator's visible grid for focused acceptance tests.
-    pub fn screen_text(&self, session_id: ResourceShellSessionId) -> Option<String> {
-        let session = self.sessions.get(&session_id)?;
-        let terminal = session.terminal.lock();
-        let columns = terminal.grid().columns();
-        let mut lines = Vec::new();
-        let mut line = String::new();
-        for (index, cell) in terminal.renderable_content().display_iter.enumerate() {
-            line.push(cell.c);
-            if let Some(zerowidth) = cell.zerowidth() {
-                line.extend(zerowidth);
-            }
-            if (index + 1) % columns == 0 {
-                lines.push(line.trim_end().to_owned());
-                line = String::new();
-            }
-        }
-        Some(lines.join("\n"))
-    }
 }
 
 fn terminal_color(color: AnsiColor) -> Option<Color> {
