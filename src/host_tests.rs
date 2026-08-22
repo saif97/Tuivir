@@ -247,8 +247,8 @@ fn a_prefix_followed_by_an_unrecognised_key_reaches_the_resource_shell_session()
         ShellKeyRoute::ToTuivir
     ));
     assert!(matches!(
-        router.route(session, KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE)),
-        ShellKeyRoute::ToPty(bytes) if bytes == b"\x02\x1bOP"
+        router.route(session, KeyEvent::new(KeyCode::F(13), KeyModifiers::NONE)),
+        ShellKeyRoute::ToPty(bytes) if bytes == b"\x02\x1b[25~"
     ));
 }
 

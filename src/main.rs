@@ -477,6 +477,7 @@ fn terminal_key_bytes(event: KeyEvent) -> Option<Vec<u8>> {
             [15, 17, 18, 19, 20, 21, 23, 24][usize::from(number - 5)]
         )
         .into_bytes(),
+        KeyCode::F(number) => format!("\x1b[{}~", 12 + number).into_bytes(),
         _ => return None,
     };
     Some(bytes)
