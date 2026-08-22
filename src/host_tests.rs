@@ -253,6 +253,28 @@ fn a_prefix_followed_by_an_unrecognised_key_reaches_the_resource_shell_session()
 }
 
 #[test]
+fn focused_resource_shell_session_receives_escape_ctrl_c_and_function_keys() {
+    let session = tuivir::application::ResourceShellSessionId::new(7);
+    let mut router = ShellInputRouter::default();
+
+    assert!(matches!(
+        router.route(session, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        ShellKeyRoute::ToPty(bytes) if bytes == [0x1b]
+    ));
+    assert!(matches!(
+        router.route(
+            session,
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)
+        ),
+        ShellKeyRoute::ToPty(bytes) if bytes == [0x03]
+    ));
+    assert!(matches!(
+        router.route(session, KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE)),
+        ShellKeyRoute::ToPty(bytes) if bytes == b"\x1bOP"
+    ));
+}
+
+#[test]
 fn multiline_unicode_paste_uses_the_resource_shell_sessions_bracketed_paste_mode() {
     let session = tuivir::application::ResourceShellSessionId::new(7);
     let mut router = ShellInputRouter::default();
