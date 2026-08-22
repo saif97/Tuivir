@@ -18,7 +18,7 @@ use alacritty_terminal::{
     event_loop::{EventLoop, EventLoopSender, Msg, State},
     grid::Dimensions,
     sync::FairMutex,
-    term::{Config as TermConfig, Osc52},
+    term::{Config as TermConfig, Osc52, TermMode},
     tty::{self, Options, Shell},
     vte::ansi::{Color as AnsiColor, NamedColor},
 };
@@ -33,6 +33,15 @@ use tuivir::presentation::{ResourceShellCell, ResourceShellScreen};
 pub enum ResourceShellRuntimeEvent {
     OutputReady { session_id: ResourceShellSessionId },
     Exited { session_id: ResourceShellSessionId },
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+/// Input protocol modes currently requested by a Resource Shell Session.
+///
+/// The host reads this neutral value to encode user input without allowing
+/// Alacritty types into application state.
+pub struct ResourceShellInputModes {
+    pub bracketed_paste: bool,
 }
 
 #[derive(Default)]
@@ -175,6 +184,18 @@ impl ResourceShellRuntime {
             .input
             .send(Msg::Input(Cow::Owned(bytes)))
             .map_err(|error| io::Error::other(error.to_string()))
+    }
+
+    /// Reports the input protocol modes active in a live session.
+    pub fn input_modes(
+        &self,
+        session_id: ResourceShellSessionId,
+    ) -> Option<ResourceShellInputModes> {
+        let session = self.sessions.get(&session_id)?;
+        let terminal = session.terminal.lock();
+        Some(ResourceShellInputModes {
+            bracketed_paste: terminal.mode().contains(TermMode::BRACKETED_PASTE),
+        })
     }
 
     /// Keeps the emulator and its private PTY aligned with the Details

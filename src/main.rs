@@ -11,7 +11,8 @@ use std::{
 
 use crossterm::{
     event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
+        self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        Event, KeyCode, KeyEvent, KeyModifiers,
     },
     execute,
 };
@@ -58,7 +59,7 @@ async fn main() -> io::Result<()> {
     let pane_boundary =
         tuivir::infrastructure::pane_boundary_state::load(&state_env, &FileSystemReader);
     let mut terminal = ratatui::init();
-    if let Err(error) = execute!(io::stdout(), EnableMouseCapture) {
+    if let Err(error) = execute!(io::stdout(), EnableMouseCapture, EnableBracketedPaste) {
         ratatui::restore();
         return Err(error);
     }
@@ -68,11 +69,11 @@ async fn main() -> io::Result<()> {
     // at every movement of the mouse.
     let restore_screen = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic| {
-        let _ = execute!(io::stdout(), DisableMouseCapture);
+        let _ = execute!(io::stdout(), DisableMouseCapture, DisableBracketedPaste);
         restore_screen(panic);
     }));
     let result = run(&mut terminal, registry, pane_boundary, state_env).await;
-    let _ = execute!(io::stdout(), DisableMouseCapture);
+    let _ = execute!(io::stdout(), DisableMouseCapture, DisableBracketedPaste);
     ratatui::restore();
     result
 }
@@ -131,6 +132,31 @@ impl ShellInputRouter {
             return ShellKeyRoute::ToTuivir;
         }
         terminal_key_bytes(key).map_or(ShellKeyRoute::ToTuivir, ShellKeyRoute::ToPty)
+    }
+
+    fn route_paste(
+        &mut self,
+        session_id: ResourceShellSessionId,
+        text: &str,
+        bracketed_paste: bool,
+    ) -> ShellKeyRoute {
+        if self.active_session != Some(session_id) {
+            self.active_session = Some(session_id);
+            self.focused = true;
+            self.prefix_pending = false;
+        }
+        if !self.focused {
+            return ShellKeyRoute::ToTuivir;
+        }
+        let mut bytes = Vec::with_capacity(text.len() + if bracketed_paste { 12 } else { 0 });
+        if bracketed_paste {
+            bytes.extend_from_slice(b"\x1b[200~");
+        }
+        bytes.extend_from_slice(text.as_bytes());
+        if bracketed_paste {
+            bytes.extend_from_slice(b"\x1b[201~");
+        }
+        ShellKeyRoute::ToPty(bytes)
     }
 }
 
@@ -432,6 +458,25 @@ async fn run(
                         let requests = command.map_or_else(Vec::new, |command| app.invoke(command));
                         (ShellControl::Continue, requests)
                     }
+                    Event::Paste(text) => {
+                        if let Some(session) = app
+                            .state()
+                            .visible_resource_shell_session()
+                            .filter(|session| {
+                                session.lifecycle == ResourceShellSessionLifecycle::Running
+                            })
+                        {
+                            let bracketed_paste = resource_shell_runtime
+                                .input_modes(session.id)
+                                .is_some_and(|modes| modes.bracketed_paste);
+                            if let ShellKeyRoute::ToPty(bytes) =
+                                shell_input.route_paste(session.id, &text, bracketed_paste)
+                            {
+                                let _ = resource_shell_runtime.write(session.id, bytes);
+                            }
+                        }
+                        (ShellControl::Continue, Vec::new())
+                    }
                     _ => (ShellControl::Continue, Vec::new()),
                 };
                 persist_pane_boundary(&mut app, &state_env, &state_storage);
@@ -541,7 +586,7 @@ fn spawn_input_thread(
         while !stop.load(Ordering::Relaxed) {
             match event::poll(Duration::from_millis(100)) {
                 Ok(true) => match event::read() {
-                    Ok(event @ (Event::Key(_) | Event::Mouse(_))) => {
+                    Ok(event @ (Event::Key(_) | Event::Mouse(_) | Event::Paste(_))) => {
                         if keys.send(event).is_err() {
                             break;
                         }

@@ -252,6 +252,25 @@ fn a_prefix_followed_by_an_unrecognised_key_reaches_the_resource_shell_session()
     ));
 }
 
+#[test]
+fn multiline_unicode_paste_uses_the_resource_shell_sessions_bracketed_paste_mode() {
+    let session = tuivir::application::ResourceShellSessionId::new(7);
+    let mut router = ShellInputRouter::default();
+    let _ = router.route(
+        session,
+        KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE),
+    );
+
+    assert!(matches!(
+        router.route_paste(session, "first\n鮫", true),
+        ShellKeyRoute::ToPty(bytes) if bytes == b"\x1b[200~first\n\xe9\xae\xab\x1b[201~"
+    ));
+    assert!(matches!(
+        router.route_paste(session, "first\n鮫", false),
+        ShellKeyRoute::ToPty(bytes) if bytes == "first\n鮫".as_bytes()
+    ));
+}
+
 fn docker_discovery() -> ProviderDiscovery {
     ProviderDiscovery::new(
         Provider::new(
