@@ -17,6 +17,7 @@ use alacritty_terminal::{
     event::{Event, EventListener, WindowSize},
     event_loop::{EventLoop, EventLoopSender, Msg, State},
     grid::Dimensions,
+    grid::Scroll,
     sync::FairMutex,
     term::{Config as TermConfig, Osc52, TermMode},
     tty::{self, Options, Shell},
@@ -42,6 +43,8 @@ pub enum ResourceShellRuntimeEvent {
 /// Alacritty types into application state.
 pub struct ResourceShellInputModes {
     pub bracketed_paste: bool,
+    pub mouse_reporting: bool,
+    pub sgr_mouse: bool,
 }
 
 #[derive(Default)]
@@ -55,6 +58,7 @@ struct LiveResourceShell {
     terminal: Arc<FairMutex<Term<SessionListener>>>,
     input: EventLoopSender,
     event_loop: JoinHandle<(EventLoop<tty::Pty, SessionListener>, State)>,
+    selection: Option<((u16, u16), (u16, u16))>,
 }
 
 #[derive(Clone)]
@@ -167,6 +171,7 @@ impl ResourceShellRuntime {
                 terminal,
                 input: event_loop_sender,
                 event_loop,
+                selection: None,
             },
         );
         Ok(())
@@ -195,7 +200,59 @@ impl ResourceShellRuntime {
         let terminal = session.terminal.lock();
         Some(ResourceShellInputModes {
             bracketed_paste: terminal.mode().contains(TermMode::BRACKETED_PASTE),
+            mouse_reporting: terminal.mode().intersects(TermMode::MOUSE_MODE),
+            sgr_mouse: terminal.mode().contains(TermMode::SGR_MOUSE),
         })
+    }
+
+    /// Moves the visible terminal viewport through its bounded scrollback.
+    pub fn scroll(&mut self, session_id: ResourceShellSessionId, lines: i32) -> io::Result<()> {
+        let Some(session) = self.sessions.get_mut(&session_id) else {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "unknown Resource Shell Session",
+            ));
+        };
+        session.terminal.lock().scroll_display(Scroll::Delta(lines));
+        Ok(())
+    }
+
+    /// Records a user-owned text selection in the visible terminal viewport.
+    pub fn select(
+        &mut self,
+        session_id: ResourceShellSessionId,
+        start: (u16, u16),
+        end: (u16, u16),
+    ) -> io::Result<()> {
+        let Some(session) = self.sessions.get_mut(&session_id) else {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "unknown Resource Shell Session",
+            ));
+        };
+        session.selection = Some((start, end));
+        Ok(())
+    }
+
+    /// Returns the text explicitly selected by the user, without accepting
+    /// terminal-originated clipboard requests.
+    pub fn selected_text(&self, session_id: ResourceShellSessionId) -> Option<String> {
+        let screen = self.screen(session_id)?;
+        let text = screen
+            .lines
+            .into_iter()
+            .map(|line| {
+                line.into_iter()
+                    .filter(|cell| cell.selected)
+                    .map(|cell| cell.text)
+                    .collect::<String>()
+                    .trim_end()
+                    .to_owned()
+            })
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
+        (!text.is_empty()).then_some(text)
     }
 
     /// Keeps the emulator and its private PTY aligned with the Details
@@ -263,6 +320,15 @@ impl ResourceShellRuntime {
                 foreground: terminal_color(cell.fg),
                 background: terminal_color(cell.bg),
                 cursor: cursor_index == Some(index),
+                selected: session.selection.is_some_and(|(start, end)| {
+                    let position = ((index % columns) as u16, (index / columns) as u16);
+                    let (first, last) = if start <= end {
+                        (start, end)
+                    } else {
+                        (end, start)
+                    };
+                    position >= first && position <= last
+                }),
             });
             if (index + 1) % columns == 0 {
                 lines.push(line);
