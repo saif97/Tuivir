@@ -275,6 +275,25 @@ fn focused_resource_shell_session_receives_escape_ctrl_c_and_function_keys() {
 }
 
 #[test]
+fn multiline_unicode_paste_uses_the_resource_shell_sessions_bracketed_paste_mode() {
+    let session = tuivir::application::ResourceShellSessionId::new(7);
+    let mut router = ShellInputRouter::default();
+    let _ = router.route(
+        session,
+        KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE),
+    );
+
+    assert!(matches!(
+        router.route_paste(session, "first\n鮫", true),
+        ShellKeyRoute::ToPty(bytes) if bytes == b"\x1b[200~first\n\xe9\xae\xab\x1b[201~"
+    ));
+    assert!(matches!(
+        router.route_paste(session, "first\n鮫", false),
+        ShellKeyRoute::ToPty(bytes) if bytes == "first\n鮫".as_bytes()
+    ));
+}
+
+#[test]
 fn a_focused_resource_shell_session_receives_mouse_coordinates_relative_to_its_viewport() {
     let session = tuivir::application::ResourceShellSessionId::new(7);
     let mut router = ShellInputRouter::default();
