@@ -9,8 +9,8 @@ use std::{
 
 use super::{
     Clipboard, DetailDispatchQueue, Osc52Clipboard, ResourceShellRuntime,
-    ResourceShellRuntimeEvent, ShellInputRouter, ShellKeyRoute, handle_key, handle_mouse,
-    persist_pane_boundary,
+    ResourceShellRuntimeEvent, ShellInputRouter, ShellKeyRoute, ShellPointerRoute, handle_key,
+    handle_mouse, persist_pane_boundary,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
@@ -202,7 +202,7 @@ fn ctrl_b_q_releases_a_resource_shell_sessions_keyboard_focus() {
             session,
             KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)
         ),
-        ShellKeyRoute::ToTuivir
+        ShellKeyRoute::Released
     ));
     assert!(matches!(
         router.route(
@@ -210,6 +210,168 @@ fn ctrl_b_q_releases_a_resource_shell_sessions_keyboard_focus() {
             KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)
         ),
         ShellKeyRoute::ToTuivir
+    ));
+}
+
+#[test]
+fn ctrl_b_ctrl_b_sends_one_literal_prefix_to_the_resource_shell_session() {
+    let session = tuivir::application::ResourceShellSessionId::new(7);
+    let mut router = ShellInputRouter::default();
+
+    assert!(matches!(
+        router.route(
+            session,
+            KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)
+        ),
+        ShellKeyRoute::ToTuivir
+    ));
+    assert!(matches!(
+        router.route(
+            session,
+            KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)
+        ),
+        ShellKeyRoute::ToPty(bytes) if bytes == [0x02]
+    ));
+}
+
+#[test]
+fn a_prefix_followed_by_an_unrecognised_key_reaches_the_resource_shell_session() {
+    let session = tuivir::application::ResourceShellSessionId::new(7);
+    let mut router = ShellInputRouter::default();
+
+    assert!(matches!(
+        router.route(
+            session,
+            KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)
+        ),
+        ShellKeyRoute::ToTuivir
+    ));
+    assert!(matches!(
+        router.route(session, KeyEvent::new(KeyCode::F(13), KeyModifiers::NONE)),
+        ShellKeyRoute::ToPty(bytes) if bytes == b"\x02\x1b[25~"
+    ));
+}
+
+#[test]
+fn focused_resource_shell_session_receives_escape_ctrl_c_and_function_keys() {
+    let session = tuivir::application::ResourceShellSessionId::new(7);
+    let mut router = ShellInputRouter::default();
+
+    assert!(matches!(
+        router.route(session, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        ShellKeyRoute::ToPty(bytes) if bytes == [0x1b]
+    ));
+    assert!(matches!(
+        router.route(
+            session,
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)
+        ),
+        ShellKeyRoute::ToPty(bytes) if bytes == [0x03]
+    ));
+    assert!(matches!(
+        router.route(session, KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE)),
+        ShellKeyRoute::ToPty(bytes) if bytes == b"\x1bOP"
+    ));
+}
+
+#[test]
+fn multiline_unicode_paste_uses_the_resource_shell_sessions_bracketed_paste_mode() {
+    let session = tuivir::application::ResourceShellSessionId::new(7);
+    let mut router = ShellInputRouter::default();
+    let _ = router.route(
+        session,
+        KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE),
+    );
+
+    assert!(matches!(
+        router.route_paste(session, "first\n鮫", true),
+        ShellKeyRoute::ToPty(bytes) if bytes == b"\x1b[200~first\n\xe9\xae\xab\x1b[201~"
+    ));
+    assert!(matches!(
+        router.route_paste(session, "first\n鮫", false),
+        ShellKeyRoute::ToPty(bytes) if bytes == "first\n鮫".as_bytes()
+    ));
+}
+
+#[test]
+fn a_focused_resource_shell_session_receives_mouse_coordinates_relative_to_its_viewport() {
+    let session = tuivir::application::ResourceShellSessionId::new(7);
+    let mut router = ShellInputRouter::default();
+    let _ = router.route(
+        session,
+        KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE),
+    );
+
+    assert!(matches!(
+        router.route_mouse(
+            session,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: 12,
+                row: 23,
+                modifiers: KeyModifiers::NONE,
+            },
+            Rect::new(10, 20, 40, 10),
+            true,
+            true,
+        ),
+        ShellPointerRoute::ToPty(bytes) if bytes == b"\x1b[<0;3;4M"
+    ));
+}
+
+#[test]
+fn dragging_or_wheeling_without_mouse_reporting_selects_or_scrolls_without_shell_input() {
+    let session = tuivir::application::ResourceShellSessionId::new(7);
+    let mut router = ShellInputRouter::default();
+    let area = Rect::new(10, 20, 40, 10);
+
+    assert!(matches!(
+        router.route_mouse(
+            session,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: 12,
+                row: 23,
+                modifiers: KeyModifiers::NONE,
+            },
+            area,
+            false,
+            false,
+        ),
+        ShellPointerRoute::None
+    ));
+    assert!(matches!(
+        router.route_mouse(
+            session,
+            MouseEvent {
+                kind: MouseEventKind::Drag(MouseButton::Left),
+                column: 15,
+                row: 24,
+                modifiers: KeyModifiers::NONE,
+            },
+            area,
+            false,
+            false,
+        ),
+        ShellPointerRoute::Select {
+            start: (2, 3),
+            end: (5, 4)
+        }
+    ));
+    assert!(matches!(
+        router.route_mouse(
+            session,
+            MouseEvent {
+                kind: MouseEventKind::ScrollUp,
+                column: 12,
+                row: 23,
+                modifiers: KeyModifiers::NONE,
+            },
+            area,
+            false,
+            false,
+        ),
+        ShellPointerRoute::Scroll { lines: 3 }
     ));
 }
 
