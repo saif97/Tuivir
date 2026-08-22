@@ -321,7 +321,9 @@ impl ResourceShellRuntime {
                 background: terminal_color(cell.bg),
                 cursor: cursor_index == Some(index),
                 selected: session.selection.is_some_and(|(start, end)| {
-                    let position = ((index % columns) as u16, (index / columns) as u16);
+                    let position = ((index / columns) as u16, (index % columns) as u16);
+                    let start = (start.1, start.0);
+                    let end = (end.1, end.0);
                     let (first, last) = if start <= end {
                         (start, end)
                     } else {
