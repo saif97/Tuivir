@@ -230,7 +230,13 @@ impl ResourceShellRuntime {
                 "unknown Resource Shell Session",
             ));
         };
-        session.selection = Some((start, end));
+        let start = (start.1, start.0);
+        let end = (end.1, end.0);
+        session.selection = Some(if start <= end {
+            (start, end)
+        } else {
+            (end, start)
+        });
         Ok(())
     }
 
@@ -322,14 +328,7 @@ impl ResourceShellRuntime {
                 cursor: cursor_index == Some(index),
                 selected: session.selection.is_some_and(|(start, end)| {
                     let position = ((index / columns) as u16, (index % columns) as u16);
-                    let start = (start.1, start.0);
-                    let end = (end.1, end.0);
-                    let (first, last) = if start <= end {
-                        (start, end)
-                    } else {
-                        (end, start)
-                    };
-                    position >= first && position <= last
+                    position >= start && position <= end
                 }),
             });
             if (index + 1) % columns == 0 {

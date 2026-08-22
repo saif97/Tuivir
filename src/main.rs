@@ -92,8 +92,7 @@ struct ShellInputRouter {
     active_session: Option<ResourceShellSessionId>,
     focused: bool,
     prefix_pending: bool,
-    pending_selection: Option<(ResourceShellSessionId, (u16, u16))>,
-    dragging_selection: bool,
+    selection_gesture: ShellSelectionGesture,
 }
 
 enum ShellKeyRoute {
@@ -108,6 +107,20 @@ enum ShellPointerRoute {
     Scroll { lines: i32 },
     ToTuivir,
     None,
+}
+
+#[derive(Default)]
+enum ShellSelectionGesture {
+    #[default]
+    Idle,
+    Pressed {
+        session_id: ResourceShellSessionId,
+        start: (u16, u16),
+    },
+    Dragging {
+        session_id: ResourceShellSessionId,
+        start: (u16, u16),
+    },
 }
 
 impl ShellInputRouter {
@@ -181,8 +194,7 @@ impl ShellInputRouter {
         let Some(position) = terminal_position(viewport, event) else {
             self.focused = false;
             self.prefix_pending = false;
-            self.pending_selection = None;
-            self.dragging_selection = false;
+            self.selection_gesture = ShellSelectionGesture::Idle;
             return ShellPointerRoute::ToTuivir;
         };
         if self.active_session != Some(session_id) {
@@ -200,19 +212,26 @@ impl ShellInputRouter {
                     self.focused = true;
                     ShellPointerRoute::None
                 } else {
-                    self.pending_selection = Some((session_id, position));
-                    self.dragging_selection = false;
+                    self.selection_gesture = ShellSelectionGesture::Pressed {
+                        session_id,
+                        start: position,
+                    };
                     ShellPointerRoute::None
                 }
             }
             MouseEventKind::Drag(MouseButton::Left) if !mouse_reporting => {
-                let Some((selected_session, start)) = self.pending_selection else {
-                    return ShellPointerRoute::None;
+                let start = match self.selection_gesture {
+                    ShellSelectionGesture::Pressed {
+                        session_id: selected_session,
+                        start,
+                    }
+                    | ShellSelectionGesture::Dragging {
+                        session_id: selected_session,
+                        start,
+                    } if selected_session == session_id => start,
+                    _ => return ShellPointerRoute::None,
                 };
-                if selected_session != session_id {
-                    return ShellPointerRoute::None;
-                }
-                self.dragging_selection = true;
+                self.selection_gesture = ShellSelectionGesture::Dragging { session_id, start };
                 self.focused = false;
                 ShellPointerRoute::Select {
                     start,
@@ -220,11 +239,11 @@ impl ShellInputRouter {
                 }
             }
             MouseEventKind::Up(MouseButton::Left) if !mouse_reporting => {
-                let selection = self.pending_selection.take();
-                if !self.dragging_selection && selection.is_some_and(|(id, _)| id == session_id) {
+                let gesture = std::mem::take(&mut self.selection_gesture);
+                if matches!(gesture, ShellSelectionGesture::Pressed { session_id: id, .. } if id == session_id)
+                {
                     self.focused = true;
                 }
-                self.dragging_selection = false;
                 ShellPointerRoute::None
             }
             MouseEventKind::ScrollUp if !mouse_reporting => ShellPointerRoute::Scroll { lines: 3 },
