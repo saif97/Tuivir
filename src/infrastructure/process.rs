@@ -1,7 +1,5 @@
 use std::{future::Future, io, pin::Pin, process::Stdio};
 
-use crate::application::InteractiveShellProcess;
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// A program and explicit argument list, never a shell command string.
 pub struct ProcessSpec {
@@ -14,15 +12,6 @@ impl ProcessSpec {
         Self {
             program: program.to_owned(),
             args: args.iter().map(|arg| (*arg).to_owned()).collect(),
-        }
-    }
-}
-
-impl From<&InteractiveShellProcess> for ProcessSpec {
-    fn from(process: &InteractiveShellProcess) -> Self {
-        Self {
-            program: process.program().to_owned(),
-            args: process.args().to_vec(),
         }
     }
 }
@@ -75,28 +64,7 @@ pub enum ProcessError {
     Exited(ProcessFailure),
 }
 
-impl ProcessError {
-    /// Why the process never ran at all, or `None` for one that ran.
-    ///
-    /// Only a process that never started failed at anything the caller
-    /// promised. One that ran and exited non-zero reported a status about its
-    /// own work, which for an Interactive Shell is the status of the last
-    /// command the user typed into it — theirs to read, not Tuivir's to
-    /// complain about.
-    ///
-    /// The caller already knows which Provider and Resource it asked about, so
-    /// this supplies only the part it cannot: what stopped the process from
-    /// starting. `provider_cli_error` words the same two failures as a whole
-    /// sentence that names the Provider itself, for callers with no sentence of
-    /// their own to put this inside — change one and read the other.
-    pub fn start_failure(&self) -> Option<String> {
-        match self {
-            Self::ExecutableNotFound => Some("the CLI is no longer available".to_owned()),
-            Self::SpawnFailed(reason) => Some(format!("the CLI could not be started: {reason}")),
-            Self::Exited(_) => None,
-        }
-    }
-}
+impl ProcessError {}
 
 /// System-boundary abstraction for running short-lived provider CLI processes.
 ///
@@ -111,44 +79,7 @@ pub trait CliRunner: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = Result<ProcessOutput, ProcessError>> + Send + 'a>>;
 }
 
-/// Runs a Provider CLI process that takes over Tuivir's terminal.
-///
-/// This is the opposite of [`CliRunner`] in the one way that matters: the
-/// process inherits the user's own stdin, stdout, and stderr instead of having
-/// them captured, because an Interactive Shell is only a shell if the user can
-/// type into it. Nothing it printed is available afterwards.
-///
-/// Running is blocking and deliberately so: Tuivir has given up the screen and
-/// has nothing to do until the shell exits.
-pub trait InteractiveRunner: Send + Sync {
-    fn run_interactive(&self, process: &ProcessSpec) -> Result<(), ProcessError>;
-}
-
 pub struct TokioCliRunner;
-
-impl InteractiveRunner for TokioCliRunner {
-    fn run_interactive(&self, process: &ProcessSpec) -> Result<(), ProcessError> {
-        let status = std::process::Command::new(&process.program)
-            .args(&process.args)
-            .status()
-            .map_err(|error| match error.kind() {
-                io::ErrorKind::NotFound => ProcessError::ExecutableNotFound,
-                _ => ProcessError::SpawnFailed(error.to_string()),
-            })?;
-
-        if status.success() {
-            Ok(())
-        } else {
-            // Both streams went to the terminal the user was looking at, so
-            // there is nothing left to quote: the status is the whole story.
-            Err(ProcessError::Exited(ProcessFailure {
-                exit_code: status.code(),
-                stdout: String::new(),
-                stderr: String::new(),
-            }))
-        }
-    }
-}
 
 impl CliRunner for TokioCliRunner {
     fn run<'a>(

@@ -250,6 +250,10 @@ fn measure_panes(state: &AppState, workspace: Rect) -> Option<WorkspacePanes> {
         detail_views.push(Rect::new(tab_x, detail_rows[0].y, width, 1));
         tab_x = tab_x.saturating_add(width + DETAIL_VIEW_GAP);
     }
+    if view.offers_shell {
+        let width = label_width(&detail_view_label("Shell", view.shell_selected));
+        detail_views.push(Rect::new(tab_x, detail_rows[0].y, width, 1));
+    }
 
     Some(WorkspacePanes {
         resources,
