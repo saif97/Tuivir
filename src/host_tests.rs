@@ -213,6 +213,45 @@ fn ctrl_b_q_releases_a_resource_shell_sessions_keyboard_focus() {
     ));
 }
 
+#[test]
+fn ctrl_b_ctrl_b_sends_one_literal_prefix_to_the_resource_shell_session() {
+    let session = tuivir::application::ResourceShellSessionId::new(7);
+    let mut router = ShellInputRouter::default();
+
+    assert!(matches!(
+        router.route(
+            session,
+            KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)
+        ),
+        ShellKeyRoute::ToTuivir
+    ));
+    assert!(matches!(
+        router.route(
+            session,
+            KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)
+        ),
+        ShellKeyRoute::ToPty(bytes) if bytes == [0x02]
+    ));
+}
+
+#[test]
+fn a_prefix_followed_by_an_unrecognised_key_reaches_the_resource_shell_session() {
+    let session = tuivir::application::ResourceShellSessionId::new(7);
+    let mut router = ShellInputRouter::default();
+
+    assert!(matches!(
+        router.route(
+            session,
+            KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)
+        ),
+        ShellKeyRoute::ToTuivir
+    ));
+    assert!(matches!(
+        router.route(session, KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE)),
+        ShellKeyRoute::ToPty(bytes) if bytes == b"\x02\x1bOP"
+    ));
+}
+
 fn docker_discovery() -> ProviderDiscovery {
     ProviderDiscovery::new(
         Provider::new(

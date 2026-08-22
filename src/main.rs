@@ -111,6 +111,13 @@ impl ShellInputRouter {
                 self.focused = false;
                 return ShellKeyRoute::ToTuivir;
             }
+            if key.code == KeyCode::Char('b') && key.modifiers == KeyModifiers::CONTROL {
+                return ShellKeyRoute::ToPty(vec![0x02]);
+            }
+            if let Some(bytes) = terminal_key_bytes(key) {
+                return ShellKeyRoute::ToPty([&[0x02][..], bytes.as_slice()].concat());
+            }
+            return ShellKeyRoute::ToTuivir;
         }
         if !self.focused {
             if key.code == KeyCode::Enter && key.modifiers.is_empty() {
@@ -329,6 +336,15 @@ fn terminal_key_bytes(event: KeyEvent) -> Option<Vec<u8>> {
         KeyCode::Home => b"\x1b[H".to_vec(),
         KeyCode::End => b"\x1b[F".to_vec(),
         KeyCode::Delete => b"\x1b[3~".to_vec(),
+        KeyCode::F(1) => b"\x1bOP".to_vec(),
+        KeyCode::F(2) => b"\x1bOQ".to_vec(),
+        KeyCode::F(3) => b"\x1bOR".to_vec(),
+        KeyCode::F(4) => b"\x1bOS".to_vec(),
+        KeyCode::F(number @ 5..=12) => format!(
+            "\x1b[{}~",
+            [15, 17, 18, 19, 20, 21, 23, 24][usize::from(number - 5)]
+        )
+        .into_bytes(),
         _ => return None,
     };
     Some(bytes)
