@@ -42,7 +42,6 @@ pub enum ResourceShellRuntimeEvent {
 /// The host reads this neutral value to encode user input without allowing
 /// Alacritty types into application state.
 pub struct ResourceShellInputModes {
-    pub bracketed_paste: bool,
     pub mouse_reporting: bool,
     pub sgr_mouse: bool,
 }
@@ -199,7 +198,6 @@ impl ResourceShellRuntime {
         let session = self.sessions.get(&session_id)?;
         let terminal = session.terminal.lock();
         Some(ResourceShellInputModes {
-            bracketed_paste: terminal.mode().contains(TermMode::BRACKETED_PASTE),
             mouse_reporting: terminal.mode().intersects(TermMode::MOUSE_MODE),
             sgr_mouse: terminal.mode().contains(TermMode::SGR_MOUSE),
         })
