@@ -173,6 +173,19 @@ impl AppState {
             .find(|session| session.id == session_id)
     }
 
+    /// Human-facing identity for the session in the enlarged presentation.
+    pub fn enlarged_resource_shell_identity(&self) -> Option<String> {
+        let session = self.enlarged_resource_shell_session()?;
+        let provider = self
+            .providers
+            .iter()
+            .find(|provider| provider.id() == &session.provider_id)?;
+        let resource_name = provider
+            .resource(&session.target)
+            .map_or_else(|| session.target.to_string(), |resource| resource.name.clone());
+        Some(format!("{} / {resource_name}", provider.name()))
+    }
+
     fn active_workspace_mut(&mut self) -> Option<&mut ProviderWorkspaceState> {
         self.active_provider
             .and_then(|active| self.providers.get_mut(active))

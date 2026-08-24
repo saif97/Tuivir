@@ -33,6 +33,15 @@ pub struct ScreenLayout {
     pub panes: Option<WorkspacePanes>,
     /// The region the topmost modal owns, when one is open.
     pub overlay: Option<Rect>,
+    /// The currently visible Resource Shell Session terminal and, when
+    /// enlarged, its single line of Tuivir chrome.
+    pub resource_shell: Option<ResourceShellLayout>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ResourceShellLayout {
+    pub header: Option<Rect>,
+    pub terminal: Rect,
 }
 
 /// The Panes of the Active Workspace, and the rows and Detail View Tabs inside them.
@@ -57,6 +66,26 @@ pub struct WorkspacePanes {
 
 impl ScreenLayout {
     pub fn measure(state: &AppState, area: Rect) -> Self {
+        if state.enlarged_resource_shell_session().is_some() {
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(1), Constraint::Min(0)])
+                .split(area);
+            return Self {
+                provider_bar: rows[0],
+                workspace: rows[1],
+                status: Rect::default(),
+                provider_selector: Rect::default(),
+                active_target: None,
+                provider_workspaces: Vec::new(),
+                panes: None,
+                overlay: None,
+                resource_shell: Some(ResourceShellLayout {
+                    header: Some(rows[0]),
+                    terminal: rows[1],
+                }),
+            };
+        }
         let bands = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -95,6 +124,15 @@ impl ScreenLayout {
             x = x.saturating_add(width);
         }
 
+        let panes = measure_panes(state, workspace);
+        let resource_shell = state
+            .visible_resource_shell_session()
+            .and_then(|_| panes.as_ref())
+            .map(|panes| ResourceShellLayout {
+                header: None,
+                terminal: panes.detail_content,
+            });
+
         Self {
             provider_bar,
             workspace,
@@ -102,8 +140,9 @@ impl ScreenLayout {
             provider_selector,
             active_target,
             provider_workspaces,
-            panes: measure_panes(state, workspace),
+            panes,
             overlay: overlay_area(state, area),
+            resource_shell,
         }
     }
 }

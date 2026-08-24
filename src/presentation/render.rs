@@ -99,6 +99,28 @@ pub fn render(state: &AppState, frame: &mut Frame<'_>) {
 /// The host measures once per frame and keeps that layout for mouse routing, so
 /// what the user clicks is what they see.
 pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &ScreenLayout) {
+    if let (Some(session), Some(shell)) = (
+        state.enlarged_resource_shell_session(),
+        layout.resource_shell.as_ref(),
+    ) {
+        if let Some(header) = shell.header {
+            let identity = state
+                .enlarged_resource_shell_identity()
+                .unwrap_or_else(|| "Resource Shell Session".to_owned());
+            frame.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::styled(
+                        identity,
+                        themed_style(ThemeRole::Primary).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw("  Ctrl-B q restore"),
+                ])),
+                header,
+            );
+        }
+        render_resource_shell_state(Some(session), frame, shell.terminal);
+        return;
+    }
     render_provider_bar(state, frame, layout);
     render_command_bar(state, frame, layout.status);
 

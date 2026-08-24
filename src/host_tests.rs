@@ -711,6 +711,7 @@ fn mouse_routing_resolves_each_region_without_a_terminal() {
             pane_boundary: Rect::new(9, 1, 2, 5),
         }),
         overlay: None,
+        resource_shell: None,
     };
 
     assert_eq!(
@@ -779,6 +780,7 @@ fn mouse_detail_click_focuses_details_without_live_terminal() {
             pane_boundary: Rect::new(0, 1, 0, 0),
         }),
         overlay: None,
+        resource_shell: None,
     };
     handle_mouse(
         &mut app,

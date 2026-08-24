@@ -1400,6 +1400,32 @@ fn the_shell_key_starts_and_enlarges_the_selected_containers_session() {
     );
 }
 
+#[test]
+fn an_enlarged_resource_shell_keeps_its_identity_and_restore_hint_above_the_terminal() {
+    let mut app = App::new();
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
+
+    handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('E'), KeyModifiers::NONE),
+    );
+
+    let screen = render_to_text(app.state(), 80, 24);
+    assert!(screen.contains("Docker / api"), "rendered screen:\n{screen}");
+    assert!(
+        screen.contains("Ctrl-B q restore"),
+        "rendered screen:\n{screen}"
+    );
+    assert!(
+        !screen.contains("Containers"),
+        "the enlarged shell owns the former Tuivir layout:\n{screen}"
+    );
+}
+
 /// Shell availability is provider-declared, but the Shell Detail View Tab is
 /// supplied by Tuivir. Selecting it is purely navigational: a persistent
 /// Resource Shell Session starts only after an explicit Enter gesture.
