@@ -368,6 +368,34 @@ fn stopping_a_live_session_forgets_and_reaps_its_pty() {
     assert!(runtime.screen(session).is_none());
 }
 
+/// A Provider CLI that ignores its graceful hangup must not keep Tuivir alive
+/// indefinitely. Cleanup signals its whole process group, escalates within a
+/// short bound, and joins the PTY event loop before terminal restoration.
+#[test]
+fn stopping_a_stubborn_resource_shell_session_escalates_and_reaps_its_process_group() {
+    let (events, _receiver) = tokio::sync::mpsc::unbounded_channel();
+    let mut runtime = ResourceShellRuntime::default();
+    let session = tuivir::application::ResourceShellSessionId::new(12);
+    runtime
+        .start(
+            session,
+            &ResourceShellProcess::new("/bin/sh", &["-c", "trap '' HUP TERM; sleep 2"]),
+            80,
+            24,
+            events,
+        )
+        .expect("local shell starts in a PTY");
+
+    let started = Instant::now();
+    runtime.stop(session);
+
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "stubborn session cleanup exceeded its bounded grace period"
+    );
+    assert!(runtime.screen(session).is_none());
+}
+
 /// Quit is a host concern only after application state has obtained explicit
 /// consent to end a live Resource Shell Session. Cancellation leaves the PTY
 /// usable; confirmation schedules its cleanup before terminal restoration.

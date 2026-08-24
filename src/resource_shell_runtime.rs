@@ -13,6 +13,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread::JoinHandle,
+    time::{Duration, Instant},
 };
 
 use alacritty_terminal::{
@@ -64,7 +65,10 @@ struct LiveResourceShell {
     selection: Option<((u16, u16), (u16, u16))>,
     size: (u16, u16),
     redraw_pending: Arc<AtomicBool>,
+    process_group_id: u32,
 }
+
+const RESOURCE_SHELL_TERMINATION_GRACE: Duration = Duration::from_millis(250);
 
 #[derive(Clone)]
 struct SessionListener {
@@ -176,6 +180,7 @@ impl ResourceShellRuntime {
             cell_height: 1,
         };
         let pty = tty::new(&pty_options, window_size, session_id.value())?;
+        let process_group_id = pty.child().id();
         let event_loop = EventLoop::new(Arc::clone(&terminal), listener, pty, true, false)?;
         let event_loop_sender = event_loop.channel();
         *input.lock().expect("terminal input lock") = Some(event_loop_sender.clone());
@@ -189,6 +194,7 @@ impl ResourceShellRuntime {
                 selection: None,
                 size: (columns.max(2), lines.max(1)),
                 redraw_pending,
+                process_group_id,
             },
         );
         Ok(())
@@ -323,12 +329,15 @@ impl ResourceShellRuntime {
     }
 
     /// Terminates and reaps the private PTY event loop for one session.
-    /// Dropping Alacritty's Unix PTY sends SIGHUP to the child and waits for it,
-    /// so no provider process outlives the Resource that owned it.
+    ///
+    /// A Resource Shell Session starts as a process-group leader. Cleanup first
+    /// gives that whole group a bounded graceful termination period, then kills
+    /// stubborn descendants before joining Alacritty's child-owning event loop.
     pub fn stop(&mut self, session_id: ResourceShellSessionId) {
         let Some(session) = self.sessions.remove(&session_id) else {
             return;
         };
+        terminate_process_group(session.process_group_id);
         let _ = session.input.send(Msg::Shutdown);
         let _ = session.event_loop.join();
     }
@@ -368,6 +377,39 @@ impl ResourceShellRuntime {
         }
         Some(ResourceShellScreen { lines })
     }
+}
+
+#[cfg(unix)]
+fn terminate_process_group(process_group_id: u32) {
+    let Ok(process_group_id) = i32::try_from(process_group_id) else {
+        return;
+    };
+    signal_process_group(process_group_id, libc::SIGTERM);
+    let deadline = Instant::now() + RESOURCE_SHELL_TERMINATION_GRACE;
+    while process_group_is_alive(process_group_id) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    if process_group_is_alive(process_group_id) {
+        signal_process_group(process_group_id, libc::SIGKILL);
+    }
+}
+
+#[cfg(not(unix))]
+fn terminate_process_group(_: u32) {}
+
+#[cfg(unix)]
+fn signal_process_group(process_group_id: i32, signal: i32) {
+    // A negative PID addresses the complete process group that owns the
+    // Provider CLI's private PTY, not merely its shell leader.
+    unsafe {
+        libc::kill(-process_group_id, signal);
+    }
+}
+
+#[cfg(unix)]
+fn process_group_is_alive(process_group_id: i32) -> bool {
+    let result = unsafe { libc::kill(-process_group_id, 0) };
+    result == 0 || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
 }
 
 fn terminal_color(color: AnsiColor) -> Option<Color> {
