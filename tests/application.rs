@@ -49,10 +49,24 @@ fn handle_key(app: &mut App, event: KeyEvent) -> (ShellControl, Vec<ProviderRequ
         return (ShellControl::Continue, Vec::new());
     };
     if app.reserved(key) == Some(Command::Quit) {
-        return (ShellControl::Quit, Vec::new());
+        let requests = app.invoke(Command::Quit);
+        return (
+            app.quit_is_ready()
+                .then_some(ShellControl::Quit)
+                .unwrap_or(ShellControl::Continue),
+            requests,
+        );
     }
     match app.resolve_command(key) {
-        Some(Command::Quit) => (ShellControl::Quit, Vec::new()),
+        Some(Command::Quit) => {
+            let requests = app.invoke(Command::Quit);
+            (
+                app.quit_is_ready()
+                    .then_some(ShellControl::Quit)
+                    .unwrap_or(ShellControl::Continue),
+                requests,
+            )
+        }
         Some(command) => (ShellControl::Continue, app.invoke(command)),
         None => (ShellControl::Continue, Vec::new()),
     }
@@ -1545,6 +1559,59 @@ fn resource_shell_runtime_events_update_only_the_matching_session_lifecycle() {
         ResourceShellSessionLifecycle::Exited
     );
     assert!(render_to_text(app.state(), 100, 24).contains("Session exited"));
+}
+
+/// Quitting with no live Resource Shell Session leaves the host free to exit
+/// immediately: no confirmation is needed when no local process can be lost.
+#[test]
+fn quit_without_live_resource_shell_sessions_is_ready_immediately() {
+    let mut app = App::new();
+
+    assert!(app.invoke(Command::Quit).is_empty());
+
+    assert!(app.quit_is_ready());
+    assert!(app.state().confirmation.is_none());
+}
+
+/// A Quit confirmation protects live Provider CLI processes without changing
+/// the Resources that own them. Cancelling preserves the exact running session;
+/// confirming asks the host to stop and reap it before Tuivir exits.
+#[test]
+fn quitting_live_resource_shell_sessions_requires_confirmation_before_cleanup() {
+    let mut app = App::new();
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
+    app.invoke(Command::OpenShell);
+    let session_id = app.state().resource_shell_sessions[0].id;
+    app.update(AppEvent::ResourceShellStarted { session_id });
+    let _ = app.take_resource_shell_effects();
+
+    app.invoke(Command::Quit);
+
+    assert!(!app.quit_is_ready());
+    assert!(
+        render_to_text(app.state(), 100, 24)
+            .contains("Quit Tuivir and end 1 Resource Shell Session?")
+    );
+
+    app.invoke(Command::Cancel);
+    assert_eq!(
+        app.state().resource_shell_sessions[0].lifecycle,
+        ResourceShellSessionLifecycle::Running
+    );
+    assert!(app.take_resource_shell_effects().is_empty());
+
+    app.invoke(Command::Quit);
+    app.invoke(Command::Confirm);
+
+    assert!(app.quit_is_ready());
+    assert_eq!(
+        app.take_resource_shell_effects(),
+        vec![ResourceShellEffect::Stop { session_id }]
+    );
 }
 
 /// An exited Resource Shell Session keeps its final screen until the user

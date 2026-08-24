@@ -423,8 +423,15 @@ fn resolve_key_command(app: &App, event: KeyEvent) -> Option<Command> {
 
 fn handle_command(app: &mut App, command: Option<Command>) -> (ShellControl, Vec<ProviderRequest>) {
     match command {
-        Some(Command::Quit) => (ShellControl::Quit, Vec::new()),
-        Some(command) => (ShellControl::Continue, app.invoke(command)),
+        Some(command) => {
+            let requests = app.invoke(command);
+            let control = if app.quit_is_ready() {
+                ShellControl::Quit
+            } else {
+                ShellControl::Continue
+            };
+            (control, requests)
+        }
         None => (ShellControl::Continue, Vec::new()),
     }
 }

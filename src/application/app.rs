@@ -110,7 +110,7 @@ pub struct AppState {
     /// the Panes the size the user left them.
     pub pane_boundary: PaneBoundary,
     pub help_overlay: Option<HelpOverlay>,
-    pub confirmation: Option<ResourceCommandInvocation>,
+    pub confirmation: Option<Confirmation>,
     pub command_error: Option<String>,
     /// Stable Resource Shell Session identities and user-visible lifecycles.
     /// The host owns all live terminal and process objects keyed by these IDs.
@@ -263,6 +263,13 @@ pub struct ResourceCommandInvocation {
     pub state: Option<ResourceState>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+/// The deliberate operation awaiting the user's confirmation.
+pub enum Confirmation {
+    ResourceCommand(ResourceCommandInvocation),
+    QuitResourceShellSessions { session_count: usize },
+}
+
 pub struct App {
     state: AppState,
     commands: CommandRegistry,
@@ -283,6 +290,7 @@ pub struct App {
     pending_pane_boundary_save: Option<PaneBoundary>,
     next_resource_shell_session_id: u64,
     pending_resource_shell_effects: Vec<ResourceShellEffect>,
+    quit_is_ready: bool,
 }
 
 impl Default for App {
@@ -323,6 +331,7 @@ impl App {
             pending_pane_boundary_save: None,
             next_resource_shell_session_id: 1,
             pending_resource_shell_effects: Vec::new(),
+            quit_is_ready: false,
         }
     }
 
@@ -456,6 +465,12 @@ impl App {
         std::mem::take(&mut self.pending_resource_shell_effects)
     }
 
+    /// Whether the host may restore its terminal and exit after it completes
+    /// every pending Resource Shell Session cleanup effect.
+    pub fn quit_is_ready(&self) -> bool {
+        self.quit_is_ready
+    }
+
     /// Records a clipboard-adapter failure through the ordinary UI error path.
     pub fn report_details_copy_failure(&mut self, reason: String) {
         self.state.command_error = Some(format!("copy selected Details failed: {reason}"));
@@ -568,7 +583,7 @@ impl App {
             workspace.clear_detail_selection();
         }
         match command {
-            Command::Quit => Vec::new(),
+            Command::Quit => self.request_quit(),
             Command::ToggleHelp => {
                 self.toggle_help();
                 Vec::new()
@@ -743,11 +758,23 @@ impl App {
     /// Accepts the open modal: confirms a Resource Command, or dismisses a
     /// reported failure.
     fn confirm_or_dismiss(&mut self) -> Vec<ProviderRequest> {
-        if self.state.confirmation.is_some() {
-            self.confirm_resource_command()
-        } else {
-            self.state.command_error = None;
-            Vec::new()
+        match self.state.confirmation.take() {
+            Some(Confirmation::ResourceCommand(confirmation)) => {
+                self.dispatch_resource_command(confirmation)
+            }
+            Some(Confirmation::QuitResourceShellSessions { .. }) => {
+                self.pending_resource_shell_effects.extend(
+                    self.live_resource_shell_session_ids()
+                        .into_iter()
+                        .map(|session_id| ResourceShellEffect::Stop { session_id }),
+                );
+                self.quit_is_ready = true;
+                Vec::new()
+            }
+            None => {
+                self.state.command_error = None;
+                Vec::new()
+            }
         }
     }
 
@@ -1042,17 +1069,39 @@ impl App {
             state: resource.state,
         };
         if command == ResourceCommand::Delete {
-            self.state.confirmation = Some(target);
+            self.state.confirmation = Some(Confirmation::ResourceCommand(target));
             return Vec::new();
         }
         self.dispatch_resource_command(target)
     }
 
-    fn confirm_resource_command(&mut self) -> Vec<ProviderRequest> {
-        let Some(confirmation) = self.state.confirmation.take() else {
+    fn request_quit(&mut self) -> Vec<ProviderRequest> {
+        if self.state.confirmation.is_some() {
             return Vec::new();
-        };
-        self.dispatch_resource_command(confirmation)
+        }
+        let session_count = self.live_resource_shell_session_ids().len();
+        if session_count == 0 {
+            self.quit_is_ready = true;
+        } else {
+            self.state.confirmation =
+                Some(Confirmation::QuitResourceShellSessions { session_count });
+        }
+        Vec::new()
+    }
+
+    fn live_resource_shell_session_ids(&self) -> Vec<ResourceShellSessionId> {
+        self.state
+            .resource_shell_sessions
+            .iter()
+            .filter(|session| {
+                matches!(
+                    session.lifecycle,
+                    ResourceShellSessionLifecycle::Starting
+                        | ResourceShellSessionLifecycle::Running
+                )
+            })
+            .map(|session| session.id)
+            .collect()
     }
 
     fn dispatch_resource_command(

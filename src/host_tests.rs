@@ -18,11 +18,11 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent,
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 use tuivir::{
-    application::Command,
     application::{
         App, AppEvent, DetailView, ProviderRequest, Resource, ResourceCommand, ResourcePanel,
         ResourceShellProcess, WorkspaceSnapshot,
     },
+    application::{Command, ResourceShellEffect, ResourceShellSessionLifecycle},
     domain::{Provider, ProviderId, ResourceId, ResourcePanelId, ResourceState, TargetEnvironment},
     infrastructure::provider::ProviderDiscovery,
     infrastructure::{
@@ -366,6 +366,52 @@ fn stopping_a_live_session_forgets_and_reaps_its_pty() {
 
     runtime.stop(session);
     assert!(runtime.screen(session).is_none());
+}
+
+/// Quit is a host concern only after application state has obtained explicit
+/// consent to end a live Resource Shell Session. Cancellation leaves the PTY
+/// usable; confirmation schedules its cleanup before terminal restoration.
+#[test]
+fn live_resource_shell_quit_waits_for_confirmation_before_host_exit() {
+    let mut app = app_on_a_loaded_workspace();
+    app.invoke(Command::OpenShell);
+    let session_id = app.state().resource_shell_sessions[0].id;
+    app.update(AppEvent::ResourceShellStarted { session_id });
+    let _ = app.take_resource_shell_effects();
+
+    let (control, requests) = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE),
+    );
+
+    assert_eq!(control, super::ShellControl::Continue);
+    assert!(requests.is_empty());
+    assert!(app.state().confirmation.is_some());
+
+    let (control, _) = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE),
+    );
+    assert_eq!(control, super::ShellControl::Continue);
+    assert_eq!(
+        app.state().resource_shell_sessions[0].lifecycle,
+        ResourceShellSessionLifecycle::Running
+    );
+
+    let _ = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE),
+    );
+    let (control, _) = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE),
+    );
+
+    assert_eq!(control, super::ShellControl::Quit);
+    assert_eq!(
+        app.take_resource_shell_effects(),
+        vec![ResourceShellEffect::Stop { session_id }]
+    );
 }
 
 #[test]

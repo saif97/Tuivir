@@ -8,7 +8,7 @@ mod shell;
 mod workspace;
 
 pub use app::{
-    App, AppEvent, AppState, FocusedPane, HelpEntry, HelpOverlay, KeyHints,
+    App, AppEvent, AppState, Confirmation, FocusedPane, HelpEntry, HelpOverlay, KeyHints,
     ResourceCommandInvocation, RunningResourceCommand,
 };
 pub use command::{
