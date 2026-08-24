@@ -227,7 +227,7 @@ pub(super) const BUILTIN_COMMANDS: &[CommandDefinition] = &[
     },
     CommandDefinition {
         id: "resource_shell_start",
-        description: "Start Shell",
+        description: "Start Shell Detail View",
         command: Command::StartResourceShell,
         scopes: DETAILS,
         default_keys: &["enter"],
@@ -293,7 +293,7 @@ pub(super) const BUILTIN_COMMANDS: &[CommandDefinition] = &[
     },
     CommandDefinition {
         id: "resource_shell",
-        description: "Shell",
+        description: "Open Shell Detail View",
         command: Command::OpenShell,
         scopes: RESOURCE_VIEW,
         default_keys: &["E"],

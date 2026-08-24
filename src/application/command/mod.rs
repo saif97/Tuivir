@@ -85,8 +85,8 @@ pub enum Command {
     /// Pane, giving the width one of them gains to the other.
     MovePaneBoundaryLeft,
     MovePaneBoundaryRight,
-    /// Hands the terminal to the Provider CLI for an Resource Shell Session inside
-    /// the selected Resource.
+    /// Starts or resumes the selected Resource's Shell Detail View Tab in the
+    /// enlarged presentation.
     OpenShell,
     /// Explicitly starts the selected Resource's Shell Detail View Tab.
     StartResourceShell,

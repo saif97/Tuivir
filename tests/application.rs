@@ -1299,7 +1299,7 @@ fn help_offers_a_shell_only_while_the_resource_can_host_one() {
     );
     let screen = render_to_text(stopped.state(), 100, 24);
     assert!(
-        screen.contains("E  Shell (unavailable)"),
+        screen.contains("E  Open Shell Detail View (unavailable)"),
         "rendered screen:\n{screen}"
     );
 
@@ -1314,9 +1314,12 @@ fn help_offers_a_shell_only_while_the_resource_can_host_one() {
         KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
     );
     let screen = render_to_text(running.state(), 100, 24);
-    assert!(screen.contains("E  Shell"), "rendered screen:\n{screen}");
     assert!(
-        !screen.contains("E  Shell (unavailable)"),
+        screen.contains("E  Open Shell Detail View"),
+        "rendered screen:\n{screen}"
+    );
+    assert!(
+        !screen.contains("E  Open Shell Detail View (unavailable)"),
         "rendered screen:\n{screen}"
     );
 }
