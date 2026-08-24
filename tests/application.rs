@@ -50,10 +50,11 @@ fn handle_key(app: &mut App, event: KeyEvent) -> (ShellControl, Vec<ProviderRequ
     };
     let command = app.reserved(key).or_else(|| app.resolve_command(key));
     let requests = command.map_or_else(Vec::new, |command| app.invoke(command));
-    let control = app
-        .quit_is_ready()
-        .then_some(ShellControl::Quit)
-        .unwrap_or(ShellControl::Continue);
+    let control = if app.quit_is_ready() {
+        ShellControl::Quit
+    } else {
+        ShellControl::Continue
+    };
     (control, requests)
 }
 
