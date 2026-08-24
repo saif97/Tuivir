@@ -1097,9 +1097,25 @@ impl App {
         }) {
             return Some(session.id);
         }
+        let replaced_runtime = self
+            .state
+            .resource_shell_sessions
+            .iter()
+            .filter(|session| {
+                session.provider_id == provider_id
+                    && session.target == target
+                    && session.lifecycle == ResourceShellSessionLifecycle::Exited
+            })
+            .map(|session| session.id)
+            .collect::<Vec<_>>();
         self.state
             .resource_shell_sessions
             .retain(|session| session.provider_id != provider_id || session.target != target);
+        self.pending_resource_shell_effects.extend(
+            replaced_runtime
+                .into_iter()
+                .map(|session_id| ResourceShellEffect::Stop { session_id }),
+        );
         let session = ResourceShellSession {
             id: ResourceShellSessionId(self.next_resource_shell_session_id),
             provider_id,

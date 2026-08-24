@@ -1547,6 +1547,60 @@ fn resource_shell_runtime_events_update_only_the_matching_session_lifecycle() {
     assert!(render_to_text(app.state(), 100, 24).contains("Session exited"));
 }
 
+/// An exited Resource Shell Session keeps its final screen until the user
+/// deliberately starts a replacement. The replacement must forget the old
+/// runtime before starting with a distinct identity, so late events from the
+/// old lifetime cannot change the fresh session.
+#[test]
+fn restarting_an_exited_resource_shell_replaces_its_runtime_and_refuses_stale_events() {
+    let mut app = App::new();
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
+    app.invoke(Command::ActivateDetailView(4));
+    app.invoke(Command::StartResourceShell);
+    let first = app.state().resource_shell_sessions[0].clone();
+    let _ = app.take_resource_shell_effects();
+    app.update(AppEvent::ResourceShellStarted {
+        session_id: first.id,
+    });
+    app.update(AppEvent::ResourceShellExited {
+        session_id: first.id,
+    });
+
+    app.invoke(Command::StartResourceShell);
+
+    let replacement = app.state().resource_shell_sessions[0].clone();
+    assert_ne!(replacement.id, first.id);
+    assert_eq!(replacement.lifecycle, ResourceShellSessionLifecycle::Starting);
+    assert_eq!(
+        app.take_resource_shell_effects(),
+        vec![
+            ResourceShellEffect::Stop {
+                session_id: first.id,
+            },
+            ResourceShellEffect::Start {
+                session: replacement.clone(),
+                process: ResourceShellProcess::new(
+                    "docker",
+                    &["exec", "-it", "container-a", "/bin/sh"],
+                ),
+            },
+        ]
+    );
+
+    app.update(AppEvent::ResourceShellExited {
+        session_id: first.id,
+    });
+    assert_eq!(
+        app.state().resource_shell_sessions,
+        vec![replacement],
+        "a late exit belongs to the replaced session, not its successor"
+    );
+}
+
 /// A removed Resource owns no lingering Session: accepting the new snapshot
 /// asks the host to stop and reap its private PTY before state forgets it.
 #[test]
