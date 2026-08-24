@@ -4,13 +4,14 @@ use std::{
     io,
     path::Path,
     sync::Mutex,
+    thread,
     time::{Duration, Instant},
 };
 
 use super::{
     Clipboard, DetailDispatchQueue, Osc52Clipboard, ResourceShellRuntime,
     ResourceShellRuntimeEvent, ShellInputRouter, ShellKeyRoute, ShellPointerRoute, handle_key,
-    handle_mouse, persist_pane_boundary,
+    handle_mouse, persist_pane_boundary, release_resource_shell,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
@@ -163,6 +164,53 @@ fn a_real_pty_shell_keeps_colour_unicode_and_cursor_in_its_screen() {
 }
 
 #[test]
+fn a_real_pty_shell_receives_the_exact_enlarged_viewport_size() {
+    let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    let mut runtime = ResourceShellRuntime::default();
+    let session = tuivir::application::ResourceShellSessionId::new(9);
+    runtime
+        .start(
+            session,
+            &ResourceShellProcess::new(
+                "/bin/sh",
+                &[
+                    "-c",
+                    "trap 'stty size' WINCH; printf ready; while :; do :; done",
+                ],
+            ),
+            80,
+            24,
+            events,
+        )
+        .expect("local shell starts in a PTY");
+    let _ = receiver.blocking_recv().expect("shell announces readiness");
+
+    runtime
+        .resize(session, 78, 23)
+        .expect("the visible enlarged terminal resizes its PTY");
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while Instant::now() < deadline {
+        if matches!(
+            receiver.try_recv(),
+            Ok(ResourceShellRuntimeEvent::OutputReady { session_id }) if session_id == session
+        ) {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    let screen = runtime
+        .screen(session)
+        .expect("live Resource Shell Session screen")
+        .lines
+        .into_iter()
+        .flatten()
+        .map(|cell| cell.text)
+        .collect::<String>();
+    assert!(screen.contains("23 78"), "terminal screen: {screen:?}");
+    runtime.stop(session);
+}
+
+#[test]
 fn stopping_a_live_session_forgets_and_reaps_its_pty() {
     let (events, _receiver) = tokio::sync::mpsc::unbounded_channel();
     let mut runtime = ResourceShellRuntime::default();
@@ -211,6 +259,36 @@ fn ctrl_b_q_releases_a_resource_shell_sessions_keyboard_focus() {
         ),
         ShellKeyRoute::ToTuivir
     ));
+}
+
+#[test]
+fn ctrl_b_z_toggles_the_resource_shell_sessions_size_without_reaching_its_pty() {
+    let session = tuivir::application::ResourceShellSessionId::new(7);
+    let mut router = ShellInputRouter::default();
+
+    assert!(matches!(
+        router.route(
+            session,
+            KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)
+        ),
+        ShellKeyRoute::ToTuivir
+    ));
+    assert!(matches!(
+        router.route(session, KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE)),
+        ShellKeyRoute::ToggleSize
+    ));
+}
+
+#[test]
+fn releasing_an_enlarged_resource_shell_restores_the_details_presentation() {
+    let mut app = app_on_a_loaded_workspace();
+    app.invoke(Command::OpenShell);
+    let session = app.state().resource_shell_sessions[0].id;
+
+    assert!(app.state().enlarged_resource_shell_session().is_some());
+    assert!(release_resource_shell(&mut app).is_empty());
+    assert!(app.state().enlarged_resource_shell_session().is_none());
+    assert_eq!(app.state().resource_shell_sessions[0].id, session);
 }
 
 #[test]

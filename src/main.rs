@@ -98,6 +98,7 @@ struct ShellInputRouter {
 enum ShellKeyRoute {
     ToPty(Vec<u8>),
     Released,
+    ToggleSize,
     ToTuivir,
 }
 
@@ -135,6 +136,9 @@ impl ShellInputRouter {
             if key.code == KeyCode::Char('q') && key.modifiers.is_empty() {
                 self.focused = false;
                 return ShellKeyRoute::Released;
+            }
+            if key.code == KeyCode::Char('z') && key.modifiers.is_empty() {
+                return ShellKeyRoute::ToggleSize;
             }
             if key.code == KeyCode::Char('b') && key.modifiers == KeyModifiers::CONTROL {
                 return ShellKeyRoute::ToPty(vec![0x02]);
@@ -396,6 +400,17 @@ fn handle_command(app: &mut App, command: Option<Command>) -> (ShellControl, Vec
     }
 }
 
+/// Releases terminal focus. From an enlarged session, the same gesture also
+/// restores the normal Details presentation; from Details it changes no
+/// application state.
+fn release_resource_shell(app: &mut App) -> Vec<ProviderRequest> {
+    app.state()
+        .enlarged_resource_shell_session()
+        .is_some()
+        .then(|| app.invoke(Command::ToggleResourceShellSize))
+        .unwrap_or_default()
+}
+
 /// Routes one terminal mouse event through the layout that drew the screen.
 ///
 /// The mouse resolves to a Command and goes through `App::invoke`, exactly as a
@@ -437,8 +452,19 @@ fn dispatch_resource_shell_effects(
     layout: Option<&presentation::ScreenLayout>,
 ) -> Vec<ProviderRequest> {
     let size = layout
-        .and_then(|layout| layout.panes.as_ref())
-        .map(|panes| panes.detail_content)
+        .map(|layout| {
+            presentation::ScreenLayout::measure(
+                app.state(),
+                ratatui::layout::Rect::new(
+                    layout.provider_bar.x,
+                    layout.provider_bar.y,
+                    layout.provider_bar.width,
+                    layout.provider_bar.height + layout.workspace.height + layout.status.height,
+                ),
+            )
+        })
+        .and_then(|layout| layout.resource_shell)
+        .map(|shell| shell.terminal)
         .unwrap_or(ratatui::layout::Rect::new(0, 0, 80, 24));
     let mut requests = Vec::new();
     for effect in app.take_resource_shell_effects() {
@@ -534,21 +560,21 @@ async fn run(
         if let Err(error) = terminal.draw(|frame| {
             let measured = presentation::ScreenLayout::measure(app.state(), frame.area());
             presentation::render_with_layout(app.state(), frame, &measured);
-            if let (Some(session), Some(panes)) = (
+            if let (Some(session), Some(shell)) = (
                 app.state().visible_resource_shell_session(),
-                measured.panes.as_ref(),
+                measured.resource_shell,
             ) && session.lifecycle == ResourceShellSessionLifecycle::Running
             {
                 let _ = resource_shell_runtime.resize(
                     session.id,
-                    panes.detail_content.width,
-                    panes.detail_content.height,
+                    shell.terminal.width,
+                    shell.terminal.height,
                 );
                 if let Some(screen) = resource_shell_runtime.screen(session.id) {
                     presentation::render_resource_shell_screen(
                         &screen,
                         frame,
-                        panes.detail_content,
+                        shell.terminal,
                     );
                 }
             }
@@ -573,7 +599,13 @@ async fn run(
                                 let _ = resource_shell_runtime.write(session.id, bytes);
                                 (ShellControl::Continue, Vec::new())
                             }
-                            Some(ShellKeyRoute::Released) => (ShellControl::Continue, Vec::new()),
+                            Some(ShellKeyRoute::Released) => {
+                                (ShellControl::Continue, release_resource_shell(&mut app))
+                            }
+                            Some(ShellKeyRoute::ToggleSize) => (
+                                ShellControl::Continue,
+                                app.invoke(Command::ToggleResourceShellSize),
+                            ),
                             Some(ShellKeyRoute::ToTuivir) | None => {
                                 let command = resolve_key_command(&app, key);
                                 if command == Some(Command::CopyDetails)
@@ -604,7 +636,7 @@ async fn run(
                                 session.lifecycle == ResourceShellSessionLifecycle::Running
                             })
                             .and_then(|session| {
-                                let viewport = layout.as_ref()?.panes.as_ref()?.detail_content;
+                                let viewport = layout.as_ref()?.resource_shell?.terminal;
                                 let modes = resource_shell_runtime.input_modes(session.id)?;
                                 Some((
                                     session.id,
