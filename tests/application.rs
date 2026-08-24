@@ -12,10 +12,9 @@ use tuivir::{
     application::{
         App, AppEvent, AppState, Command, CommandRegistry, CommandScope, DetailView, FocusedPane,
         LifecycleCommandPolicy, PaneBoundary, ProviderRequest, Resource, ResourceCommand,
-        ResourceDetails, ResourcePanel, ResourceShellEffect, ResourceShellProcess,
-        ResourceShellPresentation, ResourceShellSessionLifecycle, WorkspaceError, WorkspaceLoadState,
-        WorkspaceSnapshot,
-        lifecycle_commands,
+        ResourceDetails, ResourcePanel, ResourceShellEffect, ResourceShellPresentation,
+        ResourceShellProcess, ResourceShellSessionId, ResourceShellSessionLifecycle,
+        WorkspaceError, WorkspaceLoadState, WorkspaceSnapshot, lifecycle_commands,
     },
     domain::{
         DetailViewId, Provider, ProviderId, ResourceId, ResourcePanelId, ResourceState,
@@ -1575,7 +1574,10 @@ fn restarting_an_exited_resource_shell_replaces_its_runtime_and_refuses_stale_ev
 
     let replacement = app.state().resource_shell_sessions[0].clone();
     assert_ne!(replacement.id, first.id);
-    assert_eq!(replacement.lifecycle, ResourceShellSessionLifecycle::Starting);
+    assert_eq!(
+        replacement.lifecycle,
+        ResourceShellSessionLifecycle::Starting
+    );
     assert_eq!(
         app.take_resource_shell_effects(),
         vec![
@@ -1602,16 +1604,7 @@ fn restarting_an_exited_resource_shell_replaces_its_runtime_and_refuses_stale_ev
     );
 }
 
-/// A removed Resource owns no lingering Session: accepting the new snapshot
-/// asks the host to stop and reap its private PTY before state forgets it.
-#[test]
-fn an_accepted_refresh_stops_the_shell_for_a_removed_resource() {
-    let mut app = App::new();
-    ready_workspace(
-        &mut app,
-        docker_discovery(),
-        snapshot(&[("container-a", "api", "nginx:1.27")]),
-    );
+fn accept_resource_shell_removal(app: &mut App) -> ResourceShellSessionId {
     app.invoke(Command::OpenShell);
     let session_id = app.state().resource_shell_sessions[0].id;
     let _ = app.take_resource_shell_effects();
@@ -1629,6 +1622,20 @@ fn an_accepted_refresh_stops_the_shell_for_a_removed_resource() {
         provider_id,
         result: Ok(snapshot(&[])),
     });
+    session_id
+}
+
+/// A removed Resource owns no lingering Session: accepting the new snapshot
+/// asks the host to stop and reap its private PTY before state forgets it.
+#[test]
+fn an_accepted_refresh_stops_the_shell_for_a_removed_resource() {
+    let mut app = App::new();
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
+    let session_id = accept_resource_shell_removal(&mut app);
 
     assert!(app.state().resource_shell_sessions.is_empty());
     assert_eq!(
@@ -1641,30 +1648,14 @@ fn an_accepted_refresh_stops_the_shell_for_a_removed_resource() {
 /// including an enlarged presentation that would otherwise point at an absent
 /// session. A failed refresh remains deliberately outside this reconciliation.
 #[test]
-fn confirmed_resource_deletion_restores_details_after_forgetting_its_shell() {
+fn accepted_resource_removal_restores_details_after_forgetting_its_shell() {
     let mut app = App::new();
     ready_workspace(
         &mut app,
         docker_discovery(),
         snapshot(&[("container-a", "api", "nginx:1.27")]),
     );
-    app.invoke(Command::OpenShell);
-    let session_id = app.state().resource_shell_sessions[0].id;
-    let _ = app.take_resource_shell_effects();
-
-    let requests = app.update(AppEvent::RefreshTimerElapsed);
-    let ProviderRequest::RefreshWorkspace {
-        request_id,
-        provider_id,
-    } = requests.into_iter().next().expect("a refresh request")
-    else {
-        panic!("refresh timer requests the active workspace");
-    };
-    app.update(AppEvent::RefreshCompleted {
-        request_id,
-        provider_id,
-        result: Ok(snapshot(&[])),
-    });
+    let session_id = accept_resource_shell_removal(&mut app);
 
     assert!(app.state().resource_shell_sessions.is_empty());
     assert_eq!(

@@ -11,7 +11,8 @@ use std::{
 use super::{
     Clipboard, DetailDispatchQueue, Osc52Clipboard, ResourceShellRuntime,
     ResourceShellRuntimeEvent, ShellInputRouter, ShellKeyRoute, ShellPointerRoute, handle_key,
-    handle_mouse, persist_pane_boundary, release_resource_shell, resource_shell_output_requires_redraw,
+    handle_mouse, persist_pane_boundary, release_resource_shell,
+    resource_shell_output_requires_redraw,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
@@ -162,6 +163,46 @@ fn hidden_resource_shell_output_does_not_request_a_redraw() {
     });
     app.invoke(Command::ActivateDetailView(2));
     assert!(resource_shell_output_requires_redraw(&app, session_id));
+}
+
+/// A continuously writing hidden session must continue updating its private
+/// terminal while its one outstanding wakeup prevents redraw pressure from
+/// growing with PTY output volume.
+#[test]
+fn continuous_hidden_resource_shell_output_stays_coalesced() {
+    let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    let mut runtime = ResourceShellRuntime::default();
+    let session = tuivir::application::ResourceShellSessionId::new(11);
+    runtime
+        .start(
+            session,
+            &ResourceShellProcess::new("/bin/sh", &["-c", "while :; do printf x; done"]),
+            80,
+            24,
+            events,
+        )
+        .expect("continuous local shell starts in a PTY");
+
+    assert!(matches!(
+        receiver.blocking_recv().expect("first output wakeup"),
+        ResourceShellRuntimeEvent::OutputReady { session_id } if session_id == session
+    ));
+    thread::sleep(Duration::from_millis(50));
+    assert!(
+        runtime
+            .screen(session)
+            .expect("hidden session remains emulated")
+            .lines
+            .into_iter()
+            .flatten()
+            .any(|cell| cell.text == "x"),
+        "PTY output continues updating the hidden terminal"
+    );
+    assert!(
+        receiver.try_recv().is_err(),
+        "without a visible render acknowledgement, continuous output has one coalesced wakeup"
+    );
+    runtime.stop(session);
 }
 
 #[test]

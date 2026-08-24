@@ -162,6 +162,13 @@ impl AppState {
             .find(|session| session.provider_id == *workspace.id() && session.target == target)
     }
 
+    /// The visible session only while its host runtime can accept input and
+    /// provide terminal cells for the current frame.
+    pub fn visible_running_resource_shell_session(&self) -> Option<&ResourceShellSession> {
+        self.visible_resource_shell_session()
+            .filter(|session| session.lifecycle == ResourceShellSessionLifecycle::Running)
+    }
+
     /// The session occupying Tuivir's enlarged presentation, if any.
     pub fn enlarged_resource_shell_session(&self) -> Option<&ResourceShellSession> {
         let ResourceShellPresentation::Enlarged(session_id) = self.resource_shell_presentation
@@ -821,26 +828,36 @@ impl App {
         provider_id: &ProviderId,
         snapshot: &WorkspaceSnapshot,
     ) {
-        let stopped: Vec<_> = self
+        self.retire_resource_shell_sessions(|session| {
+            &session.provider_id == provider_id && snapshot.resource(&session.target).is_none()
+        });
+    }
+
+    /// Removes the selected session identities from application state and asks
+    /// the host to retire their private runtimes. Any enlarged presentation of
+    /// a retired session returns to Details before it can outlive its identity.
+    fn retire_resource_shell_sessions(
+        &mut self,
+        should_retire: impl Fn(&ResourceShellSession) -> bool,
+    ) {
+        let retired_session_ids = self
             .state
             .resource_shell_sessions
             .iter()
-            .filter(|session| {
-                &session.provider_id == provider_id && snapshot.resource(&session.target).is_none()
-            })
+            .filter(|session| should_retire(session))
             .map(|session| session.id)
-            .collect();
+            .collect::<Vec<_>>();
         if matches!(
             self.state.resource_shell_presentation,
-            ResourceShellPresentation::Enlarged(session_id) if stopped.contains(&session_id)
+            ResourceShellPresentation::Enlarged(session_id) if retired_session_ids.contains(&session_id)
         ) {
             self.state.resource_shell_presentation = ResourceShellPresentation::Details;
         }
-        self.state.resource_shell_sessions.retain(|session| {
-            &session.provider_id != provider_id || snapshot.resource(&session.target).is_some()
-        });
+        self.state
+            .resource_shell_sessions
+            .retain(|session| !should_retire(session));
         self.pending_resource_shell_effects.extend(
-            stopped
+            retired_session_ids
                 .into_iter()
                 .map(|session_id| ResourceShellEffect::Stop { session_id }),
         );
@@ -1103,25 +1120,11 @@ impl App {
         }) {
             return Some(session.id);
         }
-        let replaced_runtime = self
-            .state
-            .resource_shell_sessions
-            .iter()
-            .filter(|session| {
-                session.provider_id == provider_id
-                    && session.target == target
-                    && session.lifecycle == ResourceShellSessionLifecycle::Exited
-            })
-            .map(|session| session.id)
-            .collect::<Vec<_>>();
-        self.state
-            .resource_shell_sessions
-            .retain(|session| session.provider_id != provider_id || session.target != target);
-        self.pending_resource_shell_effects.extend(
-            replaced_runtime
-                .into_iter()
-                .map(|session_id| ResourceShellEffect::Stop { session_id }),
-        );
+        self.retire_resource_shell_sessions(|session| {
+            session.provider_id == provider_id
+                && session.target == target
+                && session.lifecycle == ResourceShellSessionLifecycle::Exited
+        });
         let session = ResourceShellSession {
             id: ResourceShellSessionId(self.next_resource_shell_session_id),
             provider_id,
