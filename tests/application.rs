@@ -26,7 +26,8 @@ use tuivir::{
     infrastructure::provider::{DockerWorkspace, ProviderDiscovery, ProviderWorkspace},
     infrastructure::runtime::{ProviderRuntime, RefreshTimer},
     presentation::{
-        key_from_event, render_background_colours, render_foreground_colours, render_to_text,
+        ScreenLayout, key_from_event, render_background_colours, render_foreground_colours,
+        render_to_text,
     },
 };
 
@@ -1334,10 +1335,11 @@ fn question_mark_closes_the_help_overlay_when_it_is_already_open() {
     assert!(screen.contains("api"), "rendered screen:\n{screen}");
 }
 
-/// `E` is the direct Resource Shell Session path. It selects Shell and emits a
-/// host effect, never taking the outer terminal away from Tuivir.
+/// `E` is the direct enlarged Resource Shell Session path. It selects Shell,
+/// emits one host start effect, and gives that same session the enlarged
+/// presentation without taking the outer terminal away from Tuivir.
 #[test]
-fn the_shell_key_starts_a_session_for_the_selected_container() {
+fn the_shell_key_starts_and_enlarges_the_selected_containers_session() {
     let mut app = App::new();
     ready_workspace(
         &mut app,
@@ -1369,6 +1371,11 @@ fn the_shell_key_starts_a_session_for_the_selected_container() {
         )
     );
     assert_eq!(
+        app.state().enlarged_resource_shell_session(),
+        Some(&session),
+        "E presents the same starting session enlarged"
+    );
+    assert_eq!(
         app.take_resource_shell_effects(),
         vec![ResourceShellEffect::Start {
             session: session.clone(),
@@ -1377,6 +1384,82 @@ fn the_shell_key_starts_a_session_for_the_selected_container() {
                 &["exec", "-it", "container-a", "/bin/sh"],
             ),
         }]
+    );
+
+    app.update(AppEvent::ResourceShellStarted {
+        session_id: session.id,
+    });
+    app.invoke(Command::ToggleResourceShellSize);
+
+    assert!(
+        app.state().enlarged_resource_shell_session().is_none(),
+        "the size toggle restores Details without replacing the session"
+    );
+    assert!(
+        app.take_resource_shell_effects().is_empty(),
+        "moving presentation never starts another Resource Shell Session"
+    );
+
+    app.invoke(Command::ToggleResourceShellSize);
+    assert_eq!(
+        app.state().enlarged_resource_shell_session(),
+        Some(&app.state().resource_shell_sessions[0]),
+        "repeated toggles keep the same running Resource Shell Session"
+    );
+    assert!(app.take_resource_shell_effects().is_empty());
+}
+
+#[test]
+fn an_enlarged_resource_shell_keeps_its_identity_and_restore_hint_above_the_terminal() {
+    let mut app = App::new();
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
+
+    handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('E'), KeyModifiers::NONE),
+    );
+
+    let screen = render_to_text(app.state(), 80, 24);
+    assert!(
+        screen.contains("Docker / api"),
+        "rendered screen:\n{screen}"
+    );
+    assert!(
+        screen.contains("Ctrl-B q restore"),
+        "rendered screen:\n{screen}"
+    );
+    assert!(
+        !screen.contains("Containers"),
+        "the enlarged shell owns the former Tuivir layout:\n{screen}"
+    );
+}
+
+#[test]
+fn an_enlarged_resource_shell_uses_every_row_below_its_one_line_header() {
+    let mut app = App::new();
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
+    handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('E'), KeyModifiers::NONE),
+    );
+
+    let layout = ScreenLayout::measure(app.state(), ratatui::layout::Rect::new(0, 0, 80, 24));
+    let shell = layout
+        .resource_shell
+        .expect("enlarged Resource Shell Session layout");
+    assert_eq!(shell.header, Some(ratatui::layout::Rect::new(0, 0, 80, 1)));
+    assert_eq!(shell.terminal, ratatui::layout::Rect::new(0, 1, 80, 23));
+    assert!(
+        layout.panes.is_none(),
+        "Tuivir panes are restored only on exit"
     );
 }
 

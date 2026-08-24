@@ -4,8 +4,8 @@ use super::workspace::{DetailCompletion, ProviderWorkspaceState};
 use super::{
     Command, CommandRegistry, CommandScope, Key, NUMBERED_RESOURCE_PANEL_CAPACITY, PaneBoundary,
     ProviderRequest, ProviderRequestId, ResourceCommand, ResourceDetails, ResourceShellEffect,
-    ResourceShellSession, ResourceShellSessionId, ResourceShellSessionLifecycle, WorkspaceError,
-    WorkspaceSnapshot,
+    ResourceShellPresentation, ResourceShellSession, ResourceShellSessionId,
+    ResourceShellSessionLifecycle, WorkspaceError, WorkspaceSnapshot,
 };
 use crate::domain::{DetailViewId, Provider, ProviderId, ResourceState, ResourceTarget};
 
@@ -115,6 +115,10 @@ pub struct AppState {
     /// Stable Resource Shell Session identities and user-visible lifecycles.
     /// The host owns all live terminal and process objects keyed by these IDs.
     pub resource_shell_sessions: Vec<ResourceShellSession>,
+    /// The presentation of the one Resource Shell Session currently visible.
+    /// Session lifetime stays in `resource_shell_sessions`; moving this value
+    /// never starts or stops a host runtime.
+    pub resource_shell_presentation: ResourceShellPresentation,
     /// Dispatched Resource Commands that have not completed yet, in dispatch
     /// order.
     ///
@@ -145,6 +149,9 @@ impl AppState {
     /// The session whose Shell Detail View Tab is currently visible, if it has
     /// already been explicitly started.
     pub fn visible_resource_shell_session(&self) -> Option<&ResourceShellSession> {
+        if let Some(session) = self.enlarged_resource_shell_session() {
+            return Some(session);
+        }
         let workspace = self.active_workspace()?;
         if !workspace.selected_resource_shell_tab() {
             return None;
@@ -153,6 +160,31 @@ impl AppState {
         self.resource_shell_sessions
             .iter()
             .find(|session| session.provider_id == *workspace.id() && session.target == target)
+    }
+
+    /// The session occupying Tuivir's enlarged presentation, if any.
+    pub fn enlarged_resource_shell_session(&self) -> Option<&ResourceShellSession> {
+        let ResourceShellPresentation::Enlarged(session_id) = self.resource_shell_presentation
+        else {
+            return None;
+        };
+        self.resource_shell_sessions
+            .iter()
+            .find(|session| session.id == session_id)
+    }
+
+    /// Human-facing identity for the session in the enlarged presentation.
+    pub fn enlarged_resource_shell_identity(&self) -> Option<String> {
+        let session = self.enlarged_resource_shell_session()?;
+        let provider = self
+            .providers
+            .iter()
+            .find(|provider| provider.id() == &session.provider_id)?;
+        let resource_name = provider.resource(&session.target).map_or_else(
+            || session.target.to_string(),
+            |resource| resource.name.clone(),
+        );
+        Some(format!("{} / {resource_name}", provider.name()))
     }
 
     fn active_workspace_mut(&mut self) -> Option<&mut ProviderWorkspaceState> {
@@ -649,6 +681,10 @@ impl App {
                 self.start_selected_resource_shell();
                 Vec::new()
             }
+            Command::ToggleResourceShellSize => {
+                self.toggle_resource_shell_size();
+                Vec::new()
+            }
             Command::Confirm => self.confirm_or_dismiss(),
             Command::Cancel => {
                 self.cancel_or_dismiss();
@@ -1034,28 +1070,23 @@ impl App {
             .is_some_and(ProviderWorkspaceState::select_resource_shell_tab);
         if started {
             self.state.focused_pane = FocusedPane::Details;
-            self.start_selected_resource_shell();
+            if let Some(session_id) = self.start_selected_resource_shell() {
+                self.state.resource_shell_presentation =
+                    ResourceShellPresentation::Enlarged(session_id);
+            }
         }
     }
 
-    fn start_selected_resource_shell(&mut self) {
-        let Some(provider) = self.state.active_workspace() else {
-            return;
-        };
+    fn start_selected_resource_shell(&mut self) -> Option<ResourceShellSessionId> {
+        let provider = self.state.active_workspace()?;
         if !provider.selected_resource_shell_tab() {
-            return;
+            return None;
         }
         let provider_id = provider.id().clone();
-        let Some(target) = provider.selected_resource_target() else {
-            return;
-        };
-        let Some(resource) = provider.selected_resource() else {
-            return;
-        };
-        let Some(process) = resource.shell.clone() else {
-            return;
-        };
-        if self.state.resource_shell_sessions.iter().any(|session| {
+        let target = provider.selected_resource_target()?;
+        let resource = provider.selected_resource()?;
+        let process = resource.shell.clone()?;
+        if let Some(session) = self.state.resource_shell_sessions.iter().find(|session| {
             session.provider_id == provider_id
                 && session.target == target
                 && matches!(
@@ -1064,7 +1095,7 @@ impl App {
                         | ResourceShellSessionLifecycle::Running
                 )
         }) {
-            return;
+            return Some(session.id);
         }
         self.state
             .resource_shell_sessions
@@ -1076,9 +1107,29 @@ impl App {
             lifecycle: ResourceShellSessionLifecycle::Starting,
         };
         self.next_resource_shell_session_id += 1;
+        let session_id = session.id;
         self.state.resource_shell_sessions.push(session.clone());
         self.pending_resource_shell_effects
             .push(ResourceShellEffect::Start { session, process });
+        Some(session_id)
+    }
+
+    fn toggle_resource_shell_size(&mut self) {
+        if matches!(
+            self.state.resource_shell_presentation,
+            ResourceShellPresentation::Enlarged(_)
+        ) {
+            self.state.resource_shell_presentation = ResourceShellPresentation::Details;
+            return;
+        }
+        let session_id = self
+            .state
+            .visible_resource_shell_session()
+            .map(|session| session.id);
+        if let Some(session_id) = session_id {
+            self.state.resource_shell_presentation =
+                ResourceShellPresentation::Enlarged(session_id);
+        }
     }
 
     fn toggle_help(&mut self) {

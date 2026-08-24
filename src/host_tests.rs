@@ -4,13 +4,14 @@ use std::{
     io,
     path::Path,
     sync::Mutex,
+    thread,
     time::{Duration, Instant},
 };
 
 use super::{
     Clipboard, DetailDispatchQueue, Osc52Clipboard, ResourceShellRuntime,
     ResourceShellRuntimeEvent, ShellInputRouter, ShellKeyRoute, ShellPointerRoute, handle_key,
-    handle_mouse, persist_pane_boundary,
+    handle_mouse, persist_pane_boundary, release_resource_shell,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
@@ -163,6 +164,91 @@ fn a_real_pty_shell_keeps_colour_unicode_and_cursor_in_its_screen() {
 }
 
 #[test]
+fn a_real_pty_shell_receives_the_exact_enlarged_viewport_size() {
+    let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    let mut runtime = ResourceShellRuntime::default();
+    let session = tuivir::application::ResourceShellSessionId::new(9);
+    runtime
+        .start(
+            session,
+            &ResourceShellProcess::new(
+                "/bin/sh",
+                &[
+                    "-c",
+                    "trap 'stty size' WINCH; printf ready; while :; do :; done",
+                ],
+            ),
+            80,
+            24,
+            events,
+        )
+        .expect("local shell starts in a PTY");
+    let _ = receiver.blocking_recv().expect("shell announces readiness");
+
+    runtime
+        .resize(session, 78, 23)
+        .expect("the visible enlarged terminal resizes its PTY");
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while Instant::now() < deadline {
+        if matches!(
+            receiver.try_recv(),
+            Ok(ResourceShellRuntimeEvent::OutputReady { session_id }) if session_id == session
+        ) {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    let screen = runtime
+        .screen(session)
+        .expect("live Resource Shell Session screen")
+        .lines
+        .into_iter()
+        .flatten()
+        .map(|cell| cell.text)
+        .collect::<String>();
+    assert!(screen.contains("23 78"), "terminal screen: {screen:?}");
+    runtime.stop(session);
+}
+
+#[test]
+fn btop_stays_renderable_across_repeated_resource_shell_resizes() {
+    if std::process::Command::new("btop")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
+        // `btop` is an optional real-PTY acceptance program, not a Tuivir
+        // runtime dependency. CI images without it still exercise the
+        // portable PTY resize assertion above.
+        return;
+    }
+    let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    let mut runtime = ResourceShellRuntime::default();
+    let session = tuivir::application::ResourceShellSessionId::new(10);
+    runtime
+        .start(
+            session,
+            &ResourceShellProcess::new("btop", &[]),
+            80,
+            24,
+            events,
+        )
+        .expect("btop starts in a Resource Shell Session PTY");
+    let _ = receiver.blocking_recv().expect("btop wakes the host");
+
+    for (columns, rows) in [(60, 18), (100, 30), (78, 23), (80, 24)] {
+        runtime
+            .resize(session, columns, rows)
+            .expect("each layout transition resizes btop's PTY");
+    }
+
+    let screen = runtime.screen(session).expect("btop remains renderable");
+    assert_eq!(screen.lines.len(), 24);
+    assert_eq!(screen.lines[0].len(), 80);
+    runtime.stop(session);
+}
+
+#[test]
 fn stopping_a_live_session_forgets_and_reaps_its_pty() {
     let (events, _receiver) = tokio::sync::mpsc::unbounded_channel();
     let mut runtime = ResourceShellRuntime::default();
@@ -211,6 +297,67 @@ fn ctrl_b_q_releases_a_resource_shell_sessions_keyboard_focus() {
         ),
         ShellKeyRoute::ToTuivir
     ));
+}
+
+#[test]
+fn ctrl_b_z_toggles_the_resource_shell_sessions_size_without_reaching_its_pty() {
+    let session = tuivir::application::ResourceShellSessionId::new(7);
+    let mut router = ShellInputRouter::default();
+
+    assert!(matches!(
+        router.route(
+            session,
+            KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)
+        ),
+        ShellKeyRoute::ToTuivir
+    ));
+    assert!(matches!(
+        router.route(
+            session,
+            KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE)
+        ),
+        ShellKeyRoute::ToggleSize
+    ));
+}
+
+#[test]
+fn releasing_an_enlarged_resource_shell_restores_the_details_presentation() {
+    let mut app = app_on_a_loaded_workspace();
+    app.invoke(Command::OpenShell);
+    let session = app.state().resource_shell_sessions[0].id;
+
+    assert!(app.state().enlarged_resource_shell_session().is_some());
+    assert!(release_resource_shell(&mut app).is_empty());
+    assert!(app.state().enlarged_resource_shell_session().is_none());
+    assert_eq!(app.state().resource_shell_sessions[0].id, session);
+}
+
+#[test]
+fn ctrl_b_q_restores_an_enlarged_session_after_its_process_exits() {
+    let mut app = app_on_a_loaded_workspace();
+    app.invoke(Command::OpenShell);
+    let session = app.state().resource_shell_sessions[0].id;
+    app.update(AppEvent::ResourceShellExited {
+        session_id: session,
+    });
+    let mut router = ShellInputRouter::default();
+
+    assert!(matches!(
+        router.route_without_terminal(
+            session,
+            KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)
+        ),
+        ShellKeyRoute::ToTuivir
+    ));
+    assert!(matches!(
+        router.route_without_terminal(
+            session,
+            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)
+        ),
+        ShellKeyRoute::Released
+    ));
+    assert!(release_resource_shell(&mut app).is_empty());
+    assert!(app.state().enlarged_resource_shell_session().is_none());
 }
 
 #[test]
@@ -695,6 +842,7 @@ fn a_click_on_an_open_overlay_changes_nothing_beneath_it() {
 #[test]
 fn mouse_routing_resolves_each_region_without_a_terminal() {
     let layout = ScreenLayout {
+        area: Rect::new(0, 0, 80, 24),
         provider_bar: Rect::new(0, 0, 80, 1),
         workspace: Rect::new(0, 1, 80, 22),
         status: Rect::new(0, 23, 80, 0),
@@ -711,6 +859,7 @@ fn mouse_routing_resolves_each_region_without_a_terminal() {
             pane_boundary: Rect::new(9, 1, 2, 5),
         }),
         overlay: None,
+        resource_shell: None,
     };
 
     assert_eq!(
@@ -763,6 +912,7 @@ fn press(column: u16, row: u16) -> tuivir::presentation::MouseInput {
 fn mouse_detail_click_focuses_details_without_live_terminal() {
     let mut app = App::new();
     let layout = ScreenLayout {
+        area: Rect::new(0, 0, 80, 24),
         provider_bar: Rect::new(0, 0, 80, 0),
         workspace: Rect::new(0, 1, 80, 22),
         status: Rect::new(0, 23, 80, 0),
@@ -779,6 +929,7 @@ fn mouse_detail_click_focuses_details_without_live_terminal() {
             pane_boundary: Rect::new(0, 1, 0, 0),
         }),
         overlay: None,
+        resource_shell: None,
     };
     handle_mouse(
         &mut app,

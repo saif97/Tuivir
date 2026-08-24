@@ -23,8 +23,8 @@ pub use provider::{
     ResourceDetails, ResourcePanel, WorkspaceError, WorkspaceSnapshot, lifecycle_commands,
 };
 pub use shell::{
-    ResourceShellEffect, ResourceShellProcess, ResourceShellSession, ResourceShellSessionId,
-    ResourceShellSessionLifecycle,
+    ResourceShellEffect, ResourceShellPresentation, ResourceShellProcess, ResourceShellSession,
+    ResourceShellSessionId, ResourceShellSessionLifecycle,
 };
 pub use workspace::{
     DetailCompletion, DetailContent, DetailLoad, DetailPosition, DetailSelection,

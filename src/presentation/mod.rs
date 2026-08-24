@@ -10,4 +10,4 @@ pub use render::{
     render_foreground_colours, render_resource_shell_screen, render_resource_shell_text,
     render_to_text, render_with_layout,
 };
-pub use screen_layout::{ScreenLayout, WorkspacePanes};
+pub use screen_layout::{ResourceShellLayout, ScreenLayout, WorkspacePanes};

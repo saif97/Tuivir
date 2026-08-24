@@ -99,6 +99,28 @@ pub fn render(state: &AppState, frame: &mut Frame<'_>) {
 /// The host measures once per frame and keeps that layout for mouse routing, so
 /// what the user clicks is what they see.
 pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &ScreenLayout) {
+    if let (Some(session), Some(shell)) = (
+        state.enlarged_resource_shell_session(),
+        layout.resource_shell.as_ref(),
+    ) {
+        if let Some(header) = shell.header {
+            let identity = state
+                .enlarged_resource_shell_identity()
+                .unwrap_or_else(|| "Resource Shell Session".to_owned());
+            frame.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::styled(
+                        identity,
+                        themed_style(ThemeRole::Primary).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw("  Ctrl-B q restore"),
+                ])),
+                header,
+            );
+        }
+        render_resource_shell_state(Some(session), frame, shell.terminal);
+        return;
+    }
     render_provider_bar(state, frame, layout);
     render_command_bar(state, frame, layout.status);
 
@@ -673,17 +695,17 @@ pub fn render_resource_shell_text(text: &str, frame: &mut Frame<'_>, area: Rect)
 /// Renders the host-adapted terminal grid without flattening terminal colour
 /// or cursor state into ordinary Details text.
 pub fn render_resource_shell_screen(
-    screen: &ResourceShellScreen,
+    screen: ResourceShellScreen,
     frame: &mut Frame<'_>,
     area: Rect,
 ) {
     let lines = screen
         .lines
-        .iter()
+        .into_iter()
         .map(|cells| {
             Line::from(
                 cells
-                    .iter()
+                    .into_iter()
                     .map(|cell| {
                         let mut style = Style::default();
                         if let Some(foreground) = cell.foreground {
@@ -695,7 +717,7 @@ pub fn render_resource_shell_screen(
                         if cell.cursor || cell.selected {
                             style = style.add_modifier(Modifier::REVERSED);
                         }
-                        Span::styled(cell.text.clone(), style)
+                        Span::styled(cell.text, style)
                     })
                     .collect::<Vec<_>>(),
             )

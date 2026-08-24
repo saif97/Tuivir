@@ -90,6 +90,9 @@ pub enum Command {
     OpenShell,
     /// Explicitly starts the selected Resource's Shell Detail View Tab.
     StartResourceShell,
+    /// Moves the visible Resource Shell Session between Details and its
+    /// enlarged presentation without changing the session lifetime.
+    ToggleResourceShellSize,
     /// Accepts the open modal.
     Confirm,
     /// Cancels or returns from the open modal.

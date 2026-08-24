@@ -775,6 +775,16 @@ impl ProviderWorkspaceState {
         snapshot.resource(&target)
     }
 
+    /// Finds a Resource by its stable target without changing this Workspace's
+    /// current navigation. Persistent Resource Shell Sessions use it to retain
+    /// their identity while another Resource is selected.
+    pub fn resource(&self, target: &ResourceTarget) -> Option<&Resource> {
+        let WorkspaceLoadState::Ready(snapshot) = &self.load_state else {
+            return None;
+        };
+        snapshot.resource(target)
+    }
+
     /// Whether the selected Resource is showing Tuivir's Shell Detail View
     /// Tab. The application uses this as the explicit start gate.
     pub fn selected_resource_shell_tab(&self) -> bool {
