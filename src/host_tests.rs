@@ -135,6 +135,7 @@ fn a_real_pty_shell_wakes_the_host_and_keeps_its_rendered_output() {
             .flatten()
             .any(|cell| cell.text == "h")
     );
+    runtime.stop(session);
 }
 
 /// A Resource Shell Session keeps draining while its Resource is hidden, but
@@ -213,16 +214,46 @@ fn a_real_pty_shell_keeps_colour_unicode_and_cursor_in_its_screen() {
     runtime
         .start(
             session,
-            &ResourceShellProcess::new("/bin/sh", &["-c", "printf '\\033[31mred\\033[0m 鮫'"]),
+            &ResourceShellProcess::new(
+                "/bin/sh",
+                &["-c", "printf '\\033[31mred\\033[0m 鮫'; sleep 1"],
+            ),
             80,
             24,
             events,
         )
         .expect("local shell starts in a PTY");
-    let _ = receiver.blocking_recv().expect("PTY output wakes the host");
-
-    let screen = runtime.screen(session).expect("live session screen");
-    let cells = screen.lines.into_iter().flatten().collect::<Vec<_>>();
+    let deadline = Instant::now() + Duration::from_secs(1);
+    let cells = loop {
+        while let Ok(event) = receiver.try_recv() {
+            match event {
+                ResourceShellRuntimeEvent::OutputReady { session_id } if session_id == session => {
+                    runtime.acknowledge_output(session);
+                }
+                _ => {}
+            }
+        }
+        let cells = runtime
+            .screen(session)
+            .expect("live session screen")
+            .lines
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+        let has_red_text = cells
+            .iter()
+            .any(|cell| cell.text == "r" && cell.foreground == Some(Color::Red));
+        let has_unicode = cells.iter().any(|cell| cell.text == "鮫");
+        let has_cursor = cells.iter().any(|cell| cell.cursor);
+        if has_red_text && has_unicode && has_cursor {
+            break cells;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "PTY did not finish emulating its colour, Unicode, and cursor output"
+        );
+        thread::sleep(Duration::from_millis(10));
+    };
     assert!(
         cells
             .iter()
@@ -230,6 +261,7 @@ fn a_real_pty_shell_keeps_colour_unicode_and_cursor_in_its_screen() {
     );
     assert!(cells.iter().any(|cell| cell.text == "鮫"));
     assert!(cells.iter().any(|cell| cell.cursor));
+    runtime.stop(session);
 }
 
 #[test]
