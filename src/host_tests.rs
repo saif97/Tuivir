@@ -212,6 +212,16 @@ fn a_real_pty_shell_receives_the_exact_enlarged_viewport_size() {
 
 #[test]
 fn btop_stays_renderable_across_repeated_resource_shell_resizes() {
+    if std::process::Command::new("btop")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
+        // `btop` is an optional real-PTY acceptance program, not a Tuivir
+        // runtime dependency. CI images without it still exercise the
+        // portable PTY resize assertion above.
+        return;
+    }
     let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel();
     let mut runtime = ResourceShellRuntime::default();
     let session = tuivir::application::ResourceShellSessionId::new(10);
