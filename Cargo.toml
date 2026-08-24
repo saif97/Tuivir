@@ -8,6 +8,7 @@ description = "A terminal environment for inspecting and operating resources man
 publish = false
 
 [dependencies]
+alacritty_terminal = "0.26.0"
 crossterm = "0.29.0"
 ratatui = "0.30.2"
 serde = { version = "1.0", features = ["derive"] }

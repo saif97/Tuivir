@@ -3,7 +3,7 @@ use std::{future::Future, pin::Pin};
 use serde::Deserialize;
 
 use crate::{
-    application::{InteractiveShellProcess, LifecycleCommandPolicy, lifecycle_commands},
+    application::{LifecycleCommandPolicy, ResourceShellProcess, lifecycle_commands},
     infrastructure::process::{CliRunner, ProcessError, ProcessSpec},
     infrastructure::provider::{
         DetailView, DetailViewId, Provider, ProviderDiscovery, ProviderId, ProviderWorkspace,
@@ -436,15 +436,15 @@ fn docker_resource_state(state: &str) -> ResourceState {
     }
 }
 
-/// The Interactive Shell Docker offers inside a container.
+/// The Resource Shell Session Docker offers inside a container.
 ///
 /// `docker exec` attaches only to a running container, so every other state
 /// offers none. Plain `/bin/sh` is the shell that exists wherever any shell
 /// does, including the minimal images Docker containers are so often built
 /// from; reaching for a login shell instead would fail on exactly those.
-fn container_shell(state: ResourceState, resource_id: &str) -> Option<InteractiveShellProcess> {
+fn container_shell(state: ResourceState, resource_id: &str) -> Option<ResourceShellProcess> {
     (state == ResourceState::Running)
-        .then(|| InteractiveShellProcess::new("docker", &["exec", "-it", resource_id, "/bin/sh"]))
+        .then(|| ResourceShellProcess::new("docker", &["exec", "-it", resource_id, "/bin/sh"]))
 }
 
 fn discovery_with_error(message: impl Into<String>) -> ProviderDiscovery {

@@ -3,7 +3,7 @@ use std::{future::Future, pin::Pin};
 use serde::Deserialize;
 
 use crate::{
-    application::{InteractiveShellProcess, LifecycleCommandPolicy, lifecycle_commands},
+    application::{LifecycleCommandPolicy, ResourceShellProcess, lifecycle_commands},
     infrastructure::process::{CliRunner, ProcessError, ProcessSpec},
     infrastructure::provider::{
         DetailView, DetailViewId, Provider, ProviderDiscovery, ProviderId, ProviderWorkspace,
@@ -433,16 +433,16 @@ fn incus_resource_state(status: &str) -> ResourceState {
     }
 }
 
-/// The Interactive Shell Incus offers inside an instance.
+/// The Resource Shell Session Incus offers inside an instance.
 ///
 /// `incus exec` reaches only into a running instance, so every other state
 /// offers none. An instance is a whole system rather than one packaged
 /// process, so the shell worth giving the user is root's login shell: this is
 /// what Incus's own `shell` alias expands to, spelled out here so it does not
 /// depend on that alias surviving in the user's configuration.
-fn instance_shell(state: ResourceState, name: &str) -> Option<InteractiveShellProcess> {
+fn instance_shell(state: ResourceState, name: &str) -> Option<ResourceShellProcess> {
     (state == ResourceState::Running)
-        .then(|| InteractiveShellProcess::new("incus", &["exec", name, "--", "su", "-l"]))
+        .then(|| ResourceShellProcess::new("incus", &["exec", name, "--", "su", "-l"]))
 }
 
 fn discovery_error(message: impl AsRef<str>, command: &str) -> ProviderDiscovery {
