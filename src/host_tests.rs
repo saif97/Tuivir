@@ -11,18 +11,18 @@ use std::{
 use super::{
     Clipboard, DetailDispatchQueue, Osc52Clipboard, ResourceShellRuntime,
     ResourceShellRuntimeEvent, ShellInputRouter, ShellKeyRoute, ShellPointerRoute, handle_key,
-    handle_mouse, persist_pane_boundary, release_resource_shell,
+    handle_mouse, persist_pane_boundary, release_resource_shell, resolve_modal_key_command,
     resource_shell_output_requires_redraw,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 use tuivir::{
-    application::Command,
     application::{
         App, AppEvent, DetailView, ProviderRequest, Resource, ResourceCommand, ResourcePanel,
         ResourceShellProcess, WorkspaceSnapshot,
     },
+    application::{Command, ResourceShellEffect, ResourceShellSessionLifecycle},
     domain::{Provider, ProviderId, ResourceId, ResourcePanelId, ResourceState, TargetEnvironment},
     infrastructure::provider::ProviderDiscovery,
     infrastructure::{
@@ -366,6 +366,129 @@ fn stopping_a_live_session_forgets_and_reaps_its_pty() {
 
     runtime.stop(session);
     assert!(runtime.screen(session).is_none());
+}
+
+/// A Provider CLI that ignores its graceful hangup must not keep Tuivir alive
+/// indefinitely. Cleanup signals its whole process group, escalates within a
+/// short bound, and joins the PTY event loop before terminal restoration.
+#[test]
+fn stopping_a_stubborn_resource_shell_session_escalates_and_reaps_its_process_group() {
+    let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    let mut runtime = ResourceShellRuntime::default();
+    let session = tuivir::application::ResourceShellSessionId::new(12);
+    runtime
+        .start(
+            session,
+            &ResourceShellProcess::new(
+                "/bin/sh",
+                &[
+                    "-c",
+                    "trap '' HUP TERM; /bin/sh -c 'trap \"\" HUP TERM; printf ready; while :; do :; done' & wait",
+                ],
+            ),
+            80,
+            24,
+            events,
+        )
+        .expect("local shell starts in a PTY");
+    let process_group_id = runtime
+        .process_group_id(session)
+        .expect("live session process group");
+    assert!(matches!(
+        receiver.blocking_recv(),
+        Some(ResourceShellRuntimeEvent::OutputReady { session_id }) if session_id == session
+    ));
+
+    let started = Instant::now();
+    runtime.stop(session);
+
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "stubborn session cleanup exceeded its bounded grace period"
+    );
+    assert!(runtime.screen(session).is_none());
+    assert!(
+        !ResourceShellRuntime::process_group_is_alive(process_group_id),
+        "the stubborn child process group was reaped"
+    );
+}
+
+/// Quit is a host concern only after application state has obtained explicit
+/// consent to end a live Resource Shell Session. Cancellation leaves the PTY
+/// usable; confirmation schedules its cleanup before terminal restoration.
+#[test]
+fn live_resource_shell_quit_waits_for_confirmation_before_host_exit() {
+    let mut app = app_on_a_loaded_workspace();
+    app.invoke(Command::OpenShell);
+    let session_id = app.state().resource_shell_sessions[0].id;
+    app.update(AppEvent::ResourceShellStarted { session_id });
+    let _ = app.take_resource_shell_effects();
+
+    let (control, requests) = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE),
+    );
+
+    assert_eq!(control, super::ShellControl::Continue);
+    assert!(requests.is_empty());
+    assert!(app.state().confirmation.is_some());
+
+    let (control, _) = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE),
+    );
+    assert_eq!(control, super::ShellControl::Continue);
+    assert_eq!(
+        app.state().resource_shell_sessions[0].lifecycle,
+        ResourceShellSessionLifecycle::Running
+    );
+
+    let _ = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE),
+    );
+    let (control, _) = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE),
+    );
+
+    assert_eq!(control, super::ShellControl::Quit);
+    assert_eq!(
+        app.take_resource_shell_effects(),
+        vec![ResourceShellEffect::Stop { session_id }]
+    );
+}
+
+/// Without a live Resource Shell Session, Quit reaches the host directly and
+/// does not raise a confirmation surface.
+#[test]
+fn quit_without_a_resource_shell_session_exits_without_confirmation() {
+    let mut app = app_on_a_loaded_workspace();
+
+    let (control, requests) = handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE),
+    );
+
+    assert_eq!(control, super::ShellControl::Quit);
+    assert!(requests.is_empty());
+    assert!(app.state().confirmation.is_none());
+}
+
+/// A Quit modal owns Enter even after `Ctrl-B q` released the visible shell.
+/// The host must confirm rather than refocus the terminal and send it a line.
+#[test]
+fn quit_confirmation_claims_enter_before_an_unfocused_resource_shell() {
+    let mut app = app_on_a_loaded_workspace();
+    app.invoke(Command::OpenShell);
+    let session_id = app.state().resource_shell_sessions[0].id;
+    app.update(AppEvent::ResourceShellStarted { session_id });
+    app.invoke(Command::Quit);
+
+    assert_eq!(
+        resolve_modal_key_command(&app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+        Some(Command::Confirm)
+    );
 }
 
 #[test]

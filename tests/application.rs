@@ -48,14 +48,14 @@ fn handle_key(app: &mut App, event: KeyEvent) -> (ShellControl, Vec<ProviderRequ
     let Some(key) = key_from_event(event) else {
         return (ShellControl::Continue, Vec::new());
     };
-    if app.reserved(key) == Some(Command::Quit) {
-        return (ShellControl::Quit, Vec::new());
-    }
-    match app.resolve_command(key) {
-        Some(Command::Quit) => (ShellControl::Quit, Vec::new()),
-        Some(command) => (ShellControl::Continue, app.invoke(command)),
-        None => (ShellControl::Continue, Vec::new()),
-    }
+    let command = app.reserved(key).or_else(|| app.resolve_command(key));
+    let requests = command.map_or_else(Vec::new, |command| app.invoke(command));
+    let control = if app.quit_is_ready() {
+        ShellControl::Quit
+    } else {
+        ShellControl::Continue
+    };
+    (control, requests)
 }
 
 /// Reports the single foreground colour `text` is rendered in, panicking when
@@ -1285,7 +1285,7 @@ fn help_offers_a_shell_only_while_the_resource_can_host_one() {
     );
     let screen = render_to_text(stopped.state(), 100, 24);
     assert!(
-        screen.contains("E  Shell (unavailable)"),
+        screen.contains("E  Open Shell Detail View (unavailable)"),
         "rendered screen:\n{screen}"
     );
 
@@ -1300,9 +1300,12 @@ fn help_offers_a_shell_only_while_the_resource_can_host_one() {
         KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
     );
     let screen = render_to_text(running.state(), 100, 24);
-    assert!(screen.contains("E  Shell"), "rendered screen:\n{screen}");
     assert!(
-        !screen.contains("E  Shell (unavailable)"),
+        screen.contains("E  Open Shell Detail View"),
+        "rendered screen:\n{screen}"
+    );
+    assert!(
+        !screen.contains("E  Open Shell Detail View (unavailable)"),
         "rendered screen:\n{screen}"
     );
 }
@@ -1545,6 +1548,59 @@ fn resource_shell_runtime_events_update_only_the_matching_session_lifecycle() {
         ResourceShellSessionLifecycle::Exited
     );
     assert!(render_to_text(app.state(), 100, 24).contains("Session exited"));
+}
+
+/// Quitting with no live Resource Shell Session leaves the host free to exit
+/// immediately: no confirmation is needed when no local process can be lost.
+#[test]
+fn quit_without_live_resource_shell_sessions_is_ready_immediately() {
+    let mut app = App::new();
+
+    assert!(app.invoke(Command::Quit).is_empty());
+
+    assert!(app.quit_is_ready());
+    assert!(app.state().confirmation.is_none());
+}
+
+/// A Quit confirmation protects live Provider CLI processes without changing
+/// the Resources that own them. Cancelling preserves the exact running session;
+/// confirming asks the host to stop and reap it before Tuivir exits.
+#[test]
+fn quitting_live_resource_shell_sessions_requires_confirmation_before_cleanup() {
+    let mut app = App::new();
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
+    app.invoke(Command::OpenShell);
+    let session_id = app.state().resource_shell_sessions[0].id;
+    app.update(AppEvent::ResourceShellStarted { session_id });
+    let _ = app.take_resource_shell_effects();
+
+    app.invoke(Command::Quit);
+
+    assert!(!app.quit_is_ready());
+    assert!(
+        render_to_text(app.state(), 100, 24)
+            .contains("Quit Tuivir and end 1 Resource Shell Session?")
+    );
+
+    app.invoke(Command::Cancel);
+    assert_eq!(
+        app.state().resource_shell_sessions[0].lifecycle,
+        ResourceShellSessionLifecycle::Running
+    );
+    assert!(app.take_resource_shell_effects().is_empty());
+
+    app.invoke(Command::Quit);
+    app.invoke(Command::Confirm);
+
+    assert!(app.quit_is_ready());
+    assert_eq!(
+        app.take_resource_shell_effects(),
+        vec![ResourceShellEffect::Stop { session_id }]
+    );
 }
 
 /// An exited Resource Shell Session keeps its final screen until the user

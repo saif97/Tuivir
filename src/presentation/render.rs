@@ -9,7 +9,8 @@ use ratatui::{
 };
 
 use crate::application::{
-    AppState, DetailSelection, FocusedPane, ResourceShellSession, ResourceShellSessionLifecycle,
+    AppState, Confirmation, DetailSelection, FocusedPane, ResourceShellSession,
+    ResourceShellSessionLifecycle,
 };
 use crate::application::{
     DetailContent, ResourceDetailsView, ResourcePanelView, WorkspacePresentation, WorkspaceView,
@@ -119,6 +120,7 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
             );
         }
         render_resource_shell_state(Some(session), frame, shell.terminal);
+        render_confirmation(state, frame);
         return;
     }
     render_provider_bar(state, frame, layout);
@@ -191,26 +193,49 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
         );
     }
 
+    render_confirmation(state, frame);
+}
+
+fn render_confirmation(state: &AppState, frame: &mut Frame<'_>) {
     if let (Some(confirmation), Some(area)) =
         (&state.confirmation, confirmation_area(state, frame.area()))
     {
         frame.render_widget(Clear, area);
-        let mut lines = vec![Line::from(format!(
-            "Delete {} resource {} ({})?",
-            confirmation.provider_name, confirmation.resource_name, confirmation.target
-        ))];
-        // Deleting anything but a stopped Resource stops it first, so say so
-        // before the single confirmation that authorises both. The wording
-        // stays on the outcome: a paused or restarting Resource is not running,
-        // but removing it still stops it.
-        match confirmation.state {
-            Some(ResourceState::Stopped) => {}
-            Some(_) => lines.push(Line::from("It will be stopped and removed.")),
-            None => lines.push(Line::from("It will be permanently removed.")),
-        }
+        let (title, lines) = match confirmation {
+            Confirmation::ResourceCommand(confirmation) => {
+                let mut lines = vec![Line::from(format!(
+                    "Delete {} resource {} ({})?",
+                    confirmation.provider_name, confirmation.resource_name, confirmation.target
+                ))];
+                // Deleting anything but a stopped Resource stops it first, so
+                // say so before the single confirmation that authorises both.
+                match confirmation.state {
+                    Some(ResourceState::Stopped) => {}
+                    Some(_) => lines.push(Line::from("It will be stopped and removed.")),
+                    None => lines.push(Line::from("It will be permanently removed.")),
+                }
+                (" Confirm deletion ", lines)
+            }
+            Confirmation::QuitResourceShellSessions => {
+                let session_count = state.live_resource_shell_sessions().count();
+                let noun = if session_count == 1 {
+                    "Resource Shell Session"
+                } else {
+                    "Resource Shell Sessions"
+                };
+                (
+                    " Confirm Quit ",
+                    vec![
+                        Line::from(format!("Quit Tuivir and end {session_count} {noun}?")),
+                        Line::from("The underlying Resources will keep running."),
+                    ],
+                )
+            }
+        };
+        let mut lines = lines;
         lines.push(Line::from("Press y/Enter to confirm or n/Esc to cancel."));
         frame.render_widget(
-            Paragraph::new(lines).block(modal_block(" Confirm deletion ", ThemeRole::Warning)),
+            Paragraph::new(lines).block(modal_block(title, ThemeRole::Warning)),
             area,
         );
     }
