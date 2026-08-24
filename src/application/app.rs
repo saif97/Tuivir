@@ -194,6 +194,16 @@ impl AppState {
         Some(format!("{} / {resource_name}", provider.name()))
     }
 
+    /// Resource Shell Sessions whose private runtime can still receive input.
+    pub fn live_resource_shell_sessions(&self) -> impl Iterator<Item = &ResourceShellSession> {
+        self.resource_shell_sessions.iter().filter(|session| {
+            matches!(
+                session.lifecycle,
+                ResourceShellSessionLifecycle::Starting | ResourceShellSessionLifecycle::Running
+            )
+        })
+    }
+
     fn active_workspace_mut(&mut self) -> Option<&mut ProviderWorkspaceState> {
         self.active_provider
             .and_then(|active| self.providers.get_mut(active))
@@ -267,7 +277,7 @@ pub struct ResourceCommandInvocation {
 /// The deliberate operation awaiting the user's confirmation.
 pub enum Confirmation {
     ResourceCommand(ResourceCommandInvocation),
-    QuitResourceShellSessions { session_count: usize },
+    QuitResourceShellSessions,
 }
 
 pub struct App {
@@ -762,7 +772,7 @@ impl App {
             Some(Confirmation::ResourceCommand(confirmation)) => {
                 self.dispatch_resource_command(confirmation)
             }
-            Some(Confirmation::QuitResourceShellSessions { .. }) => {
+            Some(Confirmation::QuitResourceShellSessions) => {
                 self.pending_resource_shell_effects.extend(
                     self.live_resource_shell_session_ids()
                         .into_iter()
@@ -1078,31 +1088,22 @@ impl App {
     fn request_quit(&mut self) -> Vec<ProviderRequest> {
         if matches!(
             self.state.confirmation,
-            Some(Confirmation::QuitResourceShellSessions { .. })
+            Some(Confirmation::QuitResourceShellSessions)
         ) {
             return Vec::new();
         }
-        let session_count = self.live_resource_shell_session_ids().len();
+        let session_count = self.state.live_resource_shell_sessions().count();
         if session_count == 0 {
             self.quit_is_ready = true;
         } else {
-            self.state.confirmation =
-                Some(Confirmation::QuitResourceShellSessions { session_count });
+            self.state.confirmation = Some(Confirmation::QuitResourceShellSessions);
         }
         Vec::new()
     }
 
     fn live_resource_shell_session_ids(&self) -> Vec<ResourceShellSessionId> {
         self.state
-            .resource_shell_sessions
-            .iter()
-            .filter(|session| {
-                matches!(
-                    session.lifecycle,
-                    ResourceShellSessionLifecycle::Starting
-                        | ResourceShellSessionLifecycle::Running
-                )
-            })
+            .live_resource_shell_sessions()
             .map(|session| session.id)
             .collect()
     }

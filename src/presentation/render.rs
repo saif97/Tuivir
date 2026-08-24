@@ -216,8 +216,9 @@ fn render_confirmation(state: &AppState, frame: &mut Frame<'_>) {
                 }
                 (" Confirm deletion ", lines)
             }
-            Confirmation::QuitResourceShellSessions { session_count } => {
-                let noun = if *session_count == 1 {
+            Confirmation::QuitResourceShellSessions => {
+                let session_count = state.live_resource_shell_sessions().count();
+                let noun = if session_count == 1 {
                     "Resource Shell Session"
                 } else {
                     "Resource Shell Sessions"

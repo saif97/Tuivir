@@ -408,7 +408,7 @@ fn stopping_a_stubborn_resource_shell_session_escalates_and_reaps_its_process_gr
     );
     assert!(runtime.screen(session).is_none());
     assert!(
-        !process_group_is_alive(process_group_id),
+        !ResourceShellRuntime::process_group_is_alive(process_group_id),
         "the stubborn child process group was reaped"
     );
 }
@@ -489,20 +489,6 @@ fn quit_confirmation_claims_enter_before_an_unfocused_resource_shell() {
         resolve_modal_key_command(&app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
         Some(Command::Confirm)
     );
-}
-
-#[cfg(unix)]
-fn process_group_is_alive(process_group_id: u32) -> bool {
-    let Ok(process_group_id) = i32::try_from(process_group_id) else {
-        return false;
-    };
-    let result = unsafe { libc::kill(-process_group_id, 0) };
-    result == 0 || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
-}
-
-#[cfg(not(unix))]
-fn process_group_is_alive(_: u32) -> bool {
-    false
 }
 
 #[test]

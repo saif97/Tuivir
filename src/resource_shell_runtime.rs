@@ -139,6 +139,13 @@ impl ResourceShellRuntime {
             .map(|session| session.process_group_id)
     }
 
+    #[cfg(test)]
+    /// Whether a process group still exists, exposed only so host cleanup tests
+    /// use the runtime's exact liveness rule.
+    pub fn process_group_is_alive(process_group_id: u32) -> bool {
+        process_group_is_alive(process_group_id)
+    }
+
     /// Starts exactly the Provider-declared executable and argument vector in
     /// a private PTY, then drives Alacritty's terminal emulator on its own
     /// thread.
@@ -390,9 +397,6 @@ impl ResourceShellRuntime {
 
 #[cfg(unix)]
 fn terminate_process_group(process_group_id: u32) {
-    let Ok(process_group_id) = i32::try_from(process_group_id) else {
-        return;
-    };
     signal_process_group(process_group_id, libc::SIGTERM);
     let deadline = Instant::now() + RESOURCE_SHELL_TERMINATION_GRACE;
     while process_group_is_alive(process_group_id) && Instant::now() < deadline {
@@ -407,7 +411,10 @@ fn terminate_process_group(process_group_id: u32) {
 fn terminate_process_group(_: u32) {}
 
 #[cfg(unix)]
-fn signal_process_group(process_group_id: i32, signal: i32) {
+fn signal_process_group(process_group_id: u32, signal: i32) {
+    let Ok(process_group_id) = i32::try_from(process_group_id) else {
+        return;
+    };
     // A negative PID addresses the complete process group that owns the
     // Provider CLI's private PTY, not merely its shell leader.
     unsafe {
@@ -416,7 +423,10 @@ fn signal_process_group(process_group_id: i32, signal: i32) {
 }
 
 #[cfg(unix)]
-fn process_group_is_alive(process_group_id: i32) -> bool {
+fn process_group_is_alive(process_group_id: u32) -> bool {
+    let Ok(process_group_id) = i32::try_from(process_group_id) else {
+        return false;
+    };
     let result = unsafe { libc::kill(-process_group_id, 0) };
     result == 0 || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
 }

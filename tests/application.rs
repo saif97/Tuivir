@@ -48,28 +48,13 @@ fn handle_key(app: &mut App, event: KeyEvent) -> (ShellControl, Vec<ProviderRequ
     let Some(key) = key_from_event(event) else {
         return (ShellControl::Continue, Vec::new());
     };
-    if app.reserved(key) == Some(Command::Quit) {
-        let requests = app.invoke(Command::Quit);
-        return (
-            app.quit_is_ready()
-                .then_some(ShellControl::Quit)
-                .unwrap_or(ShellControl::Continue),
-            requests,
-        );
-    }
-    match app.resolve_command(key) {
-        Some(Command::Quit) => {
-            let requests = app.invoke(Command::Quit);
-            (
-                app.quit_is_ready()
-                    .then_some(ShellControl::Quit)
-                    .unwrap_or(ShellControl::Continue),
-                requests,
-            )
-        }
-        Some(command) => (ShellControl::Continue, app.invoke(command)),
-        None => (ShellControl::Continue, Vec::new()),
-    }
+    let command = app.reserved(key).or_else(|| app.resolve_command(key));
+    let requests = command.map_or_else(Vec::new, |command| app.invoke(command));
+    let control = app
+        .quit_is_ready()
+        .then_some(ShellControl::Quit)
+        .unwrap_or(ShellControl::Continue);
+    (control, requests)
 }
 
 /// Reports the single foreground colour `text` is rendered in, panicking when
