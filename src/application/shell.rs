@@ -37,6 +37,17 @@ pub enum ResourceShellSessionLifecycle {
     StartFailed(String),
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+/// Where Tuivir presents the Resource Shell Session currently in view.
+///
+/// Enlarging is presentation-only: its session identity and live runtime stay
+/// untouched while the Details Pane gives way to the terminal.
+pub enum ResourceShellPresentation {
+    #[default]
+    Details,
+    Enlarged(ResourceShellSessionId),
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// Application-owned identity and lifecycle for one Resource Shell Session.
 ///

@@ -1334,10 +1334,11 @@ fn question_mark_closes_the_help_overlay_when_it_is_already_open() {
     assert!(screen.contains("api"), "rendered screen:\n{screen}");
 }
 
-/// `E` is the direct Resource Shell Session path. It selects Shell and emits a
-/// host effect, never taking the outer terminal away from Tuivir.
+/// `E` is the direct enlarged Resource Shell Session path. It selects Shell,
+/// emits one host start effect, and gives that same session the enlarged
+/// presentation without taking the outer terminal away from Tuivir.
 #[test]
-fn the_shell_key_starts_a_session_for_the_selected_container() {
+fn the_shell_key_starts_and_enlarges_the_selected_containers_session() {
     let mut app = App::new();
     ready_workspace(
         &mut app,
@@ -1369,6 +1370,11 @@ fn the_shell_key_starts_a_session_for_the_selected_container() {
         )
     );
     assert_eq!(
+        app.state().enlarged_resource_shell_session(),
+        Some(&session),
+        "E presents the same starting session enlarged"
+    );
+    assert_eq!(
         app.take_resource_shell_effects(),
         vec![ResourceShellEffect::Start {
             session: session.clone(),
@@ -1377,6 +1383,20 @@ fn the_shell_key_starts_a_session_for_the_selected_container() {
                 &["exec", "-it", "container-a", "/bin/sh"],
             ),
         }]
+    );
+
+    app.update(AppEvent::ResourceShellStarted {
+        session_id: session.id,
+    });
+    app.invoke(Command::ToggleResourceShellSize);
+
+    assert!(
+        app.state().enlarged_resource_shell_session().is_none(),
+        "the size toggle restores Details without replacing the session"
+    );
+    assert!(
+        app.take_resource_shell_effects().is_empty(),
+        "moving presentation never starts another Resource Shell Session"
     );
 }
 
