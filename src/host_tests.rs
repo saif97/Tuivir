@@ -211,6 +211,34 @@ fn a_real_pty_shell_receives_the_exact_enlarged_viewport_size() {
 }
 
 #[test]
+fn btop_stays_renderable_across_repeated_resource_shell_resizes() {
+    let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    let mut runtime = ResourceShellRuntime::default();
+    let session = tuivir::application::ResourceShellSessionId::new(10);
+    runtime
+        .start(
+            session,
+            &ResourceShellProcess::new("btop", &[]),
+            80,
+            24,
+            events,
+        )
+        .expect("btop starts in a Resource Shell Session PTY");
+    let _ = receiver.blocking_recv().expect("btop wakes the host");
+
+    for (columns, rows) in [(60, 18), (100, 30), (78, 23), (80, 24)] {
+        runtime
+            .resize(session, columns, rows)
+            .expect("each layout transition resizes btop's PTY");
+    }
+
+    let screen = runtime.screen(session).expect("btop remains renderable");
+    assert_eq!(screen.lines.len(), 24);
+    assert_eq!(screen.lines[0].len(), 80);
+    runtime.stop(session);
+}
+
+#[test]
 fn stopping_a_live_session_forgets_and_reaps_its_pty() {
     let (events, _receiver) = tokio::sync::mpsc::unbounded_channel();
     let mut runtime = ResourceShellRuntime::default();
@@ -274,7 +302,10 @@ fn ctrl_b_z_toggles_the_resource_shell_sessions_size_without_reaching_its_pty() 
         ShellKeyRoute::ToTuivir
     ));
     assert!(matches!(
-        router.route(session, KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE)),
+        router.route(
+            session,
+            KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE)
+        ),
         ShellKeyRoute::ToggleSize
     ));
 }
@@ -289,6 +320,34 @@ fn releasing_an_enlarged_resource_shell_restores_the_details_presentation() {
     assert!(release_resource_shell(&mut app).is_empty());
     assert!(app.state().enlarged_resource_shell_session().is_none());
     assert_eq!(app.state().resource_shell_sessions[0].id, session);
+}
+
+#[test]
+fn ctrl_b_q_restores_an_enlarged_session_after_its_process_exits() {
+    let mut app = app_on_a_loaded_workspace();
+    app.invoke(Command::OpenShell);
+    let session = app.state().resource_shell_sessions[0].id;
+    app.update(AppEvent::ResourceShellExited {
+        session_id: session,
+    });
+    let mut router = ShellInputRouter::default();
+
+    assert!(matches!(
+        router.route_without_terminal(
+            session,
+            KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)
+        ),
+        ShellKeyRoute::ToTuivir
+    ));
+    assert!(matches!(
+        router.route_without_terminal(
+            session,
+            KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)
+        ),
+        ShellKeyRoute::Released
+    ));
+    assert!(release_resource_shell(&mut app).is_empty());
+    assert!(app.state().enlarged_resource_shell_session().is_none());
 }
 
 #[test]
@@ -773,6 +832,7 @@ fn a_click_on_an_open_overlay_changes_nothing_beneath_it() {
 #[test]
 fn mouse_routing_resolves_each_region_without_a_terminal() {
     let layout = ScreenLayout {
+        area: Rect::new(0, 0, 80, 24),
         provider_bar: Rect::new(0, 0, 80, 1),
         workspace: Rect::new(0, 1, 80, 22),
         status: Rect::new(0, 23, 80, 0),
@@ -842,6 +902,7 @@ fn press(column: u16, row: u16) -> tuivir::presentation::MouseInput {
 fn mouse_detail_click_focuses_details_without_live_terminal() {
     let mut app = App::new();
     let layout = ScreenLayout {
+        area: Rect::new(0, 0, 80, 24),
         provider_bar: Rect::new(0, 0, 80, 0),
         workspace: Rect::new(0, 1, 80, 22),
         status: Rect::new(0, 23, 80, 0),

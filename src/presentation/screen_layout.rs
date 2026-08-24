@@ -18,6 +18,8 @@ pub const DETAIL_VIEW_GAP: u16 = 2;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ScreenLayout {
+    /// Full terminal rectangle that this layout measured.
+    pub area: Rect,
     /// The three horizontal bands: the provider bar, the Active Workspace, and
     /// the running-command status line.
     pub provider_bar: Rect,
@@ -72,6 +74,7 @@ impl ScreenLayout {
                 .constraints([Constraint::Length(1), Constraint::Min(0)])
                 .split(area);
             return Self {
+                area,
                 provider_bar: rows[0],
                 workspace: rows[1],
                 status: Rect::default(),
@@ -134,6 +137,7 @@ impl ScreenLayout {
             });
 
         Self {
+            area,
             provider_bar,
             workspace,
             status,

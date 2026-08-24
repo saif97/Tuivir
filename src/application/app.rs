@@ -180,9 +180,10 @@ impl AppState {
             .providers
             .iter()
             .find(|provider| provider.id() == &session.provider_id)?;
-        let resource_name = provider
-            .resource(&session.target)
-            .map_or_else(|| session.target.to_string(), |resource| resource.name.clone());
+        let resource_name = provider.resource(&session.target).map_or_else(
+            || session.target.to_string(),
+            |resource| resource.name.clone(),
+        );
         Some(format!("{} / {resource_name}", provider.name()))
     }
 
@@ -1121,9 +1122,13 @@ impl App {
             self.state.resource_shell_presentation = ResourceShellPresentation::Details;
             return;
         }
-        let session_id = self.state.visible_resource_shell_session().map(|session| session.id);
+        let session_id = self
+            .state
+            .visible_resource_shell_session()
+            .map(|session| session.id);
         if let Some(session_id) = session_id {
-            self.state.resource_shell_presentation = ResourceShellPresentation::Enlarged(session_id);
+            self.state.resource_shell_presentation =
+                ResourceShellPresentation::Enlarged(session_id);
         }
     }
 

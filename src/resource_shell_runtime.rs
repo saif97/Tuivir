@@ -8,7 +8,10 @@ use std::{
     borrow::Cow,
     collections::HashMap,
     io,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     thread::JoinHandle,
 };
 
@@ -59,6 +62,8 @@ struct LiveResourceShell {
     input: EventLoopSender,
     event_loop: JoinHandle<(EventLoop<tty::Pty, SessionListener>, State)>,
     selection: Option<((u16, u16), (u16, u16))>,
+    size: (u16, u16),
+    redraw_pending: Arc<AtomicBool>,
 }
 
 #[derive(Clone)]
@@ -66,15 +71,23 @@ struct SessionListener {
     session_id: ResourceShellSessionId,
     events: UnboundedSender<ResourceShellRuntimeEvent>,
     input: Arc<Mutex<Option<EventLoopSender>>>,
+    redraw_pending: Arc<AtomicBool>,
 }
 
 impl EventListener for SessionListener {
     fn send_event(&self, event: Event) {
         match event {
             Event::Wakeup => {
-                let _ = self.events.send(ResourceShellRuntimeEvent::OutputReady {
-                    session_id: self.session_id,
-                });
+                if !self.redraw_pending.swap(true, Ordering::AcqRel)
+                    && self
+                        .events
+                        .send(ResourceShellRuntimeEvent::OutputReady {
+                            session_id: self.session_id,
+                        })
+                        .is_err()
+                {
+                    self.redraw_pending.store(false, Ordering::Release);
+                }
             }
             Event::ChildExit(_) => {
                 let _ = self.events.send(ResourceShellRuntimeEvent::Exited {
@@ -135,10 +148,12 @@ impl ResourceShellRuntime {
             lines: usize::from(lines.max(1)),
         };
         let input = Arc::new(Mutex::new(None));
+        let redraw_pending = Arc::new(AtomicBool::new(false));
         let listener = SessionListener {
             session_id,
             events,
             input: Arc::clone(&input),
+            redraw_pending: Arc::clone(&redraw_pending),
         };
         let config = TermConfig {
             scrolling_history: 10_000,
@@ -172,6 +187,8 @@ impl ResourceShellRuntime {
                 input: event_loop_sender,
                 event_loop,
                 selection: None,
+                size: (columns.max(2), lines.max(1)),
+                redraw_pending,
             },
         );
         Ok(())
@@ -277,6 +294,9 @@ impl ResourceShellRuntime {
         };
         let columns = columns.max(2);
         let lines = lines.max(1);
+        if session.size == (columns, lines) {
+            return Ok(());
+        }
         session.terminal.lock().resize(TerminalSize {
             columns: usize::from(columns),
             lines: usize::from(lines),
@@ -289,7 +309,17 @@ impl ResourceShellRuntime {
                 cell_width: 1,
                 cell_height: 1,
             }))
-            .map_err(|error| io::Error::other(error.to_string()))
+            .map_err(|error| io::Error::other(error.to_string()))?;
+        session.size = (columns, lines);
+        Ok(())
+    }
+
+    /// Marks a coalesced output notification as rendered so the next PTY
+    /// update can request one more redraw.
+    pub fn acknowledge_output(&self, session_id: ResourceShellSessionId) {
+        if let Some(session) = self.sessions.get(&session_id) {
+            session.redraw_pending.store(false, Ordering::Release);
+        }
     }
 
     /// Terminates and reaps the private PTY event loop for one session.

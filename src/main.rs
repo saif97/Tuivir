@@ -162,6 +162,35 @@ impl ShellInputRouter {
         terminal_key_bytes(key).map_or(ShellKeyRoute::ToTuivir, ShellKeyRoute::ToPty)
     }
 
+    /// Reserves only Tuivir's terminal-prefix controls while no live PTY can
+    /// receive input. This keeps the enlarged exit and start-failure screens
+    /// escapable without pretending their sessions can accept ordinary keys.
+    fn route_without_terminal(
+        &mut self,
+        session_id: ResourceShellSessionId,
+        key: KeyEvent,
+    ) -> ShellKeyRoute {
+        if self.active_session != Some(session_id) {
+            self.active_session = Some(session_id);
+            self.focused = false;
+            self.prefix_pending = false;
+        }
+        if self.prefix_pending {
+            self.prefix_pending = false;
+            return match (key.code, key.modifiers) {
+                (KeyCode::Char('q'), modifiers) if modifiers.is_empty() => ShellKeyRoute::Released,
+                (KeyCode::Char('z'), modifiers) if modifiers.is_empty() => {
+                    ShellKeyRoute::ToggleSize
+                }
+                _ => ShellKeyRoute::ToTuivir,
+            };
+        }
+        if key.code == KeyCode::Char('b') && key.modifiers == KeyModifiers::CONTROL {
+            self.prefix_pending = true;
+        }
+        ShellKeyRoute::ToTuivir
+    }
+
     fn route_paste(
         &mut self,
         session_id: ResourceShellSessionId,
@@ -404,11 +433,7 @@ fn handle_command(app: &mut App, command: Option<Command>) -> (ShellControl, Vec
 /// restores the normal Details presentation; from Details it changes no
 /// application state.
 fn release_resource_shell(app: &mut App) -> Vec<ProviderRequest> {
-    if app
-        .state()
-        .enlarged_resource_shell_session()
-        .is_some()
-    {
+    if app.state().enlarged_resource_shell_session().is_some() {
         app.invoke(Command::ToggleResourceShellSize)
     } else {
         Vec::new()
@@ -455,25 +480,19 @@ fn dispatch_resource_shell_effects(
     events: &mpsc::UnboundedSender<ResourceShellRuntimeEvent>,
     layout: Option<&presentation::ScreenLayout>,
 ) -> Vec<ProviderRequest> {
-    let size = layout
-        .map(|layout| {
-            presentation::ScreenLayout::measure(
-                app.state(),
-                ratatui::layout::Rect::new(
-                    layout.provider_bar.x,
-                    layout.provider_bar.y,
-                    layout.provider_bar.width,
-                    layout.provider_bar.height + layout.workspace.height + layout.status.height,
-                ),
-            )
-        })
-        .and_then(|layout| layout.resource_shell)
-        .map(|shell| shell.terminal)
-        .unwrap_or(ratatui::layout::Rect::new(0, 0, 80, 24));
+    let effects = app.take_resource_shell_effects();
+    if effects.is_empty() {
+        return Vec::new();
+    }
     let mut requests = Vec::new();
-    for effect in app.take_resource_shell_effects() {
+    for effect in effects {
         match effect {
             ResourceShellEffect::Start { session, process } => {
+                let size = layout
+                    .map(|layout| presentation::ScreenLayout::measure(app.state(), layout.area))
+                    .and_then(|layout| layout.resource_shell)
+                    .map(|shell| shell.terminal)
+                    .unwrap_or(ratatui::layout::Rect::new(0, 0, 80, 24));
                 let event = match runtime.start(
                     session.id,
                     &process,
@@ -575,11 +594,7 @@ async fn run(
                     shell.terminal.height,
                 );
                 if let Some(screen) = resource_shell_runtime.screen(session.id) {
-                    presentation::render_resource_shell_screen(
-                        &screen,
-                        frame,
-                        shell.terminal,
-                    );
+                    presentation::render_resource_shell_screen(screen, frame, shell.terminal);
                 }
             }
             layout = Some(measured);
@@ -593,9 +608,19 @@ async fn run(
             Some(event) = key_rx.recv() => {
                 let (control, requests) = match event {
                     Event::Key(key) => {
-                        let route = app.state().visible_resource_shell_session()
-                            .filter(|session| session.lifecycle == ResourceShellSessionLifecycle::Running)
-                            .map(|session| shell_input.route(session.id, key));
+                        let enlarged = app
+                            .state()
+                            .enlarged_resource_shell_session()
+                            .is_some();
+                        let route = app.state().visible_resource_shell_session().and_then(|session| {
+                            if session.lifecycle == ResourceShellSessionLifecycle::Running {
+                                Some(shell_input.route(session.id, key))
+                            } else if enlarged {
+                                Some(shell_input.route_without_terminal(session.id, key))
+                            } else {
+                                None
+                            }
+                        });
                         match route {
                             Some(ShellKeyRoute::ToPty(bytes)) => {
                                 let session = app.state().visible_resource_shell_session()
@@ -724,7 +749,10 @@ async fn run(
             }
             Some(event) = resource_shell_event_rx.recv() => {
                 let requests = match event {
-                    ResourceShellRuntimeEvent::OutputReady { .. } => Vec::new(),
+                    ResourceShellRuntimeEvent::OutputReady { session_id } => {
+                        resource_shell_runtime.acknowledge_output(session_id);
+                        Vec::new()
+                    }
                     ResourceShellRuntimeEvent::Exited { session_id } => {
                         app.update(AppEvent::ResourceShellExited { session_id })
                     }
