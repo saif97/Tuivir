@@ -404,11 +404,15 @@ fn handle_command(app: &mut App, command: Option<Command>) -> (ShellControl, Vec
 /// restores the normal Details presentation; from Details it changes no
 /// application state.
 fn release_resource_shell(app: &mut App) -> Vec<ProviderRequest> {
-    app.state()
+    if app
+        .state()
         .enlarged_resource_shell_session()
         .is_some()
-        .then(|| app.invoke(Command::ToggleResourceShellSize))
-        .unwrap_or_default()
+    {
+        app.invoke(Command::ToggleResourceShellSize)
+    } else {
+        Vec::new()
+    }
 }
 
 /// Routes one terminal mouse event through the layout that drew the screen.

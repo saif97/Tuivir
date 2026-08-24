@@ -1077,22 +1077,14 @@ impl App {
     }
 
     fn start_selected_resource_shell(&mut self) -> Option<ResourceShellSessionId> {
-        let Some(provider) = self.state.active_workspace() else {
-            return None;
-        };
+        let provider = self.state.active_workspace()?;
         if !provider.selected_resource_shell_tab() {
             return None;
         }
         let provider_id = provider.id().clone();
-        let Some(target) = provider.selected_resource_target() else {
-            return None;
-        };
-        let Some(resource) = provider.selected_resource() else {
-            return None;
-        };
-        let Some(process) = resource.shell.clone() else {
-            return None;
-        };
+        let target = provider.selected_resource_target()?;
+        let resource = provider.selected_resource()?;
+        let process = resource.shell.clone()?;
         if let Some(session) = self.state.resource_shell_sessions.iter().find(|session| {
             session.provider_id == provider_id
                 && session.target == target

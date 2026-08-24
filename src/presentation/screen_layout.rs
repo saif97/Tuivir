@@ -127,7 +127,7 @@ impl ScreenLayout {
         let panes = measure_panes(state, workspace);
         let resource_shell = state
             .visible_resource_shell_session()
-            .and_then(|_| panes.as_ref())
+            .and(panes.as_ref())
             .map(|panes| ResourceShellLayout {
                 header: None,
                 terminal: panes.detail_content,
