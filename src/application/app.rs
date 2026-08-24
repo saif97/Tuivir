@@ -830,6 +830,12 @@ impl App {
             })
             .map(|session| session.id)
             .collect();
+        if matches!(
+            self.state.resource_shell_presentation,
+            ResourceShellPresentation::Enlarged(session_id) if stopped.contains(&session_id)
+        ) {
+            self.state.resource_shell_presentation = ResourceShellPresentation::Details;
+        }
         self.state.resource_shell_sessions.retain(|session| {
             &session.provider_id != provider_id || snapshot.resource(&session.target).is_some()
         });

@@ -13,7 +13,8 @@ use tuivir::{
         App, AppEvent, AppState, Command, CommandRegistry, CommandScope, DetailView, FocusedPane,
         LifecycleCommandPolicy, PaneBoundary, ProviderRequest, Resource, ResourceCommand,
         ResourceDetails, ResourcePanel, ResourceShellEffect, ResourceShellProcess,
-        ResourceShellSessionLifecycle, WorkspaceError, WorkspaceLoadState, WorkspaceSnapshot,
+        ResourceShellPresentation, ResourceShellSessionLifecycle, WorkspaceError, WorkspaceLoadState,
+        WorkspaceSnapshot,
         lifecycle_commands,
     },
     domain::{
@@ -1630,6 +1631,46 @@ fn an_accepted_refresh_stops_the_shell_for_a_removed_resource() {
     });
 
     assert!(app.state().resource_shell_sessions.is_empty());
+    assert_eq!(
+        app.take_resource_shell_effects(),
+        vec![ResourceShellEffect::Stop { session_id }]
+    );
+}
+
+/// Deletion removes every application-owned trace of a Resource Shell Session,
+/// including an enlarged presentation that would otherwise point at an absent
+/// session. A failed refresh remains deliberately outside this reconciliation.
+#[test]
+fn confirmed_resource_deletion_restores_details_after_forgetting_its_shell() {
+    let mut app = App::new();
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
+    app.invoke(Command::OpenShell);
+    let session_id = app.state().resource_shell_sessions[0].id;
+    let _ = app.take_resource_shell_effects();
+
+    let requests = app.update(AppEvent::RefreshTimerElapsed);
+    let ProviderRequest::RefreshWorkspace {
+        request_id,
+        provider_id,
+    } = requests.into_iter().next().expect("a refresh request")
+    else {
+        panic!("refresh timer requests the active workspace");
+    };
+    app.update(AppEvent::RefreshCompleted {
+        request_id,
+        provider_id,
+        result: Ok(snapshot(&[])),
+    });
+
+    assert!(app.state().resource_shell_sessions.is_empty());
+    assert_eq!(
+        app.state().resource_shell_presentation,
+        ResourceShellPresentation::Details
+    );
     assert_eq!(
         app.take_resource_shell_effects(),
         vec![ResourceShellEffect::Stop { session_id }]
