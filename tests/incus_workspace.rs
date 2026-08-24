@@ -3,7 +3,7 @@ use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
 use tokio::sync::Barrier;
 
 use tuivir::{
-    application::{App, Command, InteractiveShellProcess, ProviderRequest, ResourceCommand},
+    application::{App, Command, ProviderRequest, ResourceCommand, ResourceShellProcess},
     domain::{DetailViewId, ProviderId, ResourceState, TargetEnvironment},
     infrastructure::process::{CliRunner, ProcessError, ProcessOutput, ProcessSpec},
     infrastructure::provider::{IncusWorkspace, ProviderWorkspace},
@@ -704,7 +704,7 @@ async fn incus_maps_every_instance_status_into_the_shared_vocabulary() {
 }
 
 /// `incus exec` reaches only into a running instance, so no other state may
-/// carry the Interactive Shell that runs it. An Incus instance is a whole
+/// carry the Resource Shell Session that runs it. An Incus instance is a whole
 /// system, so its shell is the root login shell — the same one `incus shell`
 /// itself expands to — rather than the bare `/bin/sh` a minimal Docker image
 /// forces.
@@ -736,7 +736,7 @@ async fn only_a_running_instance_carries_an_interactive_shell() {
         shells,
         [(
             "api",
-            InteractiveShellProcess::new("incus", &["exec", "api", "--", "su", "-l"]),
+            ResourceShellProcess::new("incus", &["exec", "api", "--", "su", "-l"]),
         )]
     );
 }

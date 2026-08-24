@@ -11,6 +11,10 @@ use crate::{
 use unicode_width::UnicodeWidthChar;
 
 const OVERVIEW_DETAIL_VIEW_ID: &str = "overview";
+/// The Detail View Tab Tuivir supplies for a Resource whose Provider declares
+/// an executable Resource Shell Session. It is deliberately not a
+/// provider-native [`DetailView`]: selecting it never causes Provider work.
+pub const RESOURCE_SHELL_DETAIL_VIEW_ID: &str = "shell";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// Whether a Provider Workspace is loading, ready to present, or unavailable.
@@ -379,6 +383,18 @@ impl ProviderWorkspaceState {
             let Some(panel) = snapshot.panel(panel_id) else {
                 return;
             };
+            let offers_shell = workspace
+                .panel_navigation
+                .iter()
+                .find(|navigation| navigation.panel_id == panel.id)
+                .and_then(|navigation| navigation.selected_resource.as_ref())
+                .and_then(|selected| {
+                    panel
+                        .resources
+                        .iter()
+                        .find(|resource| &resource.id == selected)
+                })
+                .is_some_and(|resource| resource.shell.is_some());
             let current = workspace
                 .selected_detail_view
                 .as_ref()
@@ -389,12 +405,21 @@ impl ProviderWorkspaceState {
                         .position(|view| &view.id == selected)
                         .map(|index| index + 1)
                 })
+                .or_else(|| {
+                    (offers_shell
+                        && workspace
+                            .selected_detail_view
+                            .as_ref()
+                            .is_some_and(|selected| selected.0 == RESOURCE_SHELL_DETAIL_VIEW_ID))
+                    .then_some(panel.detail_views.len() + 1)
+                })
                 .unwrap_or(0);
-            let next = (current as isize + delta)
-                .rem_euclid((panel.detail_views.len() + 1) as isize)
-                as usize;
+            let tab_count = panel.detail_views.len() + 1 + usize::from(offers_shell);
+            let next = (current as isize + delta).rem_euclid(tab_count as isize) as usize;
             workspace.selected_detail_view = Some(if next == 0 {
                 DetailViewId::new(OVERVIEW_DETAIL_VIEW_ID)
+            } else if offers_shell && next == panel.detail_views.len() + 1 {
+                DetailViewId::new(RESOURCE_SHELL_DETAIL_VIEW_ID)
             } else {
                 panel.detail_views[next - 1].id.clone()
             });
@@ -412,6 +437,18 @@ impl ProviderWorkspaceState {
             let Some(panel) = snapshot.panel(panel_id) else {
                 return;
             };
+            let offers_shell = workspace
+                .panel_navigation
+                .iter()
+                .find(|navigation| navigation.panel_id == panel.id)
+                .and_then(|navigation| navigation.selected_resource.as_ref())
+                .and_then(|selected| {
+                    panel
+                        .resources
+                        .iter()
+                        .find(|resource| &resource.id == selected)
+                })
+                .is_some_and(|resource| resource.shell.is_some());
             let Some(view_id) = (index == 0)
                 .then(|| DetailViewId::new(OVERVIEW_DETAIL_VIEW_ID))
                 .or_else(|| {
@@ -419,6 +456,10 @@ impl ProviderWorkspaceState {
                         .detail_views
                         .get(index - 1)
                         .map(|view| view.id.clone())
+                })
+                .or_else(|| {
+                    (offers_shell && index == panel.detail_views.len() + 1)
+                        .then(|| DetailViewId::new(RESOURCE_SHELL_DETAIL_VIEW_ID))
                 })
             else {
                 return;
@@ -668,6 +709,7 @@ impl ProviderWorkspaceState {
                 .find(|view| &view.id == selected)
         });
         let detail_views = selected_panel.map_or(&[][..], |panel| panel.detail_views.as_slice());
+        let offers_shell = selected_resource.is_some_and(|resource| resource.shell.is_some());
         let details = selected_target.as_ref().and_then(|selected| {
             self.details.as_ref().filter(|details| {
                 details.target.resource == *selected
@@ -684,6 +726,11 @@ impl ProviderWorkspaceState {
             panel_navigation: &self.panel_navigation,
             selected_resource,
             detail_views,
+            offers_shell,
+            shell_selected: self
+                .selected_detail_view
+                .as_ref()
+                .is_some_and(|selected| selected.0 == RESOURCE_SHELL_DETAIL_VIEW_ID),
             overview_selected: self
                 .selected_detail_view
                 .as_ref()
@@ -728,6 +775,45 @@ impl ProviderWorkspaceState {
         snapshot.resource(&target)
     }
 
+    /// Finds a Resource by its stable target without changing this Workspace's
+    /// current navigation. Persistent Resource Shell Sessions use it to retain
+    /// their identity while another Resource is selected.
+    pub fn resource(&self, target: &ResourceTarget) -> Option<&Resource> {
+        let WorkspaceLoadState::Ready(snapshot) = &self.load_state else {
+            return None;
+        };
+        snapshot.resource(target)
+    }
+
+    /// Whether the selected Resource is showing Tuivir's Shell Detail View
+    /// Tab. The application uses this as the explicit start gate.
+    pub fn selected_resource_shell_tab(&self) -> bool {
+        self.selected_detail_view
+            .as_ref()
+            .is_some_and(|view| view.0 == RESOURCE_SHELL_DETAIL_VIEW_ID)
+    }
+
+    /// Selects Tuivir's Shell Detail View Tab when the selected Resource has a
+    /// Provider-declared shell. This is the direct-entry path for the `E`
+    /// command; it remains inert until the application explicitly starts the
+    /// session.
+    pub fn select_resource_shell_tab(&mut self) -> bool {
+        self.invalidate_detail_when_target_changes(|workspace| {
+            let WorkspaceLoadState::Ready(snapshot) = &workspace.load_state else {
+                return false;
+            };
+            let offers_shell = workspace
+                .selected_resource_target()
+                .and_then(|target| snapshot.resource(&target))
+                .is_some_and(|resource| resource.shell.is_some());
+            if offers_shell {
+                workspace.selected_detail_view =
+                    Some(DetailViewId::new(RESOURCE_SHELL_DETAIL_VIEW_ID));
+            }
+            offers_shell
+        })
+    }
+
     fn invalidate_detail_when_target_changes<R>(
         &mut self,
         update: impl FnOnce(&mut Self) -> R,
@@ -753,8 +839,13 @@ impl ProviderWorkspaceState {
             .as_ref()
             .and_then(|selected| snapshot.panel_for(selected))
             .map_or(&[][..], |panel| panel.detail_views.as_slice());
+        let offers_shell = self
+            .selected_resource()
+            .is_some_and(|resource| resource.shell.is_some());
         let still_offered = self.selected_detail_view.as_ref().is_some_and(|selected| {
-            selected.0 == OVERVIEW_DETAIL_VIEW_ID || offered.iter().any(|view| &view.id == selected)
+            selected.0 == OVERVIEW_DETAIL_VIEW_ID
+                || (selected.0 == RESOURCE_SHELL_DETAIL_VIEW_ID && offers_shell)
+                || offered.iter().any(|view| &view.id == selected)
         });
         if !still_offered {
             self.selected_detail_view = Some(DetailViewId::new(OVERVIEW_DETAIL_VIEW_ID));
@@ -770,6 +861,8 @@ impl ProviderWorkspaceState {
         let view_id = self.selected_detail_view.as_ref()?;
         let view = if view_id.0 == OVERVIEW_DETAIL_VIEW_ID {
             DetailView::from_snapshot(OVERVIEW_DETAIL_VIEW_ID, "Overview")
+        } else if view_id.0 == RESOURCE_SHELL_DETAIL_VIEW_ID {
+            return None;
         } else {
             snapshot
                 .panel_for(&target)?
@@ -793,6 +886,8 @@ pub struct WorkspaceView<'a> {
     panel_navigation: &'a [ResourcePanelNavigation],
     pub selected_resource: Option<&'a Resource>,
     pub detail_views: &'a [DetailView],
+    pub offers_shell: bool,
+    pub shell_selected: bool,
     pub overview_selected: bool,
     pub selected_detail_view: Option<&'a DetailView>,
     pub details: Option<ResourceDetailsView<'a>>,

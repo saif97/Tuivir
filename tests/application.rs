@@ -11,9 +11,10 @@ use tokio::sync::{Barrier, Notify, mpsc};
 use tuivir::{
     application::{
         App, AppEvent, AppState, Command, CommandRegistry, CommandScope, DetailView, FocusedPane,
-        InteractiveShellOutcome, InteractiveShellProcess, LifecycleCommandPolicy, PaneBoundary,
-        ProviderRequest, Resource, ResourceCommand, ResourceDetails, ResourcePanel, WorkspaceError,
-        WorkspaceLoadState, WorkspaceSnapshot, lifecycle_commands,
+        LifecycleCommandPolicy, PaneBoundary, ProviderRequest, Resource, ResourceCommand,
+        ResourceDetails, ResourcePanel, ResourceShellEffect, ResourceShellProcess,
+        ResourceShellSessionLifecycle, WorkspaceError, WorkspaceLoadState, WorkspaceSnapshot,
+        lifecycle_commands,
     },
     domain::{
         DetailViewId, Provider, ProviderId, ResourceId, ResourcePanelId, ResourceState,
@@ -25,7 +26,8 @@ use tuivir::{
     infrastructure::provider::{DockerWorkspace, ProviderDiscovery, ProviderWorkspace},
     infrastructure::runtime::{ProviderRuntime, RefreshTimer},
     presentation::{
-        key_from_event, render_background_colours, render_foreground_colours, render_to_text,
+        ScreenLayout, key_from_event, render_background_colours, render_foreground_colours,
+        render_to_text,
     },
 };
 
@@ -745,7 +747,12 @@ fn returning_from_a_shell_refreshes_the_active_workspace_and_preserves_selection
         &mut app,
         KeyEvent::new(KeyCode::Char('E'), KeyModifiers::NONE),
     );
-    let shell = app.take_pending_shell().expect("a shell to hand over to");
+    let shell = app
+        .state()
+        .resource_shell_sessions
+        .first()
+        .expect("a Resource Shell Session to start")
+        .clone();
     assert_eq!(
         shell.target,
         ResourceTarget::new(
@@ -754,9 +761,11 @@ fn returning_from_a_shell_refreshes_the_active_workspace_and_preserves_selection
         )
     );
 
-    let requests = app.update(AppEvent::ShellClosed {
-        shell,
-        outcome: InteractiveShellOutcome::Exited,
+    app.update(AppEvent::ResourceShellStarted {
+        session_id: shell.id,
+    });
+    let requests = app.update(AppEvent::ResourceShellExited {
+        session_id: shell.id,
     });
 
     let refresh = requests
@@ -1249,7 +1258,7 @@ fn help_offers_resume_only_while_the_resource_is_suspended() {
     );
 }
 
-/// A Resource whose Provider offers no Interactive Shell must not look as
+/// A Resource whose Provider offers no Resource Shell Session must not look as
 /// though pressing the key would do something. Nothing is asked for, and help
 /// says why the key is there but idle.
 #[test]
@@ -1266,7 +1275,7 @@ fn help_offers_a_shell_only_while_the_resource_can_host_one() {
         KeyEvent::new(KeyCode::Char('E'), KeyModifiers::NONE),
     );
     assert!(
-        stopped.state().pending_shell.is_none(),
+        stopped.state().resource_shell_sessions.is_empty(),
         "a stopped container has no shell to open"
     );
 
@@ -1326,11 +1335,11 @@ fn question_mark_closes_the_help_overlay_when_it_is_already_open() {
     assert!(screen.contains("api"), "rendered screen:\n{screen}");
 }
 
-/// An Interactive Shell is not work Tuivir can run behind its own screen, so
-/// the shell key produces no provider request at all. It asks for the terminal
-/// instead, naming what the shell was opened for so a failure can say so later.
+/// `E` is the direct enlarged Resource Shell Session path. It selects Shell,
+/// emits one host start effect, and gives that same session the enlarged
+/// presentation without taking the outer terminal away from Tuivir.
 #[test]
-fn the_shell_key_asks_for_the_terminal_for_the_selected_container() {
+fn the_shell_key_starts_and_enlarges_the_selected_containers_session() {
     let mut app = App::new();
     ready_workspace(
         &mut app,
@@ -1345,26 +1354,231 @@ fn the_shell_key_asks_for_the_terminal_for_the_selected_container() {
 
     assert!(
         requests.is_empty(),
-        "an Interactive Shell is never dispatched as background work"
+        "a Resource Shell Session is never provider background work"
     );
-    let pending = app
+    let session = app
         .state()
-        .pending_shell
-        .as_ref()
-        .expect("a shell waiting for the terminal");
-    assert_eq!(pending.provider_id, ProviderId::new("docker"));
-    assert_eq!(pending.provider_name, "Docker");
+        .resource_shell_sessions
+        .first()
+        .expect("a Resource Shell Session waiting for the host")
+        .clone();
+    assert_eq!(session.provider_id, ProviderId::new("docker"));
     assert_eq!(
-        pending.target,
+        session.target,
         ResourceTarget::new(
             ResourcePanelId::new("containers"),
             ResourceId::new("container-a"),
         )
     );
-    assert_eq!(pending.resource_name, "api");
     assert_eq!(
-        pending.process,
-        InteractiveShellProcess::new("docker", &["exec", "-it", "container-a", "/bin/sh"])
+        app.state().enlarged_resource_shell_session(),
+        Some(&session),
+        "E presents the same starting session enlarged"
+    );
+    assert_eq!(
+        app.take_resource_shell_effects(),
+        vec![ResourceShellEffect::Start {
+            session: session.clone(),
+            process: ResourceShellProcess::new(
+                "docker",
+                &["exec", "-it", "container-a", "/bin/sh"],
+            ),
+        }]
+    );
+
+    app.update(AppEvent::ResourceShellStarted {
+        session_id: session.id,
+    });
+    app.invoke(Command::ToggleResourceShellSize);
+
+    assert!(
+        app.state().enlarged_resource_shell_session().is_none(),
+        "the size toggle restores Details without replacing the session"
+    );
+    assert!(
+        app.take_resource_shell_effects().is_empty(),
+        "moving presentation never starts another Resource Shell Session"
+    );
+
+    app.invoke(Command::ToggleResourceShellSize);
+    assert_eq!(
+        app.state().enlarged_resource_shell_session(),
+        Some(&app.state().resource_shell_sessions[0]),
+        "repeated toggles keep the same running Resource Shell Session"
+    );
+    assert!(app.take_resource_shell_effects().is_empty());
+}
+
+#[test]
+fn an_enlarged_resource_shell_keeps_its_identity_and_restore_hint_above_the_terminal() {
+    let mut app = App::new();
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
+
+    handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('E'), KeyModifiers::NONE),
+    );
+
+    let screen = render_to_text(app.state(), 80, 24);
+    assert!(
+        screen.contains("Docker / api"),
+        "rendered screen:\n{screen}"
+    );
+    assert!(
+        screen.contains("Ctrl-B q restore"),
+        "rendered screen:\n{screen}"
+    );
+    assert!(
+        !screen.contains("Containers"),
+        "the enlarged shell owns the former Tuivir layout:\n{screen}"
+    );
+}
+
+#[test]
+fn an_enlarged_resource_shell_uses_every_row_below_its_one_line_header() {
+    let mut app = App::new();
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
+    handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('E'), KeyModifiers::NONE),
+    );
+
+    let layout = ScreenLayout::measure(app.state(), ratatui::layout::Rect::new(0, 0, 80, 24));
+    let shell = layout
+        .resource_shell
+        .expect("enlarged Resource Shell Session layout");
+    assert_eq!(shell.header, Some(ratatui::layout::Rect::new(0, 0, 80, 1)));
+    assert_eq!(shell.terminal, ratatui::layout::Rect::new(0, 1, 80, 23));
+    assert!(
+        layout.panes.is_none(),
+        "Tuivir panes are restored only on exit"
+    );
+}
+
+/// Shell availability is provider-declared, but the Shell Detail View Tab is
+/// supplied by Tuivir. Selecting it is purely navigational: a persistent
+/// Resource Shell Session starts only after an explicit Enter gesture.
+#[test]
+fn selecting_the_shell_detail_view_tab_is_inert() {
+    let mut app = App::new();
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
+
+    let requests = app.invoke(Command::ActivateDetailView(4));
+
+    assert!(
+        requests.is_empty(),
+        "selecting Shell must not load provider details"
+    );
+    assert!(
+        app.state().resource_shell_sessions.is_empty(),
+        "selecting Shell must not start a session"
+    );
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(screen.contains("[ Shell ]"), "rendered screen:\n{screen}");
+}
+
+#[test]
+fn enter_on_the_shell_tab_starts_one_session_with_the_provider_command() {
+    let mut app = App::new();
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
+    app.invoke(Command::ActivateDetailView(4));
+
+    let (_, requests) = handle_key(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    assert!(requests.is_empty(), "a Resource Shell Session is host work");
+    let session = app
+        .state()
+        .resource_shell_sessions
+        .first()
+        .expect("a starting Resource Shell Session")
+        .clone();
+    assert_eq!(session.lifecycle, ResourceShellSessionLifecycle::Starting);
+    assert_eq!(
+        app.take_resource_shell_effects(),
+        vec![ResourceShellEffect::Start {
+            session,
+            process: ResourceShellProcess::new(
+                "docker",
+                &["exec", "-it", "container-a", "/bin/sh"],
+            ),
+        }]
+    );
+}
+
+#[test]
+fn resource_shell_runtime_events_update_only_the_matching_session_lifecycle() {
+    let mut app = App::new();
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
+    app.invoke(Command::ActivateDetailView(4));
+    app.invoke(Command::StartResourceShell);
+    let session_id = app.state().resource_shell_sessions[0].id;
+
+    app.update(AppEvent::ResourceShellStarted { session_id });
+    assert_eq!(
+        app.state().resource_shell_sessions[0].lifecycle,
+        ResourceShellSessionLifecycle::Running
+    );
+
+    app.update(AppEvent::ResourceShellExited { session_id });
+    assert_eq!(
+        app.state().resource_shell_sessions[0].lifecycle,
+        ResourceShellSessionLifecycle::Exited
+    );
+    assert!(render_to_text(app.state(), 100, 24).contains("Session exited"));
+}
+
+/// A removed Resource owns no lingering Session: accepting the new snapshot
+/// asks the host to stop and reap its private PTY before state forgets it.
+#[test]
+fn an_accepted_refresh_stops_the_shell_for_a_removed_resource() {
+    let mut app = App::new();
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
+    app.invoke(Command::OpenShell);
+    let session_id = app.state().resource_shell_sessions[0].id;
+    let _ = app.take_resource_shell_effects();
+
+    let requests = app.update(AppEvent::RefreshTimerElapsed);
+    let ProviderRequest::RefreshWorkspace {
+        request_id,
+        provider_id,
+    } = requests.into_iter().next().expect("a refresh request")
+    else {
+        panic!("refresh timer requests the active workspace");
+    };
+    app.update(AppEvent::RefreshCompleted {
+        request_id,
+        provider_id,
+        result: Ok(snapshot(&[])),
+    });
+
+    assert!(app.state().resource_shell_sessions.is_empty());
+    assert_eq!(
+        app.take_resource_shell_effects(),
+        vec![ResourceShellEffect::Stop { session_id }]
     );
 }
 
@@ -2021,7 +2235,7 @@ fn container_snapshot(
                     snapshot_details: Vec::new(),
                     available_commands,
                     shell: (state == ResourceState::Running).then(|| {
-                        InteractiveShellProcess::new("docker", &["exec", "-it", *id, "/bin/sh"])
+                        ResourceShellProcess::new("docker", &["exec", "-it", *id, "/bin/sh"])
                     }),
                 })
                 .collect(),
@@ -2064,10 +2278,7 @@ fn incus_snapshot(instances: &[(&str, &str, &str)]) -> WorkspaceSnapshot {
                             LifecycleCommandPolicy::RestartAndResume,
                         ),
                         shell: running.then(|| {
-                            InteractiveShellProcess::new(
-                                "incus",
-                                &["exec", *name, "--", "su", "-l"],
-                            )
+                            ResourceShellProcess::new("incus", &["exec", *name, "--", "su", "-l"])
                         }),
                     }
                 })
@@ -2103,7 +2314,7 @@ fn docker_multi_panel_snapshot() -> WorkspaceSnapshot {
                         ResourceCommand::Restart,
                         ResourceCommand::Delete,
                     ],
-                    shell: Some(InteractiveShellProcess::new(
+                    shell: Some(ResourceShellProcess::new(
                         "docker",
                         &["exec", "-it", "shared-id", "/bin/sh"],
                     )),
@@ -2625,10 +2836,12 @@ fn detail_views_wrap_around_at_both_ends() {
     );
 
     app.invoke(Command::PreviousDetailView);
-    assert!(render_to_text(app.state(), 100, 24).contains("Logs  Stats  [ Inspect ]"));
+    assert!(render_to_text(app.state(), 100, 24).contains("Logs  Stats  Inspect  [ Shell ]"));
 
     app.invoke(Command::NextDetailView);
-    assert!(render_to_text(app.state(), 100, 24).contains("[ Overview ]  Logs  Stats  Inspect"));
+    assert!(
+        render_to_text(app.state(), 100, 24).contains("[ Overview ]  Logs  Stats  Inspect  Shell")
+    );
 }
 
 /// The view survives moving between Resources, so reading one kind of detail

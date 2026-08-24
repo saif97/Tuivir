@@ -2,7 +2,7 @@ use crate::domain::{
     DetailViewId, ProviderId, ResourceId, ResourcePanelId, ResourceState, ResourceTarget,
 };
 
-use super::{InteractiveShellProcess, ResourceCommand};
+use super::{ResourceCommand, ResourceShellProcess};
 
 const RUNNING_RESTARTABLE: &[ResourceCommand] = &[
     ResourceCommand::Stop,
@@ -101,8 +101,8 @@ pub struct Resource {
     pub snapshot_details: Vec<(DetailViewId, ResourceDetails)>,
     /// Lifecycle Commands currently available for this provider Resource.
     pub available_commands: &'static [ResourceCommand],
-    /// The Interactive Shell this Provider offers inside the Resource now.
-    pub shell: Option<InteractiveShellProcess>,
+    /// The Resource Shell Session this Provider offers inside the Resource now.
+    pub shell: Option<ResourceShellProcess>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

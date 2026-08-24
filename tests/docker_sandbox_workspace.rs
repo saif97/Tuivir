@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use tuivir::{
-    application::{App, Command, InteractiveShellProcess, ProviderRequest, ResourceCommand},
+    application::{App, Command, ProviderRequest, ResourceCommand, ResourceShellProcess},
     domain::{
         DetailViewId, ProviderId, ProviderVersion, ResourceId, ResourcePanelId, ResourceState,
         ResourceTarget,
@@ -289,7 +289,7 @@ async fn a_command_sbx_cannot_perform_is_refused_without_running_anything() {
 }
 
 /// `sbx exec` starts a stopped sandbox before running in it, so a sandbox does
-/// not have to be running to carry an Interactive Shell — it only has to be one
+/// not have to be running to carry an Resource Shell Session — it only has to be one
 /// Tuivir recognises. That is a real difference from Docker and Incus, where
 /// exec against anything but a running Resource simply fails, and the rule in
 /// both cases is the same one: offer the shell exactly where it works.
@@ -324,15 +324,15 @@ async fn every_recognised_sandbox_carries_an_interactive_shell() {
         [
             (
                 "running-sandbox",
-                InteractiveShellProcess::new("sbx", &["exec", "-it", "running-sandbox", "bash"],),
+                ResourceShellProcess::new("sbx", &["exec", "-it", "running-sandbox", "bash"],),
             ),
             (
                 "stopped-sandbox",
-                InteractiveShellProcess::new("sbx", &["exec", "-it", "stopped-sandbox", "bash"],),
+                ResourceShellProcess::new("sbx", &["exec", "-it", "stopped-sandbox", "bash"],),
             ),
             (
                 "shouting-sandbox",
-                InteractiveShellProcess::new("sbx", &["exec", "-it", "shouting-sandbox", "bash"],),
+                ResourceShellProcess::new("sbx", &["exec", "-it", "shouting-sandbox", "bash"],),
             ),
         ]
     );
