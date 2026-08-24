@@ -130,6 +130,15 @@ impl Dimensions for TerminalSize {
 }
 
 impl ResourceShellRuntime {
+    #[cfg(test)]
+    /// The private process group that owns a live session, exposed only so the
+    /// host seam can verify the group has been reaped after cleanup.
+    pub fn process_group_id(&self, session_id: ResourceShellSessionId) -> Option<u32> {
+        self.sessions
+            .get(&session_id)
+            .map(|session| session.process_group_id)
+    }
+
     /// Starts exactly the Provider-declared executable and argument vector in
     /// a private PTY, then drives Alacritty's terminal emulator on its own
     /// thread.
