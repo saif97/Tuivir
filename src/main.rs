@@ -516,6 +516,18 @@ fn dispatch_resource_shell_effects(
     requests
 }
 
+/// Whether a coalesced PTY output wakeup needs another frame. Hidden sessions
+/// keep draining in their private runtime, but their terminal cells are not
+/// part of the current frame and therefore must not wake the renderer.
+fn resource_shell_output_requires_redraw(app: &App, session_id: ResourceShellSessionId) -> bool {
+    app.state()
+        .visible_resource_shell_session()
+        .is_some_and(|session| {
+            session.id == session_id
+                && session.lifecycle == ResourceShellSessionLifecycle::Running
+        })
+}
+
 /// Encodes the common interactive keys without asking the application to know
 /// about PTYs or terminal engines. Alacritty remains the owner of output
 /// parsing and terminal state.
@@ -596,6 +608,10 @@ async fn run(
                 if let Some(screen) = resource_shell_runtime.screen(session.id) {
                     presentation::render_resource_shell_screen(screen, frame, shell.terminal);
                 }
+                // This acknowledgement comes only after the visible terminal
+                // has been rendered. Hidden sessions leave their coalesced
+                // wakeup pending while their PTYs continue draining output.
+                resource_shell_runtime.acknowledge_output(session.id);
             }
             layout = Some(measured);
         }) {
@@ -750,7 +766,9 @@ async fn run(
             Some(event) = resource_shell_event_rx.recv() => {
                 let requests = match event {
                     ResourceShellRuntimeEvent::OutputReady { session_id } => {
-                        resource_shell_runtime.acknowledge_output(session_id);
+                        if !resource_shell_output_requires_redraw(&app, session_id) {
+                            continue;
+                        }
                         Vec::new()
                     }
                     ResourceShellRuntimeEvent::Exited { session_id } => {

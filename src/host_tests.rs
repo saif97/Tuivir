@@ -11,7 +11,7 @@ use std::{
 use super::{
     Clipboard, DetailDispatchQueue, Osc52Clipboard, ResourceShellRuntime,
     ResourceShellRuntimeEvent, ShellInputRouter, ShellKeyRoute, ShellPointerRoute, handle_key,
-    handle_mouse, persist_pane_boundary, release_resource_shell,
+    handle_mouse, persist_pane_boundary, release_resource_shell, resource_shell_output_requires_redraw,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
@@ -134,6 +134,34 @@ fn a_real_pty_shell_wakes_the_host_and_keeps_its_rendered_output() {
             .flatten()
             .any(|cell| cell.text == "h")
     );
+}
+
+/// A Resource Shell Session keeps draining while its Resource is hidden, but
+/// its coalesced PTY wakeup must not ask the host to redraw invisible content.
+#[test]
+fn hidden_resource_shell_output_does_not_request_a_redraw() {
+    let mut app = app_on_workspace(two_containers());
+    app.invoke(Command::OpenShell);
+    let session_id = app.state().resource_shell_sessions[0].id;
+    app.update(AppEvent::ResourceShellStarted { session_id });
+    app.invoke(Command::ToggleResourceShellSize);
+
+    app.invoke(Command::SelectResource {
+        panel: 0,
+        resource: 1,
+    });
+
+    assert!(
+        !resource_shell_output_requires_redraw(&app, session_id),
+        "a session for a Resource outside the visible Shell Detail View stays hidden"
+    );
+
+    app.invoke(Command::SelectResource {
+        panel: 0,
+        resource: 0,
+    });
+    app.invoke(Command::ActivateDetailView(2));
+    assert!(resource_shell_output_requires_redraw(&app, session_id));
 }
 
 #[test]
