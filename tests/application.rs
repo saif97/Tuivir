@@ -12,9 +12,9 @@ use tuivir::{
     application::{
         App, AppEvent, AppState, Command, CommandRegistry, CommandScope, DetailView, FocusedPane,
         LifecycleCommandPolicy, PaneBoundary, ProviderRequest, Resource, ResourceCommand,
-        ResourceDetails, ResourcePanel, ResourceShellEffect, ResourceShellProcess,
-        ResourceShellSessionLifecycle, WorkspaceError, WorkspaceLoadState, WorkspaceSnapshot,
-        lifecycle_commands,
+        ResourceDetails, ResourcePanel, ResourceShellEffect, ResourceShellPresentation,
+        ResourceShellProcess, ResourceShellSessionId, ResourceShellSessionLifecycle,
+        WorkspaceError, WorkspaceLoadState, WorkspaceSnapshot, lifecycle_commands,
     },
     domain::{
         DetailViewId, Provider, ProviderId, ResourceId, ResourcePanelId, ResourceState,
@@ -1547,16 +1547,64 @@ fn resource_shell_runtime_events_update_only_the_matching_session_lifecycle() {
     assert!(render_to_text(app.state(), 100, 24).contains("Session exited"));
 }
 
-/// A removed Resource owns no lingering Session: accepting the new snapshot
-/// asks the host to stop and reap its private PTY before state forgets it.
+/// An exited Resource Shell Session keeps its final screen until the user
+/// deliberately starts a replacement. The replacement must forget the old
+/// runtime before starting with a distinct identity, so late events from the
+/// old lifetime cannot change the fresh session.
 #[test]
-fn an_accepted_refresh_stops_the_shell_for_a_removed_resource() {
+fn restarting_an_exited_resource_shell_replaces_its_runtime_and_refuses_stale_events() {
     let mut app = App::new();
     ready_workspace(
         &mut app,
         docker_discovery(),
         snapshot(&[("container-a", "api", "nginx:1.27")]),
     );
+    app.invoke(Command::ActivateDetailView(4));
+    app.invoke(Command::StartResourceShell);
+    let first = app.state().resource_shell_sessions[0].clone();
+    let _ = app.take_resource_shell_effects();
+    app.update(AppEvent::ResourceShellStarted {
+        session_id: first.id,
+    });
+    app.update(AppEvent::ResourceShellExited {
+        session_id: first.id,
+    });
+
+    app.invoke(Command::StartResourceShell);
+
+    let replacement = app.state().resource_shell_sessions[0].clone();
+    assert_ne!(replacement.id, first.id);
+    assert_eq!(
+        replacement.lifecycle,
+        ResourceShellSessionLifecycle::Starting
+    );
+    assert_eq!(
+        app.take_resource_shell_effects(),
+        vec![
+            ResourceShellEffect::Stop {
+                session_id: first.id,
+            },
+            ResourceShellEffect::Start {
+                session: replacement.clone(),
+                process: ResourceShellProcess::new(
+                    "docker",
+                    &["exec", "-it", "container-a", "/bin/sh"],
+                ),
+            },
+        ]
+    );
+
+    app.update(AppEvent::ResourceShellExited {
+        session_id: first.id,
+    });
+    assert_eq!(
+        app.state().resource_shell_sessions,
+        vec![replacement],
+        "a late exit belongs to the replaced session, not its successor"
+    );
+}
+
+fn accept_resource_shell_removal(app: &mut App) -> ResourceShellSessionId {
     app.invoke(Command::OpenShell);
     let session_id = app.state().resource_shell_sessions[0].id;
     let _ = app.take_resource_shell_effects();
@@ -1574,8 +1622,46 @@ fn an_accepted_refresh_stops_the_shell_for_a_removed_resource() {
         provider_id,
         result: Ok(snapshot(&[])),
     });
+    session_id
+}
+
+/// A removed Resource owns no lingering Session: accepting the new snapshot
+/// asks the host to stop and reap its private PTY before state forgets it.
+#[test]
+fn an_accepted_refresh_stops_the_shell_for_a_removed_resource() {
+    let mut app = App::new();
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
+    let session_id = accept_resource_shell_removal(&mut app);
 
     assert!(app.state().resource_shell_sessions.is_empty());
+    assert_eq!(
+        app.take_resource_shell_effects(),
+        vec![ResourceShellEffect::Stop { session_id }]
+    );
+}
+
+/// Deletion removes every application-owned trace of a Resource Shell Session,
+/// including an enlarged presentation that would otherwise point at an absent
+/// session. A failed refresh remains deliberately outside this reconciliation.
+#[test]
+fn accepted_resource_removal_restores_details_after_forgetting_its_shell() {
+    let mut app = App::new();
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
+    let session_id = accept_resource_shell_removal(&mut app);
+
+    assert!(app.state().resource_shell_sessions.is_empty());
+    assert_eq!(
+        app.state().resource_shell_presentation,
+        ResourceShellPresentation::Details
+    );
     assert_eq!(
         app.take_resource_shell_effects(),
         vec![ResourceShellEffect::Stop { session_id }]

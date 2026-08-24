@@ -12,6 +12,7 @@ use super::{
     Clipboard, DetailDispatchQueue, Osc52Clipboard, ResourceShellRuntime,
     ResourceShellRuntimeEvent, ShellInputRouter, ShellKeyRoute, ShellPointerRoute, handle_key,
     handle_mouse, persist_pane_boundary, release_resource_shell,
+    resource_shell_output_requires_redraw,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
@@ -134,6 +135,75 @@ fn a_real_pty_shell_wakes_the_host_and_keeps_its_rendered_output() {
             .flatten()
             .any(|cell| cell.text == "h")
     );
+    runtime.stop(session);
+}
+
+/// A Resource Shell Session keeps draining while its Resource is hidden, but
+/// its coalesced PTY wakeup must not ask the host to redraw invisible content.
+#[test]
+fn hidden_resource_shell_output_does_not_request_a_redraw() {
+    let mut app = app_on_workspace(two_containers());
+    app.invoke(Command::OpenShell);
+    let session_id = app.state().resource_shell_sessions[0].id;
+    app.update(AppEvent::ResourceShellStarted { session_id });
+    app.invoke(Command::ToggleResourceShellSize);
+
+    app.invoke(Command::SelectResource {
+        panel: 0,
+        resource: 1,
+    });
+
+    assert!(
+        !resource_shell_output_requires_redraw(&app, session_id),
+        "a session for a Resource outside the visible Shell Detail View stays hidden"
+    );
+
+    app.invoke(Command::SelectResource {
+        panel: 0,
+        resource: 0,
+    });
+    app.invoke(Command::ActivateDetailView(2));
+    assert!(resource_shell_output_requires_redraw(&app, session_id));
+}
+
+/// A continuously writing hidden session must continue updating its private
+/// terminal while its one outstanding wakeup prevents redraw pressure from
+/// growing with PTY output volume.
+#[test]
+fn continuous_hidden_resource_shell_output_stays_coalesced() {
+    let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    let mut runtime = ResourceShellRuntime::default();
+    let session = tuivir::application::ResourceShellSessionId::new(11);
+    runtime
+        .start(
+            session,
+            &ResourceShellProcess::new("/bin/sh", &["-c", "while :; do printf x; done"]),
+            80,
+            24,
+            events,
+        )
+        .expect("continuous local shell starts in a PTY");
+
+    assert!(matches!(
+        receiver.blocking_recv().expect("first output wakeup"),
+        ResourceShellRuntimeEvent::OutputReady { session_id } if session_id == session
+    ));
+    thread::sleep(Duration::from_millis(50));
+    assert!(
+        runtime
+            .screen(session)
+            .expect("hidden session remains emulated")
+            .lines
+            .into_iter()
+            .flatten()
+            .any(|cell| cell.text == "x"),
+        "PTY output continues updating the hidden terminal"
+    );
+    assert!(
+        receiver.try_recv().is_err(),
+        "without a visible render acknowledgement, continuous output has one coalesced wakeup"
+    );
+    runtime.stop(session);
 }
 
 #[test]
@@ -144,16 +214,46 @@ fn a_real_pty_shell_keeps_colour_unicode_and_cursor_in_its_screen() {
     runtime
         .start(
             session,
-            &ResourceShellProcess::new("/bin/sh", &["-c", "printf '\\033[31mred\\033[0m 鮫'"]),
+            &ResourceShellProcess::new(
+                "/bin/sh",
+                &["-c", "printf '\\033[31mred\\033[0m 鮫'; sleep 1"],
+            ),
             80,
             24,
             events,
         )
         .expect("local shell starts in a PTY");
-    let _ = receiver.blocking_recv().expect("PTY output wakes the host");
-
-    let screen = runtime.screen(session).expect("live session screen");
-    let cells = screen.lines.into_iter().flatten().collect::<Vec<_>>();
+    let deadline = Instant::now() + Duration::from_secs(1);
+    let cells = loop {
+        while let Ok(event) = receiver.try_recv() {
+            match event {
+                ResourceShellRuntimeEvent::OutputReady { session_id } if session_id == session => {
+                    runtime.acknowledge_output(session);
+                }
+                _ => {}
+            }
+        }
+        let cells = runtime
+            .screen(session)
+            .expect("live session screen")
+            .lines
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+        let has_red_text = cells
+            .iter()
+            .any(|cell| cell.text == "r" && cell.foreground == Some(Color::Red));
+        let has_unicode = cells.iter().any(|cell| cell.text == "鮫");
+        let has_cursor = cells.iter().any(|cell| cell.cursor);
+        if has_red_text && has_unicode && has_cursor {
+            break cells;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "PTY did not finish emulating its colour, Unicode, and cursor output"
+        );
+        thread::sleep(Duration::from_millis(10));
+    };
     assert!(
         cells
             .iter()
@@ -161,6 +261,7 @@ fn a_real_pty_shell_keeps_colour_unicode_and_cursor_in_its_screen() {
     );
     assert!(cells.iter().any(|cell| cell.text == "鮫"));
     assert!(cells.iter().any(|cell| cell.cursor));
+    runtime.stop(session);
 }
 
 #[test]

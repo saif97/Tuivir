@@ -25,7 +25,7 @@ use resource_shell_runtime::{ResourceShellRuntime, ResourceShellRuntimeEvent};
 use tuivir::{
     application::{
         App, AppEvent, Command, CommandRegistry, ProviderRequest, ResourceShellEffect,
-        ResourceShellSessionId, ResourceShellSessionLifecycle,
+        ResourceShellSessionId,
     },
     infrastructure::{
         config::{Env, FileSystemReader, load},
@@ -516,6 +516,15 @@ fn dispatch_resource_shell_effects(
     requests
 }
 
+/// Whether a coalesced PTY output wakeup needs another frame. Hidden sessions
+/// keep draining in their private runtime, but their terminal cells are not
+/// part of the current frame and therefore must not wake the renderer.
+fn resource_shell_output_requires_redraw(app: &App, session_id: ResourceShellSessionId) -> bool {
+    app.state()
+        .visible_running_resource_shell_session()
+        .is_some_and(|session| session.id == session_id)
+}
+
 /// Encodes the common interactive keys without asking the application to know
 /// about PTYs or terminal engines. Alacritty remains the owner of output
 /// parsing and terminal state.
@@ -576,30 +585,39 @@ async fn run(
     let (key_tx, mut key_rx) = mpsc::unbounded_channel();
     let mut input = InputThread::start(key_tx);
     let mut refresh_timer = RefreshTimer::new();
+    // Keep the last measured geometry for mouse handling while the host is
+    // intentionally idle. In particular, hidden shell output must not force a
+    // new frame just to replace a layout it never used.
+    let mut layout: Option<presentation::ScreenLayout> = None;
+    let mut redraw_needed = true;
 
     let result = loop {
-        // Nothing has been drawn yet, so there is nothing to point at.
-        let mut layout: Option<presentation::ScreenLayout> = None;
-        if let Err(error) = terminal.draw(|frame| {
-            let measured = presentation::ScreenLayout::measure(app.state(), frame.area());
-            presentation::render_with_layout(app.state(), frame, &measured);
-            if let (Some(session), Some(shell)) = (
-                app.state().visible_resource_shell_session(),
-                measured.resource_shell,
-            ) && session.lifecycle == ResourceShellSessionLifecycle::Running
-            {
-                let _ = resource_shell_runtime.resize(
-                    session.id,
-                    shell.terminal.width,
-                    shell.terminal.height,
-                );
-                if let Some(screen) = resource_shell_runtime.screen(session.id) {
-                    presentation::render_resource_shell_screen(screen, frame, shell.terminal);
+        if redraw_needed {
+            if let Err(error) = terminal.draw(|frame| {
+                let measured = presentation::ScreenLayout::measure(app.state(), frame.area());
+                presentation::render_with_layout(app.state(), frame, &measured);
+                if let (Some(session), Some(shell)) = (
+                    app.state().visible_running_resource_shell_session(),
+                    measured.resource_shell,
+                ) {
+                    let _ = resource_shell_runtime.resize(
+                        session.id,
+                        shell.terminal.width,
+                        shell.terminal.height,
+                    );
+                    if let Some(screen) = resource_shell_runtime.screen(session.id) {
+                        presentation::render_resource_shell_screen(screen, frame, shell.terminal);
+                    }
+                    // This acknowledgement comes only after the visible terminal
+                    // has been rendered. Hidden sessions leave their coalesced
+                    // wakeup pending while their PTYs continue draining output.
+                    resource_shell_runtime.acknowledge_output(session.id);
                 }
+                layout = Some(measured);
+            }) {
+                break Err(error);
             }
-            layout = Some(measured);
-        }) {
-            break Err(error);
+            redraw_needed = false;
         }
 
         let detail_deadline = detail_dispatch.deadline();
@@ -612,18 +630,22 @@ async fn run(
                             .state()
                             .enlarged_resource_shell_session()
                             .is_some();
-                        let route = app.state().visible_resource_shell_session().and_then(|session| {
-                            if session.lifecycle == ResourceShellSessionLifecycle::Running {
-                                Some(shell_input.route(session.id, key))
-                            } else if enlarged {
-                                Some(shell_input.route_without_terminal(session.id, key))
-                            } else {
-                                None
-                            }
-                        });
+                        let route = app
+                            .state()
+                            .visible_running_resource_shell_session()
+                            .map(|session| shell_input.route(session.id, key))
+                            .or_else(|| {
+                                enlarged.then(|| {
+                                    app.state()
+                                        .visible_resource_shell_session()
+                                        .map(|session| {
+                                            shell_input.route_without_terminal(session.id, key)
+                                        })
+                                })?
+                            });
                         match route {
                             Some(ShellKeyRoute::ToPty(bytes)) => {
-                                let session = app.state().visible_resource_shell_session()
+                                let session = app.state().visible_running_resource_shell_session()
                                     .expect("a routed Resource Shell Session stays visible");
                                 let _ = resource_shell_runtime.write(session.id, bytes);
                                 (ShellControl::Continue, Vec::new())
@@ -640,11 +662,7 @@ async fn run(
                                 if command == Some(Command::CopyDetails)
                                     && let Some(session) = app
                                         .state()
-                                        .visible_resource_shell_session()
-                                        .filter(|session| {
-                                            session.lifecycle
-                                                == ResourceShellSessionLifecycle::Running
-                                        })
+                                        .visible_running_resource_shell_session()
                                     && let Some(text) = resource_shell_runtime.selected_text(session.id)
                                 {
                                     if let Err(error) = clipboard.copy(&text) {
@@ -660,10 +678,7 @@ async fn run(
                     Event::Mouse(mouse) => {
                         let route = app
                             .state()
-                            .visible_resource_shell_session()
-                            .filter(|session| {
-                                session.lifecycle == ResourceShellSessionLifecycle::Running
-                            })
+                            .visible_running_resource_shell_session()
                             .and_then(|session| {
                                 let viewport = layout.as_ref()?.resource_shell?.terminal;
                                 let modes = resource_shell_runtime.input_modes(session.id)?;
@@ -704,10 +719,7 @@ async fn run(
                     Event::Paste(text) => {
                         if let Some(session) = app
                             .state()
-                            .visible_resource_shell_session()
-                            .filter(|session| {
-                                session.lifecycle == ResourceShellSessionLifecycle::Running
-                            })
+                            .visible_running_resource_shell_session()
                         {
                             let bracketed_paste = resource_shell_runtime
                                 .input_modes(session.id)
@@ -735,6 +747,7 @@ async fn run(
                 if control == ShellControl::Quit {
                     break Ok(());
                 }
+                redraw_needed = true;
             }
             Some(event) = completion_rx.recv() => {
                 let requests = app.update(event);
@@ -746,22 +759,24 @@ async fn run(
                     layout.as_ref(),
                 );
                 dispatch_all(&runtime, &completion_tx, &mut detail_dispatch, requests);
+                redraw_needed = true;
             }
             Some(event) = resource_shell_event_rx.recv() => {
-                let requests = match event {
+                let (requests, requests_redraw) = match event {
                     ResourceShellRuntimeEvent::OutputReady { session_id } => {
-                        resource_shell_runtime.acknowledge_output(session_id);
-                        Vec::new()
+                        (Vec::new(), resource_shell_output_requires_redraw(&app, session_id))
                     }
                     ResourceShellRuntimeEvent::Exited { session_id } => {
-                        app.update(AppEvent::ResourceShellExited { session_id })
+                        (app.update(AppEvent::ResourceShellExited { session_id }), true)
                     }
                 };
                 dispatch_all(&runtime, &completion_tx, &mut detail_dispatch, requests);
+                redraw_needed |= requests_redraw;
             }
             _ = refresh_timer.tick() => {
                 let requests = app.update(AppEvent::RefreshTimerElapsed);
                 dispatch_all(&runtime, &completion_tx, &mut detail_dispatch, requests);
+                redraw_needed = true;
             }
             _ = wait_for_detail_dispatch(detail_deadline) => {
                 if let Some(request) = detail_dispatch.take_ready(Instant::now())
