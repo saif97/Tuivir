@@ -1076,7 +1076,10 @@ impl App {
     }
 
     fn request_quit(&mut self) -> Vec<ProviderRequest> {
-        if self.state.confirmation.is_some() {
+        if matches!(
+            self.state.confirmation,
+            Some(Confirmation::QuitResourceShellSessions { .. })
+        ) {
             return Vec::new();
         }
         let session_count = self.live_resource_shell_session_ids().len();
@@ -1129,8 +1132,8 @@ impl App {
         }]
     }
 
-    /// Asks for the terminal on behalf of the selected Resource's Interactive
-    /// Shell.
+    /// Opens the selected Resource's Shell Detail View Tab in its enlarged
+    /// presentation.
     ///
     /// A Resource whose Provider offers no shell asks for nothing, so an
     /// unsupported operation stays unsupported rather than being attempted and
