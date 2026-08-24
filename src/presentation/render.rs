@@ -29,6 +29,7 @@ pub struct ResourceShellCell {
     pub foreground: Option<Color>,
     pub background: Option<Color>,
     pub cursor: bool,
+    pub selected: bool,
 }
 
 use super::screen_layout::{
@@ -691,7 +692,7 @@ pub fn render_resource_shell_screen(
                         if let Some(background) = cell.background {
                             style = style.bg(background);
                         }
-                        if cell.cursor {
+                        if cell.cursor || cell.selected {
                             style = style.add_modifier(Modifier::REVERSED);
                         }
                         Span::styled(cell.text.clone(), style)

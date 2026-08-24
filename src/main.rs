@@ -11,11 +11,12 @@ use std::{
 
 use crossterm::{
     event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
+        self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
     },
     execute,
 };
-use ratatui::DefaultTerminal;
+use ratatui::{DefaultTerminal, layout::Rect};
 use tokio::sync::mpsc;
 
 mod resource_shell_runtime;
@@ -58,7 +59,7 @@ async fn main() -> io::Result<()> {
     let pane_boundary =
         tuivir::infrastructure::pane_boundary_state::load(&state_env, &FileSystemReader);
     let mut terminal = ratatui::init();
-    if let Err(error) = execute!(io::stdout(), EnableMouseCapture) {
+    if let Err(error) = execute!(io::stdout(), EnableMouseCapture, EnableBracketedPaste) {
         ratatui::restore();
         return Err(error);
     }
@@ -68,11 +69,11 @@ async fn main() -> io::Result<()> {
     // at every movement of the mouse.
     let restore_screen = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic| {
-        let _ = execute!(io::stdout(), DisableMouseCapture);
+        let _ = execute!(io::stdout(), DisableMouseCapture, DisableBracketedPaste);
         restore_screen(panic);
     }));
     let result = run(&mut terminal, registry, pane_boundary, state_env).await;
-    let _ = execute!(io::stdout(), DisableMouseCapture);
+    let _ = execute!(io::stdout(), DisableMouseCapture, DisableBracketedPaste);
     ratatui::restore();
     result
 }
@@ -91,11 +92,35 @@ struct ShellInputRouter {
     active_session: Option<ResourceShellSessionId>,
     focused: bool,
     prefix_pending: bool,
+    selection_gesture: ShellSelectionGesture,
 }
 
 enum ShellKeyRoute {
     ToPty(Vec<u8>),
+    Released,
     ToTuivir,
+}
+
+enum ShellPointerRoute {
+    ToPty(Vec<u8>),
+    Select { start: (u16, u16), end: (u16, u16) },
+    Scroll { lines: i32 },
+    ToTuivir,
+    None,
+}
+
+#[derive(Default)]
+enum ShellSelectionGesture {
+    #[default]
+    Idle,
+    Pressed {
+        session_id: ResourceShellSessionId,
+        start: (u16, u16),
+    },
+    Dragging {
+        session_id: ResourceShellSessionId,
+        start: (u16, u16),
+    },
 }
 
 impl ShellInputRouter {
@@ -109,8 +134,15 @@ impl ShellInputRouter {
             self.prefix_pending = false;
             if key.code == KeyCode::Char('q') && key.modifiers.is_empty() {
                 self.focused = false;
-                return ShellKeyRoute::ToTuivir;
+                return ShellKeyRoute::Released;
             }
+            if key.code == KeyCode::Char('b') && key.modifiers == KeyModifiers::CONTROL {
+                return ShellKeyRoute::ToPty(vec![0x02]);
+            }
+            if let Some(bytes) = terminal_key_bytes(key) {
+                return ShellKeyRoute::ToPty([&[0x02][..], bytes.as_slice()].concat());
+            }
+            return ShellKeyRoute::ToTuivir;
         }
         if !self.focused {
             if key.code == KeyCode::Enter && key.modifiers.is_empty() {
@@ -124,6 +156,132 @@ impl ShellInputRouter {
             return ShellKeyRoute::ToTuivir;
         }
         terminal_key_bytes(key).map_or(ShellKeyRoute::ToTuivir, ShellKeyRoute::ToPty)
+    }
+
+    fn route_paste(
+        &mut self,
+        session_id: ResourceShellSessionId,
+        text: &str,
+        bracketed_paste: bool,
+    ) -> ShellKeyRoute {
+        if self.active_session != Some(session_id) {
+            self.active_session = Some(session_id);
+            self.focused = true;
+            self.prefix_pending = false;
+        }
+        if !self.focused {
+            return ShellKeyRoute::ToTuivir;
+        }
+        let mut bytes = Vec::with_capacity(text.len() + if bracketed_paste { 12 } else { 0 });
+        if bracketed_paste {
+            bytes.extend_from_slice(b"\x1b[200~");
+        }
+        bytes.extend_from_slice(text.as_bytes());
+        if bracketed_paste {
+            bytes.extend_from_slice(b"\x1b[201~");
+        }
+        ShellKeyRoute::ToPty(bytes)
+    }
+
+    fn route_mouse(
+        &mut self,
+        session_id: ResourceShellSessionId,
+        event: MouseEvent,
+        viewport: Rect,
+        mouse_reporting: bool,
+        sgr_mouse: bool,
+    ) -> ShellPointerRoute {
+        let Some(position) = terminal_position(viewport, event) else {
+            self.focused = false;
+            self.prefix_pending = false;
+            self.selection_gesture = ShellSelectionGesture::Idle;
+            return ShellPointerRoute::ToTuivir;
+        };
+        if self.active_session != Some(session_id) {
+            self.active_session = Some(session_id);
+            self.focused = false;
+            self.prefix_pending = false;
+        }
+        if mouse_reporting && self.focused {
+            return terminal_mouse_bytes(event, position, sgr_mouse)
+                .map_or(ShellPointerRoute::None, ShellPointerRoute::ToPty);
+        }
+        match event.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                if mouse_reporting {
+                    self.focused = true;
+                    ShellPointerRoute::None
+                } else {
+                    self.selection_gesture = ShellSelectionGesture::Pressed {
+                        session_id,
+                        start: position,
+                    };
+                    ShellPointerRoute::None
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) if !mouse_reporting => {
+                let start = match self.selection_gesture {
+                    ShellSelectionGesture::Pressed {
+                        session_id: selected_session,
+                        start,
+                    }
+                    | ShellSelectionGesture::Dragging {
+                        session_id: selected_session,
+                        start,
+                    } if selected_session == session_id => start,
+                    _ => return ShellPointerRoute::None,
+                };
+                self.selection_gesture = ShellSelectionGesture::Dragging { session_id, start };
+                self.focused = false;
+                ShellPointerRoute::Select {
+                    start,
+                    end: position,
+                }
+            }
+            MouseEventKind::Up(MouseButton::Left) if !mouse_reporting => {
+                let gesture = std::mem::take(&mut self.selection_gesture);
+                if matches!(gesture, ShellSelectionGesture::Pressed { session_id: id, .. } if id == session_id)
+                {
+                    self.focused = true;
+                }
+                ShellPointerRoute::None
+            }
+            MouseEventKind::ScrollUp if !mouse_reporting => ShellPointerRoute::Scroll { lines: 3 },
+            MouseEventKind::ScrollDown if !mouse_reporting => {
+                ShellPointerRoute::Scroll { lines: -3 }
+            }
+            _ => ShellPointerRoute::None,
+        }
+    }
+}
+
+fn terminal_position(viewport: Rect, event: MouseEvent) -> Option<(u16, u16)> {
+    (event.column >= viewport.x
+        && event.column < viewport.right()
+        && event.row >= viewport.y
+        && event.row < viewport.bottom())
+    .then_some((event.column - viewport.x, event.row - viewport.y))
+}
+
+fn terminal_mouse_bytes(
+    event: MouseEvent,
+    position: (u16, u16),
+    sgr_mouse: bool,
+) -> Option<Vec<u8>> {
+    let (code, suffix) = match event.kind {
+        MouseEventKind::Down(MouseButton::Left) => (0, 'M'),
+        MouseEventKind::Drag(MouseButton::Left) => (32, 'M'),
+        MouseEventKind::Up(MouseButton::Left) => (3, 'm'),
+        MouseEventKind::ScrollUp => (64, 'M'),
+        MouseEventKind::ScrollDown => (65, 'M'),
+        _ => return None,
+    };
+    if sgr_mouse {
+        Some(format!("\x1b[<{code};{};{}{suffix}", position.0 + 1, position.1 + 1).into_bytes())
+    } else {
+        let column = u8::try_from(position.0 + 33).ok()?;
+        let row = u8::try_from(position.1 + 33).ok()?;
+        Some(vec![0x1b, b'[', b'M', code + 32, column, row])
     }
 }
 
@@ -329,6 +487,16 @@ fn terminal_key_bytes(event: KeyEvent) -> Option<Vec<u8>> {
         KeyCode::Home => b"\x1b[H".to_vec(),
         KeyCode::End => b"\x1b[F".to_vec(),
         KeyCode::Delete => b"\x1b[3~".to_vec(),
+        KeyCode::F(1) => b"\x1bOP".to_vec(),
+        KeyCode::F(2) => b"\x1bOQ".to_vec(),
+        KeyCode::F(3) => b"\x1bOR".to_vec(),
+        KeyCode::F(4) => b"\x1bOS".to_vec(),
+        KeyCode::F(number @ 5..=12) => format!(
+            "\x1b[{}~",
+            [15, 17, 18, 19, 20, 21, 23, 24][usize::from(number - 5)]
+        )
+        .into_bytes(),
+        KeyCode::F(number) => format!("\x1b[{}~", 12 + number).into_bytes(),
         _ => return None,
     };
     Some(bytes)
@@ -405,16 +573,91 @@ async fn run(
                                 let _ = resource_shell_runtime.write(session.id, bytes);
                                 (ShellControl::Continue, Vec::new())
                             }
+                            Some(ShellKeyRoute::Released) => (ShellControl::Continue, Vec::new()),
                             Some(ShellKeyRoute::ToTuivir) | None => {
                                 let command = resolve_key_command(&app, key);
-                                handle_command(&mut app, command)
+                                if command == Some(Command::CopyDetails)
+                                    && let Some(session) = app
+                                        .state()
+                                        .visible_resource_shell_session()
+                                        .filter(|session| {
+                                            session.lifecycle
+                                                == ResourceShellSessionLifecycle::Running
+                                        })
+                                    && let Some(text) = resource_shell_runtime.selected_text(session.id)
+                                {
+                                    if let Err(error) = clipboard.copy(&text) {
+                                        app.report_details_copy_failure(error.to_string());
+                                    }
+                                    (ShellControl::Continue, Vec::new())
+                                } else {
+                                    handle_command(&mut app, command)
+                                }
                             }
                         }
                     }
                     Event::Mouse(mouse) => {
-                        let command = resolve_mouse_command(&app, mouse, layout.as_ref());
-                        let requests = command.map_or_else(Vec::new, |command| app.invoke(command));
+                        let route = app
+                            .state()
+                            .visible_resource_shell_session()
+                            .filter(|session| {
+                                session.lifecycle == ResourceShellSessionLifecycle::Running
+                            })
+                            .and_then(|session| {
+                                let viewport = layout.as_ref()?.panes.as_ref()?.detail_content;
+                                let modes = resource_shell_runtime.input_modes(session.id)?;
+                                Some((
+                                    session.id,
+                                    shell_input.route_mouse(
+                                        session.id,
+                                        mouse,
+                                        viewport,
+                                        modes.mouse_reporting,
+                                        modes.sgr_mouse,
+                                    ),
+                                ))
+                            });
+                        let requests = match route {
+                            Some((session_id, ShellPointerRoute::ToPty(bytes))) => {
+                                let _ = resource_shell_runtime.write(session_id, bytes);
+                                Vec::new()
+                            }
+                            Some((session_id, ShellPointerRoute::Scroll { lines })) => {
+                                let _ = resource_shell_runtime.scroll(session_id, lines);
+                                Vec::new()
+                            }
+                            Some((session_id, ShellPointerRoute::Select { start, end })) => {
+                                let _ = resource_shell_runtime.select(session_id, start, end);
+                                Vec::new()
+                            }
+                            Some((_, ShellPointerRoute::None)) => {
+                                Vec::new()
+                            }
+                            Some((_, ShellPointerRoute::ToTuivir)) | None => {
+                                resolve_mouse_command(&app, mouse, layout.as_ref())
+                                    .map_or_else(Vec::new, |command| app.invoke(command))
+                            }
+                        };
                         (ShellControl::Continue, requests)
+                    }
+                    Event::Paste(text) => {
+                        if let Some(session) = app
+                            .state()
+                            .visible_resource_shell_session()
+                            .filter(|session| {
+                                session.lifecycle == ResourceShellSessionLifecycle::Running
+                            })
+                        {
+                            let bracketed_paste = resource_shell_runtime
+                                .input_modes(session.id)
+                                .is_some_and(|modes| modes.bracketed_paste);
+                            if let ShellKeyRoute::ToPty(bytes) =
+                                shell_input.route_paste(session.id, &text, bracketed_paste)
+                            {
+                                let _ = resource_shell_runtime.write(session.id, bytes);
+                            }
+                        }
+                        (ShellControl::Continue, Vec::new())
                     }
                     _ => (ShellControl::Continue, Vec::new()),
                 };
@@ -525,7 +768,7 @@ fn spawn_input_thread(
         while !stop.load(Ordering::Relaxed) {
             match event::poll(Duration::from_millis(100)) {
                 Ok(true) => match event::read() {
-                    Ok(event @ (Event::Key(_) | Event::Mouse(_))) => {
+                    Ok(event @ (Event::Key(_) | Event::Mouse(_) | Event::Paste(_))) => {
                         if keys.send(event).is_err() {
                             break;
                         }
