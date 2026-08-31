@@ -691,6 +691,32 @@ fn a_focused_resource_shell_session_receives_mouse_coordinates_relative_to_its_v
 }
 
 #[test]
+fn a_resource_shell_routes_mouse_events_outside_its_viewport_to_tuivir() {
+    let session = tuivir::application::ResourceShellSessionId::new(7);
+    let mut router = ShellInputRouter::default();
+    let _ = router.route(
+        session,
+        KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE),
+    );
+
+    assert!(matches!(
+        router.route_mouse(
+            session,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: 9,
+                row: 20,
+                modifiers: KeyModifiers::NONE,
+            },
+            Rect::new(10, 20, 40, 10),
+            true,
+            true,
+        ),
+        ShellPointerRoute::ToTuivir
+    ));
+}
+
+#[test]
 fn dragging_or_wheeling_without_mouse_reporting_selects_or_scrolls_without_shell_input() {
     let session = tuivir::application::ResourceShellSessionId::new(7);
     let mut router = ShellInputRouter::default();
