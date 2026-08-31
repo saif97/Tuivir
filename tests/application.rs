@@ -2986,10 +2986,10 @@ fn detail_views_wrap_around_at_both_ends() {
     );
 }
 
-/// The view survives moving between Resources, so reading one kind of detail
-/// down a list does not keep resetting to the first view.
+/// Each Resource remembers its own Detail View Tab, so returning restores the
+/// view without making every Resource share one choice.
 #[test]
-fn the_chosen_detail_view_survives_moving_to_another_resource() {
+fn returning_to_a_resource_restores_its_detail_view_tab() {
     let mut app = App::new();
     ready_workspace(
         &mut app,
@@ -3002,21 +3002,46 @@ fn the_chosen_detail_view_survives_moving_to_another_resource() {
     app.invoke(Command::NextDetailView);
     app.invoke(Command::NextDetailView);
 
-    let requests = app.invoke(Command::SelectNext);
+    app.invoke(Command::SelectNext);
 
     assert!(
-        matches!(
-            requests.as_slice(),
-            [ProviderRequest::LoadResourceDetails { target, view_id, .. }]
-                if target == &ResourceTarget::new(
-                    ResourcePanelId::new("containers"),
-                    ResourceId::new("container-b"),
-                )
-                    && view_id == &DetailViewId::new("stats")
-        ),
-        "unexpected requests: {requests:?}"
+        render_to_text(app.state(), 100, 24).contains("[ Overview ]  Logs  Stats  Inspect"),
+        "a Resource without a remembered Detail View Tab starts at Overview"
     );
-    assert!(render_to_text(app.state(), 100, 24).contains("Overview  Logs  [ Stats ]  Inspect"));
+
+    app.invoke(Command::SelectPrevious);
+
+    assert!(
+        render_to_text(app.state(), 100, 24).contains("Overview  Logs  [ Stats ]  Inspect"),
+        "returning to api restores Stats"
+    );
+}
+
+/// Detail View Tab choice belongs to the Resource, so returning to a Resource
+/// with a live Resource Shell Session shows its Shell tab again.
+#[test]
+fn returning_to_a_resource_restores_its_shell_detail_view_tab() {
+    let mut app = App::new();
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[
+            ("container-a", "api", "nginx:1.27"),
+            ("container-b", "worker", "alpine:3.21"),
+        ]),
+    );
+
+    app.invoke(Command::ActivateDetailView(4));
+    app.invoke(Command::FocusResourcePanel(0));
+    app.invoke(Command::SelectNext);
+    app.invoke(Command::ActivateDetailView(0));
+    app.invoke(Command::FocusResourcePanel(0));
+    app.invoke(Command::SelectPrevious);
+
+    assert!(
+        render_to_text(app.state(), 100, 24).contains("Logs  Stats  Inspect  [ Shell ]"),
+        "returning to api should restore its Shell Detail View Tab"
+    );
 }
 
 /// A user who moves off a Resource before its details arrive must not have the
@@ -3033,7 +3058,8 @@ fn a_late_result_for_the_previous_resource_cannot_replace_current_details() {
         ])),
     ));
     let stale = first_provider_detail(&mut app);
-    let current = detail_request(app.invoke(Command::SelectNext));
+    app.invoke(Command::SelectNext);
+    let current = detail_request(app.invoke(Command::NextDetailView));
     app.update(details_completed(
         current,
         Ok(ResourceDetails::from_lines(["worker is up"])),
@@ -3191,10 +3217,10 @@ fn an_ordinary_refresh_neither_reloads_nor_discards_the_loaded_details() {
     );
 }
 
-/// When the selected Resource is gone, the selection moves and the details have
-/// to follow it.
+/// When the selected Resource is gone, its replacement starts from its own
+/// Overview rather than inheriting the removed Resource's Detail View Tab.
 #[test]
-fn a_refresh_that_removes_the_selected_resource_loads_the_new_selections_details() {
+fn a_refresh_that_removes_the_selected_resource_shows_the_new_selections_overview() {
     let mut app = App::new();
     let initial = refresh_request(app.update(docker_discovery().into_event()));
     app.update(refresh_completed(
@@ -3213,20 +3239,9 @@ fn a_refresh_that_removes_the_selected_resource_loads_the_new_selections_details
         Ok(snapshot(&[("container-b", "worker", "alpine:3.21")])),
     ));
 
-    let reloaded = detail_request(requests);
-    assert!(
-        matches!(
-            &reloaded,
-            ProviderRequest::LoadResourceDetails { target, .. }
-                if target == &ResourceTarget::new(
-                    ResourcePanelId::new("containers"),
-                    ResourceId::new("container-b"),
-                )
-        ),
-        "unexpected request: {reloaded:?}"
-    );
+    assert!(requests.is_empty(), "unexpected requests: {requests:?}");
     let screen = render_to_text(app.state(), 100, 24);
-    assert!(screen.contains("Loading Logs…"), "rendered:\n{screen}");
+    assert!(screen.contains("Image: alpine:3.21"), "rendered:\n{screen}");
     assert!(!screen.contains("listening on port 80"));
 }
 
@@ -3512,7 +3527,8 @@ fn moving_to_another_resource_starts_its_detail_view_at_the_top() {
     ));
     app.invoke(Command::ScrollDetailsDown);
 
-    let worker = detail_request(app.invoke(Command::SelectNext));
+    app.invoke(Command::SelectNext);
+    let worker = detail_request(app.invoke(Command::NextDetailView));
     app.update(details_completed(
         worker,
         Ok(ResourceDetails::from_lines(

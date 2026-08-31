@@ -200,6 +200,7 @@ fn a_detail_result_is_accepted_only_for_the_still_visible_resource_and_view() {
         .expect("the selected Resource offers Logs");
 
     workspace.move_resource_selection(1);
+    workspace.move_detail_view(1);
     let current = workspace
         .start_visible_detail_load(ProviderRequestId::new(2))
         .expect("the newly selected Resource needs Logs");

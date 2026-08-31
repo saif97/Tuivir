@@ -69,7 +69,7 @@ An ordered association between one or more key combinations and a Command. The f
 _Avoid_: Shortcut, hotkey
 
 **Detail View Tab**:
-One selectable view of a Resource in the Details pane, either supplied by Tuivir or declared and named by its Provider Workspace — Docker's Logs, Stats, and Inspect; Incus's Info, Config, and Console Log. Only the provider-backed tab on screen is ever loaded; snapshot-backed content comes from the current Workspace Snapshot, while a Resource Shell Session continues independently of which tab is visible.
+One selectable view of a Resource in the Details pane, either supplied by Tuivir or declared and named by its Provider Workspace — Docker's Logs, Stats, and Inspect; Incus's Info, Config, and Console Log. Each Resource remembers its last valid Detail View Tab for its Provider Workspace's lifetime. Only the provider-backed tab on screen is ever loaded; snapshot-backed content comes from the current Workspace Snapshot, while a Resource Shell Session continues independently of which tab is visible.
 _Avoid_: Detail View, pane, inspector, log view
 
 **Resource Shell Session**:
