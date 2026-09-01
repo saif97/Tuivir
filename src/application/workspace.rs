@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::{
     application::{
         DetailView, ProviderRequestId, Resource, ResourceDetails, ResourcePanel, WorkspaceError,
@@ -155,6 +157,7 @@ pub struct ProviderWorkspaceState {
     focused_resource_panel: Option<ResourcePanelId>,
     panel_navigation: Vec<ResourcePanelNavigation>,
     selected_detail_view: Option<DetailViewId>,
+    remembered_detail_views: HashMap<ResourceTarget, DetailViewId>,
     details: Option<ResourceDetailsState>,
 }
 
@@ -167,6 +170,7 @@ impl ProviderWorkspaceState {
             focused_resource_panel: None,
             panel_navigation: Vec::new(),
             selected_detail_view: None,
+            remembered_detail_views: HashMap::new(),
             details: None,
         }
     }
@@ -241,6 +245,7 @@ impl ProviderWorkspaceState {
         self.focused_resource_panel = None;
         self.panel_navigation.clear();
         self.selected_detail_view = None;
+        self.remembered_detail_views.clear();
         self.details = None;
     }
 
@@ -262,20 +267,11 @@ impl ProviderWorkspaceState {
             let WorkspaceLoadState::Ready(snapshot) = &workspace.load_state else {
                 return false;
             };
-            let Some(panel) = snapshot.panel(panel_id) else {
+            let Some(_) = snapshot.panel(panel_id) else {
                 return false;
             };
             workspace.focused_resource_panel = Some(panel_id.clone());
-            let still_offered = workspace
-                .selected_detail_view
-                .as_ref()
-                .is_some_and(|selected| {
-                    selected.0 == OVERVIEW_DETAIL_VIEW_ID
-                        || panel.detail_views.iter().any(|view| &view.id == selected)
-                });
-            if !still_offered {
-                workspace.selected_detail_view = Some(DetailViewId::new(OVERVIEW_DETAIL_VIEW_ID));
-            }
+            workspace.restore_selected_detail_view();
             true
         })
     }
@@ -330,6 +326,7 @@ impl ProviderWorkspaceState {
                 navigation.selected_resource =
                     panel.resources.first().map(|resource| resource.id.clone());
                 navigation.selected_index = 0;
+                workspace.restore_selected_detail_view();
                 return;
             };
             let next = current
@@ -340,6 +337,7 @@ impl ProviderWorkspaceState {
                 .get(next)
                 .map(|resource| resource.id.clone());
             navigation.selected_index = next;
+            workspace.restore_selected_detail_view();
         });
     }
 
@@ -368,6 +366,7 @@ impl ProviderWorkspaceState {
             };
             navigation.selected_resource = Some(resource.id.clone());
             navigation.selected_index = index;
+            workspace.restore_selected_detail_view();
         });
     }
 
@@ -416,7 +415,7 @@ impl ProviderWorkspaceState {
                 .unwrap_or(0);
             let tab_count = panel.detail_views.len() + 1 + usize::from(offers_shell);
             let next = (current as isize + delta).rem_euclid(tab_count as isize) as usize;
-            workspace.selected_detail_view = Some(if next == 0 {
+            workspace.select_detail_view(if next == 0 {
                 DetailViewId::new(OVERVIEW_DETAIL_VIEW_ID)
             } else if offers_shell && next == panel.detail_views.len() + 1 {
                 DetailViewId::new(RESOURCE_SHELL_DETAIL_VIEW_ID)
@@ -464,7 +463,7 @@ impl ProviderWorkspaceState {
             else {
                 return;
             };
-            workspace.selected_detail_view = Some(view_id);
+            workspace.select_detail_view(view_id);
         });
     }
 
@@ -678,7 +677,8 @@ impl ProviderWorkspaceState {
                 workspace.focused_resource_panel =
                     snapshot.panels.first().map(|panel| panel.id.clone());
             }
-            workspace.reconcile_detail_view(&snapshot);
+            workspace.load_state = WorkspaceLoadState::Ready(snapshot);
+            workspace.reconcile_detail_view();
             if workspace
                 .selected_detail_view
                 .as_ref()
@@ -688,7 +688,6 @@ impl ProviderWorkspaceState {
                 // on refresh rather than retaining fields from an older one.
                 workspace.details = None;
             }
-            workspace.load_state = WorkspaceLoadState::Ready(snapshot);
         });
     }
 
@@ -807,8 +806,7 @@ impl ProviderWorkspaceState {
                 .and_then(|target| snapshot.resource(&target))
                 .is_some_and(|resource| resource.shell.is_some());
             if offers_shell {
-                workspace.selected_detail_view =
-                    Some(DetailViewId::new(RESOURCE_SHELL_DETAIL_VIEW_ID));
+                workspace.select_detail_view(DetailViewId::new(RESOURCE_SHELL_DETAIL_VIEW_ID));
             }
             offers_shell
         })
@@ -833,23 +831,34 @@ impl ProviderWorkspaceState {
         })
     }
 
-    fn reconcile_detail_view(&mut self, snapshot: &WorkspaceSnapshot) {
-        let offered = self
-            .selected_resource_target()
-            .as_ref()
-            .and_then(|selected| snapshot.panel_for(selected))
-            .map_or(&[][..], |panel| panel.detail_views.as_slice());
-        let offers_shell = self
-            .selected_resource()
-            .is_some_and(|resource| resource.shell.is_some());
-        let still_offered = self.selected_detail_view.as_ref().is_some_and(|selected| {
-            selected.0 == OVERVIEW_DETAIL_VIEW_ID
-                || (selected.0 == RESOURCE_SHELL_DETAIL_VIEW_ID && offers_shell)
-                || offered.iter().any(|view| &view.id == selected)
-        });
-        if !still_offered {
-            self.selected_detail_view = Some(DetailViewId::new(OVERVIEW_DETAIL_VIEW_ID));
+    fn select_detail_view(&mut self, view_id: DetailViewId) {
+        self.selected_detail_view = Some(view_id.clone());
+        if let Some(target) = self.selected_resource_target() {
+            self.remembered_detail_views.insert(target, view_id);
         }
+    }
+
+    fn restore_selected_detail_view(&mut self) {
+        let Some(target) = self.selected_resource_target() else {
+            self.selected_detail_view = None;
+            return;
+        };
+        let remembered = self.remembered_detail_views.get(&target).cloned();
+        let offered = match &self.load_state {
+            WorkspaceLoadState::Ready(snapshot) => remembered
+                .as_ref()
+                .is_some_and(|view| detail_view_is_offered(snapshot, &target, view)),
+            WorkspaceLoadState::Loading | WorkspaceLoadState::Error(_) => false,
+        };
+        self.selected_detail_view = Some(if offered {
+            remembered.expect("an offered remembered Detail View Tab exists")
+        } else {
+            DetailViewId::new(OVERVIEW_DETAIL_VIEW_ID)
+        });
+    }
+
+    fn reconcile_detail_view(&mut self) {
+        self.restore_selected_detail_view();
     }
 
     fn detail_target(&self) -> Option<(ResourceTarget, String, DetailView)> {
@@ -873,6 +882,21 @@ impl ProviderWorkspaceState {
         };
         Some((target, resource.name.clone(), view))
     }
+}
+
+fn detail_view_is_offered(
+    snapshot: &WorkspaceSnapshot,
+    target: &ResourceTarget,
+    view_id: &DetailViewId,
+) -> bool {
+    view_id.0 == OVERVIEW_DETAIL_VIEW_ID
+        || (view_id.0 == RESOURCE_SHELL_DETAIL_VIEW_ID
+            && snapshot
+                .resource(target)
+                .is_some_and(|resource| resource.shell.is_some()))
+        || snapshot
+            .panel_for(target)
+            .is_some_and(|panel| panel.detail_views.iter().any(|view| &view.id == view_id))
 }
 
 /// The read-only projection consumed by presentation and application callers.

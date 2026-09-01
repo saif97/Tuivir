@@ -69,17 +69,13 @@ An ordered association between one or more key combinations and a Command. The f
 _Avoid_: Shortcut, hotkey
 
 **Detail View Tab**:
-One selectable, provider-native view of a Resource, declared by the Provider Workspace that offers it and named in that Provider's own words — Docker's Logs, Stats, and Inspect; Incus's Info, Config, and Console Log. Only the provider-backed tab on screen is ever loaded; snapshot-backed content is resolved from the current Workspace Snapshot without Provider work. A result that arrives for a Resource or tab the user has left is refused rather than shown.
+One selectable view of a Resource in the Details pane, either supplied by Tuivir or declared and named by its Provider Workspace — Docker's Logs, Stats, and Inspect; Incus's Info, Config, and Console Log. Each Resource remembers its last valid Detail View Tab for its Provider Workspace's lifetime. Only the provider-backed tab on screen is ever loaded; snapshot-backed content comes from the current Workspace Snapshot, while a Resource Shell Session continues independently of which tab is visible.
 _Avoid_: Detail View, pane, inspector, log view
 
 **Resource Shell Session**:
-An ongoing command shell attached to one Resource through a Detail View Tab. It remains active when the user navigates elsewhere in Tuivir and is ended explicitly or when Tuivir exits.
-_Avoid_: Interactive Detail Session, shell panel, terminal tab
+An ongoing interactive command shell running inside exactly one Resource and presented through its Shell Detail View Tab. At most one runs for a Resource; the same session can be shown inside the Details pane or enlarged to fill Tuivir, continues while the user navigates elsewhere, and ends when its process exits, its Resource disappears, or Tuivir exits.
+_Avoid_: Interactive Shell, attached shell, shell panel, terminal tab
 
 **Resource State**:
 What a Provider reported a stateful Resource to be doing at the last refresh, in one vocabulary shared by every Provider: running, stopped, paused, transitioning, broken, or unknown. Each Provider Workspace maps its own status words into it, and an invoked lifecycle Command carries it so Tuivir never asks a Provider CLI for what it already knows. A stateless Resource has no Resource State; absence is not _unknown_. Only _stopped_ is positively determined; every other state, unknown included, means "not settled and stopped", so a Command that must treat those differently fails safe.
 _Avoid_: Status, run state, power state, phase
-
-**Interactive Shell**:
-A Provider CLI process that temporarily owns Tuivir's whole terminal so the user can work inside a Resource directly. Tuivir clears its screen and stops reading keys before handing over, and takes both back however that process ends — including one that never started. The shell runs on Tuivir's own screen rather than on the terminal Tuivir was launched from, so it opens on nothing but itself and the user's terminal is still theirs, untouched, when Tuivir exits. A Provider Workspace declares the shell it offers for each Resource in its own words, in the shell a Resource of that kind actually has: Docker's containers get `/bin/sh`, because the image may hold nothing else; an Incus instance is a whole system, so it gets root's login shell. A Resource its Provider declares no shell for offers the operation nowhere rather than failing when asked. Only a shell that never started counts as failing: one that ran exits with the status of the last command the user typed into it, which is theirs to read rather than Tuivir's to complain about.
-_Avoid_: Exec, attach, terminal session, embedded terminal

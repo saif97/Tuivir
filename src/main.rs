@@ -293,7 +293,7 @@ fn terminal_position(viewport: Rect, event: MouseEvent) -> Option<(u16, u16)> {
         && event.column < viewport.right()
         && event.row >= viewport.y
         && event.row < viewport.bottom())
-    .then_some((event.column - viewport.x, event.row - viewport.y))
+    .then(|| (event.column - viewport.x, event.row - viewport.y))
 }
 
 fn terminal_mouse_bytes(
