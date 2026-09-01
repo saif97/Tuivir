@@ -2,9 +2,10 @@ use std::collections::HashMap;
 
 use super::workspace::{DetailCompletion, ProviderWorkspaceState};
 use super::{
-    Command, CommandRegistry, CommandScope, InteractiveShellOutcome, InteractiveShellProcess, Key,
-    NUMBERED_RESOURCE_PANEL_CAPACITY, PaneBoundary, ProviderRequest, ProviderRequestId,
-    ResourceCommand, ResourceDetails, WorkspaceError, WorkspaceSnapshot,
+    Command, CommandRegistry, CommandScope, Key, NUMBERED_RESOURCE_PANEL_CAPACITY, PaneBoundary,
+    ProviderRequest, ProviderRequestId, ResourceCommand, ResourceDetails, ResourceShellEffect,
+    ResourceShellPresentation, ResourceShellSession, ResourceShellSessionId,
+    ResourceShellSessionLifecycle, WorkspaceError, WorkspaceSnapshot,
 };
 use crate::domain::{DetailViewId, Provider, ProviderId, ResourceState, ResourceTarget};
 
@@ -28,14 +29,20 @@ pub enum AppEvent {
         provider_id: ProviderId,
         result: Result<WorkspaceSnapshot, WorkspaceError>,
     },
-    /// An Interactive Shell has given the terminal back, however it ended.
-    ///
-    /// The shell it was opened for travels with the event, so what happened can
-    /// be reported against its Provider and Resource even though the pending
-    /// shell is long gone by then.
-    ShellClosed {
-        shell: PendingShell,
-        outcome: InteractiveShellOutcome,
+    /// The host created the live PTY runtime for this application-owned
+    /// Resource Shell Session identity.
+    ResourceShellStarted {
+        session_id: ResourceShellSessionId,
+    },
+    /// The host could not create the PTY or provider process. The session
+    /// remains visible so Enter can retry it.
+    ResourceShellStartFailed {
+        session_id: ResourceShellSessionId,
+        reason: String,
+    },
+    /// The private child process ended after it had started.
+    ResourceShellExited {
+        session_id: ResourceShellSessionId,
     },
     ResourceCommandCompleted {
         request_id: ProviderRequestId,
@@ -75,7 +82,7 @@ const DETAIL_SCROLL_LINES: isize = 10;
 /// One sentence for every operation Tuivir asked a Provider for and did not
 /// get.
 ///
-/// Lifecycle Commands and Interactive Shells fail in different places and are
+/// Lifecycle Commands and Resource Shell Sessions fail in different places and are
 /// worded by different code, but they identify their target the same way, so
 /// the user reads one sentence rather than two dialects of one.
 fn operation_failure(
@@ -103,14 +110,15 @@ pub struct AppState {
     /// the Panes the size the user left them.
     pub pane_boundary: PaneBoundary,
     pub help_overlay: Option<HelpOverlay>,
-    pub confirmation: Option<ResourceCommandInvocation>,
+    pub confirmation: Option<Confirmation>,
     pub command_error: Option<String>,
-    /// The Interactive Shell waiting to be given the terminal.
-    ///
-    /// The application cannot suspend a screen or run a process, so this is how
-    /// it asks: the host takes the shell, hands the terminal over, and reports
-    /// back with [`AppEvent::ShellClosed`].
-    pub pending_shell: Option<PendingShell>,
+    /// Stable Resource Shell Session identities and user-visible lifecycles.
+    /// The host owns all live terminal and process objects keyed by these IDs.
+    pub resource_shell_sessions: Vec<ResourceShellSession>,
+    /// The presentation of the one Resource Shell Session currently visible.
+    /// Session lifetime stays in `resource_shell_sessions`; moving this value
+    /// never starts or stops a host runtime.
+    pub resource_shell_presentation: ResourceShellPresentation,
     /// Dispatched Resource Commands that have not completed yet, in dispatch
     /// order.
     ///
@@ -136,6 +144,64 @@ impl AppState {
     pub fn active_workspace(&self) -> Option<&ProviderWorkspaceState> {
         self.active_provider
             .and_then(|active| self.providers.get(active))
+    }
+
+    /// The session whose Shell Detail View Tab is currently visible, if it has
+    /// already been explicitly started.
+    pub fn visible_resource_shell_session(&self) -> Option<&ResourceShellSession> {
+        if let Some(session) = self.enlarged_resource_shell_session() {
+            return Some(session);
+        }
+        let workspace = self.active_workspace()?;
+        if !workspace.selected_resource_shell_tab() {
+            return None;
+        }
+        let target = workspace.selected_resource_target()?;
+        self.resource_shell_sessions
+            .iter()
+            .find(|session| session.provider_id == *workspace.id() && session.target == target)
+    }
+
+    /// The visible session only while its host runtime can accept input and
+    /// provide terminal cells for the current frame.
+    pub fn visible_running_resource_shell_session(&self) -> Option<&ResourceShellSession> {
+        self.visible_resource_shell_session()
+            .filter(|session| session.lifecycle == ResourceShellSessionLifecycle::Running)
+    }
+
+    /// The session occupying Tuivir's enlarged presentation, if any.
+    pub fn enlarged_resource_shell_session(&self) -> Option<&ResourceShellSession> {
+        let ResourceShellPresentation::Enlarged(session_id) = self.resource_shell_presentation
+        else {
+            return None;
+        };
+        self.resource_shell_sessions
+            .iter()
+            .find(|session| session.id == session_id)
+    }
+
+    /// Human-facing identity for the session in the enlarged presentation.
+    pub fn enlarged_resource_shell_identity(&self) -> Option<String> {
+        let session = self.enlarged_resource_shell_session()?;
+        let provider = self
+            .providers
+            .iter()
+            .find(|provider| provider.id() == &session.provider_id)?;
+        let resource_name = provider.resource(&session.target).map_or_else(
+            || session.target.to_string(),
+            |resource| resource.name.clone(),
+        );
+        Some(format!("{} / {resource_name}", provider.name()))
+    }
+
+    /// Resource Shell Sessions whose private runtime can still receive input.
+    pub fn live_resource_shell_sessions(&self) -> impl Iterator<Item = &ResourceShellSession> {
+        self.resource_shell_sessions.iter().filter(|session| {
+            matches!(
+                session.lifecycle,
+                ResourceShellSessionLifecycle::Starting | ResourceShellSessionLifecycle::Running
+            )
+        })
     }
 
     fn active_workspace_mut(&mut self) -> Option<&mut ProviderWorkspaceState> {
@@ -184,22 +250,6 @@ pub struct RunningResourceCommand {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-/// One Interactive Shell the application wants the terminal for.
-///
-/// The Provider and Resource travel with the process because the application
-/// state cannot be consulted for them: by the time the shell ends, the shell
-/// has been taken out of the state and the refreshed snapshot may no longer
-/// contain the Resource at all.
-pub struct PendingShell {
-    pub provider_id: ProviderId,
-    pub provider_name: String,
-    pub target: ResourceTarget,
-    pub resource_name: String,
-    /// The Provider CLI process that takes over the terminal.
-    pub process: InteractiveShellProcess,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HelpEntry {
     pub key: String,
     pub description: String,
@@ -223,6 +273,13 @@ pub struct ResourceCommandInvocation {
     pub state: Option<ResourceState>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+/// The deliberate operation awaiting the user's confirmation.
+pub enum Confirmation {
+    ResourceCommand(ResourceCommandInvocation),
+    QuitResourceShellSessions,
+}
+
 pub struct App {
     state: AppState,
     commands: CommandRegistry,
@@ -241,6 +298,9 @@ pub struct App {
     /// A completed user resize for the host to persist outside application
     /// state, following the same effect-taking pattern as clipboard work.
     pending_pane_boundary_save: Option<PaneBoundary>,
+    next_resource_shell_session_id: u64,
+    pending_resource_shell_effects: Vec<ResourceShellEffect>,
+    quit_is_ready: bool,
 }
 
 impl Default for App {
@@ -279,6 +339,9 @@ impl App {
             pending_refreshes: HashMap::new(),
             pane_boundary_before_drag: None,
             pending_pane_boundary_save: None,
+            next_resource_shell_session_id: 1,
+            pending_resource_shell_effects: Vec::new(),
+            quit_is_ready: false,
         }
     }
 
@@ -320,7 +383,17 @@ impl App {
                 self.handle_provider_discovered(provider, error)
             }
             AppEvent::RefreshTimerElapsed => self.refresh_active_provider(),
-            AppEvent::ShellClosed { shell, outcome } => self.apply_shell_closed(shell, outcome),
+            AppEvent::ResourceShellStarted { session_id } => {
+                self.apply_resource_shell_started(session_id);
+                Vec::new()
+            }
+            AppEvent::ResourceShellStartFailed { session_id, reason } => {
+                self.apply_resource_shell_start_failed(session_id, reason);
+                Vec::new()
+            }
+            AppEvent::ResourceShellExited { session_id } => {
+                self.apply_resource_shell_exited(session_id)
+            }
             AppEvent::RefreshCompleted {
                 request_id,
                 provider_id,
@@ -394,6 +467,18 @@ impl App {
     /// Takes a completed Pane Boundary preference for the host to persist.
     pub fn take_pending_pane_boundary_save(&mut self) -> Option<PaneBoundary> {
         self.pending_pane_boundary_save.take()
+    }
+
+    /// Takes all host work requested by application-owned Resource Shell
+    /// Session transitions.
+    pub fn take_resource_shell_effects(&mut self) -> Vec<ResourceShellEffect> {
+        std::mem::take(&mut self.pending_resource_shell_effects)
+    }
+
+    /// Whether the host may restore its terminal and exit after it completes
+    /// every pending Resource Shell Session cleanup effect.
+    pub fn quit_is_ready(&self) -> bool {
+        self.quit_is_ready
     }
 
     /// Records a clipboard-adapter failure through the ordinary UI error path.
@@ -508,7 +593,7 @@ impl App {
             workspace.clear_detail_selection();
         }
         match command {
-            Command::Quit => Vec::new(),
+            Command::Quit => self.request_quit(),
             Command::ToggleHelp => {
                 self.toggle_help();
                 Vec::new()
@@ -624,6 +709,14 @@ impl App {
                 self.open_shell();
                 Vec::new()
             }
+            Command::StartResourceShell => {
+                self.start_selected_resource_shell();
+                Vec::new()
+            }
+            Command::ToggleResourceShellSize => {
+                self.toggle_resource_shell_size();
+                Vec::new()
+            }
             Command::Confirm => self.confirm_or_dismiss(),
             Command::Cancel => {
                 self.cancel_or_dismiss();
@@ -675,11 +768,23 @@ impl App {
     /// Accepts the open modal: confirms a Resource Command, or dismisses a
     /// reported failure.
     fn confirm_or_dismiss(&mut self) -> Vec<ProviderRequest> {
-        if self.state.confirmation.is_some() {
-            self.confirm_resource_command()
-        } else {
-            self.state.command_error = None;
-            Vec::new()
+        match self.state.confirmation.take() {
+            Some(Confirmation::ResourceCommand(confirmation)) => {
+                self.dispatch_resource_command(confirmation)
+            }
+            Some(Confirmation::QuitResourceShellSessions) => {
+                self.pending_resource_shell_effects.extend(
+                    self.live_resource_shell_session_ids()
+                        .into_iter()
+                        .map(|session_id| ResourceShellEffect::Stop { session_id }),
+                );
+                self.quit_is_ready = true;
+                Vec::new()
+            }
+            None => {
+                self.state.command_error = None;
+                Vec::new()
+            }
         }
     }
 
@@ -744,11 +849,55 @@ impl App {
                 )));
             }
             Ok(snapshot) => {
-                provider.reconcile_snapshot(snapshot);
+                provider.reconcile_snapshot(snapshot.clone());
+                self.stop_sessions_for_missing_resources(&provider_id, &snapshot);
             }
             Err(error) => provider.record_load_error(error),
         }
         Vec::new()
+    }
+
+    /// Ends sessions whose stable Resource identity is no longer present in an
+    /// accepted snapshot. A failed refresh deliberately does not pass here:
+    /// uncertainty must never kill a live user session.
+    fn stop_sessions_for_missing_resources(
+        &mut self,
+        provider_id: &ProviderId,
+        snapshot: &WorkspaceSnapshot,
+    ) {
+        self.retire_resource_shell_sessions(|session| {
+            &session.provider_id == provider_id && snapshot.resource(&session.target).is_none()
+        });
+    }
+
+    /// Removes the selected session identities from application state and asks
+    /// the host to retire their private runtimes. Any enlarged presentation of
+    /// a retired session returns to Details before it can outlive its identity.
+    fn retire_resource_shell_sessions(
+        &mut self,
+        should_retire: impl Fn(&ResourceShellSession) -> bool,
+    ) {
+        let retired_session_ids = self
+            .state
+            .resource_shell_sessions
+            .iter()
+            .filter(|session| should_retire(session))
+            .map(|session| session.id)
+            .collect::<Vec<_>>();
+        if matches!(
+            self.state.resource_shell_presentation,
+            ResourceShellPresentation::Enlarged(session_id) if retired_session_ids.contains(&session_id)
+        ) {
+            self.state.resource_shell_presentation = ResourceShellPresentation::Details;
+        }
+        self.state
+            .resource_shell_sessions
+            .retain(|session| !should_retire(session));
+        self.pending_resource_shell_effects.extend(
+            retired_session_ids
+                .into_iter()
+                .map(|session_id| ResourceShellEffect::Stop { session_id }),
+        );
     }
 
     /// Brings the loaded detail view into line with what is on screen.
@@ -850,38 +999,53 @@ impl App {
         self.refresh_active_provider()
     }
 
-    /// Takes the Interactive Shell that is waiting for the terminal, if any.
-    ///
-    /// Taking it is what commits the application to the handover: a second call
-    /// finds nothing, so one keypress can only ever hand the terminal over once.
-    pub fn take_pending_shell(&mut self) -> Option<PendingShell> {
-        self.state.pending_shell.take()
+    fn apply_resource_shell_started(&mut self, session_id: ResourceShellSessionId) {
+        if let Some(session) = self
+            .state
+            .resource_shell_sessions
+            .iter_mut()
+            .find(|session| session.id == session_id)
+            && session.lifecycle == ResourceShellSessionLifecycle::Starting
+        {
+            session.lifecycle = ResourceShellSessionLifecycle::Running;
+        }
     }
 
-    /// Brings the Active Workspace back into line with whatever the user did
-    /// inside the shell.
-    ///
-    /// Only the Active Workspace is asked, and it is always the one the shell
-    /// was opened in: the handover blocks the event loop from the moment the
-    /// shell is taken until this runs, so nothing can have moved in between.
-    fn apply_shell_closed(
+    fn apply_resource_shell_start_failed(
         &mut self,
-        shell: PendingShell,
-        outcome: InteractiveShellOutcome,
-    ) -> Vec<ProviderRequest> {
-        // Only a shell that never started is reported. One that ran did what
-        // was asked of it whatever status it left, and clearing here would
-        // dismiss a failure the user has not read yet.
-        if let InteractiveShellOutcome::StartFailed(reason) = outcome {
-            self.state.command_error = Some(operation_failure(
-                &shell.provider_name,
-                "shell",
-                &shell.resource_name,
-                &shell.target,
-                &reason,
-            ));
+        session_id: ResourceShellSessionId,
+        reason: String,
+    ) {
+        if let Some(session) = self
+            .state
+            .resource_shell_sessions
+            .iter_mut()
+            .find(|session| session.id == session_id)
+            && session.lifecycle == ResourceShellSessionLifecycle::Starting
+        {
+            session.lifecycle = ResourceShellSessionLifecycle::StartFailed(reason);
         }
-        self.refresh_active_provider()
+    }
+
+    fn apply_resource_shell_exited(
+        &mut self,
+        session_id: ResourceShellSessionId,
+    ) -> Vec<ProviderRequest> {
+        let Some(session) = self
+            .state
+            .resource_shell_sessions
+            .iter_mut()
+            .find(|session| session.id == session_id)
+        else {
+            return Vec::new();
+        };
+        let provider_id = session.provider_id.clone();
+        session.lifecycle = ResourceShellSessionLifecycle::Exited;
+        if self.is_active_provider(&provider_id) {
+            self.refresh_active_provider()
+        } else {
+            Vec::new()
+        }
     }
 
     fn is_active_provider(&self, provider_id: &ProviderId) -> bool {
@@ -915,17 +1079,33 @@ impl App {
             state: resource.state,
         };
         if command == ResourceCommand::Delete {
-            self.state.confirmation = Some(target);
+            self.state.confirmation = Some(Confirmation::ResourceCommand(target));
             return Vec::new();
         }
         self.dispatch_resource_command(target)
     }
 
-    fn confirm_resource_command(&mut self) -> Vec<ProviderRequest> {
-        let Some(confirmation) = self.state.confirmation.take() else {
+    fn request_quit(&mut self) -> Vec<ProviderRequest> {
+        if matches!(
+            self.state.confirmation,
+            Some(Confirmation::QuitResourceShellSessions)
+        ) {
             return Vec::new();
-        };
-        self.dispatch_resource_command(confirmation)
+        }
+        let session_count = self.state.live_resource_shell_sessions().count();
+        if session_count == 0 {
+            self.quit_is_ready = true;
+        } else {
+            self.state.confirmation = Some(Confirmation::QuitResourceShellSessions);
+        }
+        Vec::new()
+    }
+
+    fn live_resource_shell_session_ids(&self) -> Vec<ResourceShellSessionId> {
+        self.state
+            .live_resource_shell_sessions()
+            .map(|session| session.id)
+            .collect()
     }
 
     fn dispatch_resource_command(
@@ -953,35 +1133,81 @@ impl App {
         }]
     }
 
-    /// Asks for the terminal on behalf of the selected Resource's Interactive
-    /// Shell.
+    /// Opens the selected Resource's Shell Detail View Tab in its enlarged
+    /// presentation.
     ///
     /// A Resource whose Provider offers no shell asks for nothing, so an
     /// unsupported operation stays unsupported rather than being attempted and
     /// refused.
     fn open_shell(&mut self) {
-        let Some(provider) = self.state.active_workspace() else {
-            return;
-        };
+        let started = self
+            .state
+            .active_workspace_mut()
+            .is_some_and(ProviderWorkspaceState::select_resource_shell_tab);
+        if started {
+            self.state.focused_pane = FocusedPane::Details;
+            if let Some(session_id) = self.start_selected_resource_shell() {
+                self.state.resource_shell_presentation =
+                    ResourceShellPresentation::Enlarged(session_id);
+            }
+        }
+    }
+
+    fn start_selected_resource_shell(&mut self) -> Option<ResourceShellSessionId> {
+        let provider = self.state.active_workspace()?;
+        if !provider.selected_resource_shell_tab() {
+            return None;
+        }
         let provider_id = provider.id().clone();
-        let provider_name = provider.name().to_owned();
-        let Some(target) = provider.selected_resource_target() else {
-            return;
-        };
-        let Some(resource) = self.selected_resource() else {
-            return;
-        };
-        let Some(process) = resource.shell.clone() else {
-            return;
-        };
-        let resource_name = resource.name.clone();
-        self.state.pending_shell = Some(PendingShell {
-            provider_id,
-            provider_name,
-            target,
-            resource_name,
-            process,
+        let target = provider.selected_resource_target()?;
+        let resource = provider.selected_resource()?;
+        let process = resource.shell.clone()?;
+        if let Some(session) = self.state.resource_shell_sessions.iter().find(|session| {
+            session.provider_id == provider_id
+                && session.target == target
+                && matches!(
+                    session.lifecycle,
+                    ResourceShellSessionLifecycle::Starting
+                        | ResourceShellSessionLifecycle::Running
+                )
+        }) {
+            return Some(session.id);
+        }
+        self.retire_resource_shell_sessions(|session| {
+            session.provider_id == provider_id
+                && session.target == target
+                && session.lifecycle == ResourceShellSessionLifecycle::Exited
         });
+        let session = ResourceShellSession {
+            id: ResourceShellSessionId(self.next_resource_shell_session_id),
+            provider_id,
+            target,
+            lifecycle: ResourceShellSessionLifecycle::Starting,
+        };
+        self.next_resource_shell_session_id += 1;
+        let session_id = session.id;
+        self.state.resource_shell_sessions.push(session.clone());
+        self.pending_resource_shell_effects
+            .push(ResourceShellEffect::Start { session, process });
+        Some(session_id)
+    }
+
+    fn toggle_resource_shell_size(&mut self) {
+        if matches!(
+            self.state.resource_shell_presentation,
+            ResourceShellPresentation::Enlarged(_)
+        ) {
+            self.state.resource_shell_presentation = ResourceShellPresentation::Details;
+            return;
+        }
+        let session_id = self
+            .state
+            .visible_resource_shell_session()
+            .map(|session| session.id);
+        if let Some(session_id) = session_id {
+            self.state.resource_shell_presentation =
+                ResourceShellPresentation::Enlarged(session_id);
+        }
     }
 
     fn toggle_help(&mut self) {

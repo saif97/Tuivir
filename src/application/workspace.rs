@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::{
     application::{
         DetailView, ProviderRequestId, Resource, ResourceDetails, ResourcePanel, WorkspaceError,
@@ -11,6 +13,10 @@ use crate::{
 use unicode_width::UnicodeWidthChar;
 
 const OVERVIEW_DETAIL_VIEW_ID: &str = "overview";
+/// The Detail View Tab Tuivir supplies for a Resource whose Provider declares
+/// an executable Resource Shell Session. It is deliberately not a
+/// provider-native [`DetailView`]: selecting it never causes Provider work.
+pub const RESOURCE_SHELL_DETAIL_VIEW_ID: &str = "shell";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// Whether a Provider Workspace is loading, ready to present, or unavailable.
@@ -151,6 +157,7 @@ pub struct ProviderWorkspaceState {
     focused_resource_panel: Option<ResourcePanelId>,
     panel_navigation: Vec<ResourcePanelNavigation>,
     selected_detail_view: Option<DetailViewId>,
+    remembered_detail_views: HashMap<ResourceTarget, DetailViewId>,
     details: Option<ResourceDetailsState>,
 }
 
@@ -163,6 +170,7 @@ impl ProviderWorkspaceState {
             focused_resource_panel: None,
             panel_navigation: Vec::new(),
             selected_detail_view: None,
+            remembered_detail_views: HashMap::new(),
             details: None,
         }
     }
@@ -237,6 +245,7 @@ impl ProviderWorkspaceState {
         self.focused_resource_panel = None;
         self.panel_navigation.clear();
         self.selected_detail_view = None;
+        self.remembered_detail_views.clear();
         self.details = None;
     }
 
@@ -258,20 +267,11 @@ impl ProviderWorkspaceState {
             let WorkspaceLoadState::Ready(snapshot) = &workspace.load_state else {
                 return false;
             };
-            let Some(panel) = snapshot.panel(panel_id) else {
+            let Some(_) = snapshot.panel(panel_id) else {
                 return false;
             };
             workspace.focused_resource_panel = Some(panel_id.clone());
-            let still_offered = workspace
-                .selected_detail_view
-                .as_ref()
-                .is_some_and(|selected| {
-                    selected.0 == OVERVIEW_DETAIL_VIEW_ID
-                        || panel.detail_views.iter().any(|view| &view.id == selected)
-                });
-            if !still_offered {
-                workspace.selected_detail_view = Some(DetailViewId::new(OVERVIEW_DETAIL_VIEW_ID));
-            }
+            workspace.restore_selected_detail_view();
             true
         })
     }
@@ -326,6 +326,7 @@ impl ProviderWorkspaceState {
                 navigation.selected_resource =
                     panel.resources.first().map(|resource| resource.id.clone());
                 navigation.selected_index = 0;
+                workspace.restore_selected_detail_view();
                 return;
             };
             let next = current
@@ -336,6 +337,7 @@ impl ProviderWorkspaceState {
                 .get(next)
                 .map(|resource| resource.id.clone());
             navigation.selected_index = next;
+            workspace.restore_selected_detail_view();
         });
     }
 
@@ -364,6 +366,7 @@ impl ProviderWorkspaceState {
             };
             navigation.selected_resource = Some(resource.id.clone());
             navigation.selected_index = index;
+            workspace.restore_selected_detail_view();
         });
     }
 
@@ -379,6 +382,18 @@ impl ProviderWorkspaceState {
             let Some(panel) = snapshot.panel(panel_id) else {
                 return;
             };
+            let offers_shell = workspace
+                .panel_navigation
+                .iter()
+                .find(|navigation| navigation.panel_id == panel.id)
+                .and_then(|navigation| navigation.selected_resource.as_ref())
+                .and_then(|selected| {
+                    panel
+                        .resources
+                        .iter()
+                        .find(|resource| &resource.id == selected)
+                })
+                .is_some_and(|resource| resource.shell.is_some());
             let current = workspace
                 .selected_detail_view
                 .as_ref()
@@ -389,12 +404,21 @@ impl ProviderWorkspaceState {
                         .position(|view| &view.id == selected)
                         .map(|index| index + 1)
                 })
+                .or_else(|| {
+                    (offers_shell
+                        && workspace
+                            .selected_detail_view
+                            .as_ref()
+                            .is_some_and(|selected| selected.0 == RESOURCE_SHELL_DETAIL_VIEW_ID))
+                    .then_some(panel.detail_views.len() + 1)
+                })
                 .unwrap_or(0);
-            let next = (current as isize + delta)
-                .rem_euclid((panel.detail_views.len() + 1) as isize)
-                as usize;
-            workspace.selected_detail_view = Some(if next == 0 {
+            let tab_count = panel.detail_views.len() + 1 + usize::from(offers_shell);
+            let next = (current as isize + delta).rem_euclid(tab_count as isize) as usize;
+            workspace.select_detail_view(if next == 0 {
                 DetailViewId::new(OVERVIEW_DETAIL_VIEW_ID)
+            } else if offers_shell && next == panel.detail_views.len() + 1 {
+                DetailViewId::new(RESOURCE_SHELL_DETAIL_VIEW_ID)
             } else {
                 panel.detail_views[next - 1].id.clone()
             });
@@ -412,6 +436,18 @@ impl ProviderWorkspaceState {
             let Some(panel) = snapshot.panel(panel_id) else {
                 return;
             };
+            let offers_shell = workspace
+                .panel_navigation
+                .iter()
+                .find(|navigation| navigation.panel_id == panel.id)
+                .and_then(|navigation| navigation.selected_resource.as_ref())
+                .and_then(|selected| {
+                    panel
+                        .resources
+                        .iter()
+                        .find(|resource| &resource.id == selected)
+                })
+                .is_some_and(|resource| resource.shell.is_some());
             let Some(view_id) = (index == 0)
                 .then(|| DetailViewId::new(OVERVIEW_DETAIL_VIEW_ID))
                 .or_else(|| {
@@ -420,10 +456,14 @@ impl ProviderWorkspaceState {
                         .get(index - 1)
                         .map(|view| view.id.clone())
                 })
+                .or_else(|| {
+                    (offers_shell && index == panel.detail_views.len() + 1)
+                        .then(|| DetailViewId::new(RESOURCE_SHELL_DETAIL_VIEW_ID))
+                })
             else {
                 return;
             };
-            workspace.selected_detail_view = Some(view_id);
+            workspace.select_detail_view(view_id);
         });
     }
 
@@ -637,7 +677,8 @@ impl ProviderWorkspaceState {
                 workspace.focused_resource_panel =
                     snapshot.panels.first().map(|panel| panel.id.clone());
             }
-            workspace.reconcile_detail_view(&snapshot);
+            workspace.load_state = WorkspaceLoadState::Ready(snapshot);
+            workspace.reconcile_detail_view();
             if workspace
                 .selected_detail_view
                 .as_ref()
@@ -647,7 +688,6 @@ impl ProviderWorkspaceState {
                 // on refresh rather than retaining fields from an older one.
                 workspace.details = None;
             }
-            workspace.load_state = WorkspaceLoadState::Ready(snapshot);
         });
     }
 
@@ -668,6 +708,7 @@ impl ProviderWorkspaceState {
                 .find(|view| &view.id == selected)
         });
         let detail_views = selected_panel.map_or(&[][..], |panel| panel.detail_views.as_slice());
+        let offers_shell = selected_resource.is_some_and(|resource| resource.shell.is_some());
         let details = selected_target.as_ref().and_then(|selected| {
             self.details.as_ref().filter(|details| {
                 details.target.resource == *selected
@@ -684,6 +725,11 @@ impl ProviderWorkspaceState {
             panel_navigation: &self.panel_navigation,
             selected_resource,
             detail_views,
+            offers_shell,
+            shell_selected: self
+                .selected_detail_view
+                .as_ref()
+                .is_some_and(|selected| selected.0 == RESOURCE_SHELL_DETAIL_VIEW_ID),
             overview_selected: self
                 .selected_detail_view
                 .as_ref()
@@ -728,6 +774,44 @@ impl ProviderWorkspaceState {
         snapshot.resource(&target)
     }
 
+    /// Finds a Resource by its stable target without changing this Workspace's
+    /// current navigation. Persistent Resource Shell Sessions use it to retain
+    /// their identity while another Resource is selected.
+    pub fn resource(&self, target: &ResourceTarget) -> Option<&Resource> {
+        let WorkspaceLoadState::Ready(snapshot) = &self.load_state else {
+            return None;
+        };
+        snapshot.resource(target)
+    }
+
+    /// Whether the selected Resource is showing Tuivir's Shell Detail View
+    /// Tab. The application uses this as the explicit start gate.
+    pub fn selected_resource_shell_tab(&self) -> bool {
+        self.selected_detail_view
+            .as_ref()
+            .is_some_and(|view| view.0 == RESOURCE_SHELL_DETAIL_VIEW_ID)
+    }
+
+    /// Selects Tuivir's Shell Detail View Tab when the selected Resource has a
+    /// Provider-declared shell. This is the direct-entry path for the `E`
+    /// command; it remains inert until the application explicitly starts the
+    /// session.
+    pub fn select_resource_shell_tab(&mut self) -> bool {
+        self.invalidate_detail_when_target_changes(|workspace| {
+            let WorkspaceLoadState::Ready(snapshot) = &workspace.load_state else {
+                return false;
+            };
+            let offers_shell = workspace
+                .selected_resource_target()
+                .and_then(|target| snapshot.resource(&target))
+                .is_some_and(|resource| resource.shell.is_some());
+            if offers_shell {
+                workspace.select_detail_view(DetailViewId::new(RESOURCE_SHELL_DETAIL_VIEW_ID));
+            }
+            offers_shell
+        })
+    }
+
     fn invalidate_detail_when_target_changes<R>(
         &mut self,
         update: impl FnOnce(&mut Self) -> R,
@@ -747,18 +831,34 @@ impl ProviderWorkspaceState {
         })
     }
 
-    fn reconcile_detail_view(&mut self, snapshot: &WorkspaceSnapshot) {
-        let offered = self
-            .selected_resource_target()
-            .as_ref()
-            .and_then(|selected| snapshot.panel_for(selected))
-            .map_or(&[][..], |panel| panel.detail_views.as_slice());
-        let still_offered = self.selected_detail_view.as_ref().is_some_and(|selected| {
-            selected.0 == OVERVIEW_DETAIL_VIEW_ID || offered.iter().any(|view| &view.id == selected)
-        });
-        if !still_offered {
-            self.selected_detail_view = Some(DetailViewId::new(OVERVIEW_DETAIL_VIEW_ID));
+    fn select_detail_view(&mut self, view_id: DetailViewId) {
+        self.selected_detail_view = Some(view_id.clone());
+        if let Some(target) = self.selected_resource_target() {
+            self.remembered_detail_views.insert(target, view_id);
         }
+    }
+
+    fn restore_selected_detail_view(&mut self) {
+        let Some(target) = self.selected_resource_target() else {
+            self.selected_detail_view = None;
+            return;
+        };
+        let remembered = self.remembered_detail_views.get(&target).cloned();
+        let offered = match &self.load_state {
+            WorkspaceLoadState::Ready(snapshot) => remembered
+                .as_ref()
+                .is_some_and(|view| detail_view_is_offered(snapshot, &target, view)),
+            WorkspaceLoadState::Loading | WorkspaceLoadState::Error(_) => false,
+        };
+        self.selected_detail_view = Some(if offered {
+            remembered.expect("an offered remembered Detail View Tab exists")
+        } else {
+            DetailViewId::new(OVERVIEW_DETAIL_VIEW_ID)
+        });
+    }
+
+    fn reconcile_detail_view(&mut self) {
+        self.restore_selected_detail_view();
     }
 
     fn detail_target(&self) -> Option<(ResourceTarget, String, DetailView)> {
@@ -770,6 +870,8 @@ impl ProviderWorkspaceState {
         let view_id = self.selected_detail_view.as_ref()?;
         let view = if view_id.0 == OVERVIEW_DETAIL_VIEW_ID {
             DetailView::from_snapshot(OVERVIEW_DETAIL_VIEW_ID, "Overview")
+        } else if view_id.0 == RESOURCE_SHELL_DETAIL_VIEW_ID {
+            return None;
         } else {
             snapshot
                 .panel_for(&target)?
@@ -780,6 +882,21 @@ impl ProviderWorkspaceState {
         };
         Some((target, resource.name.clone(), view))
     }
+}
+
+fn detail_view_is_offered(
+    snapshot: &WorkspaceSnapshot,
+    target: &ResourceTarget,
+    view_id: &DetailViewId,
+) -> bool {
+    view_id.0 == OVERVIEW_DETAIL_VIEW_ID
+        || (view_id.0 == RESOURCE_SHELL_DETAIL_VIEW_ID
+            && snapshot
+                .resource(target)
+                .is_some_and(|resource| resource.shell.is_some()))
+        || snapshot
+            .panel_for(target)
+            .is_some_and(|panel| panel.detail_views.iter().any(|view| &view.id == view_id))
 }
 
 /// The read-only projection consumed by presentation and application callers.
@@ -793,6 +910,8 @@ pub struct WorkspaceView<'a> {
     panel_navigation: &'a [ResourcePanelNavigation],
     pub selected_resource: Option<&'a Resource>,
     pub detail_views: &'a [DetailView],
+    pub offers_shell: bool,
+    pub shell_selected: bool,
     pub overview_selected: bool,
     pub selected_detail_view: Option<&'a DetailView>,
     pub details: Option<ResourceDetailsView<'a>>,

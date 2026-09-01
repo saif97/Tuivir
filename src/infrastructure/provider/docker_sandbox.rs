@@ -3,7 +3,7 @@ use std::{future::Future, pin::Pin};
 use serde::Deserialize;
 
 use crate::{
-    application::{InteractiveShellProcess, LifecycleCommandPolicy, lifecycle_commands},
+    application::{LifecycleCommandPolicy, ResourceShellProcess, lifecycle_commands},
     infrastructure::process::{CliRunner, ProcessError, ProcessSpec},
     infrastructure::provider::{
         DetailView, DetailViewId, Provider, ProviderDiscovery, ProviderId, ProviderVersion,
@@ -131,7 +131,7 @@ fn sandbox_resource_state(status: &str) -> ResourceState {
     }
 }
 
-/// The Interactive Shell Docker Sandbox offers inside a sandbox.
+/// The Resource Shell Session Docker Sandbox offers inside a sandbox.
 ///
 /// `sbx exec` starts a stopped sandbox before running in it, so unlike Docker
 /// and Incus a sandbox need not already be running to be worth opening a shell
@@ -141,9 +141,9 @@ fn sandbox_resource_state(status: &str) -> ResourceState {
 ///
 /// `bash` is what sbx's own documentation reaches for, and a sandbox is a
 /// prepared agent environment rather than a stripped image, so it is there.
-fn sandbox_shell(state: ResourceState, name: &str) -> Option<InteractiveShellProcess> {
+fn sandbox_shell(state: ResourceState, name: &str) -> Option<ResourceShellProcess> {
     matches!(state, ResourceState::Running | ResourceState::Stopped)
-        .then(|| InteractiveShellProcess::new("sbx", &["exec", "-it", name, "bash"]))
+        .then(|| ResourceShellProcess::new("sbx", &["exec", "-it", name, "bash"]))
 }
 
 /// The Commands a sandbox in this state can be asked to perform.

@@ -1,5 +1,5 @@
 use tuivir::{
-    application::{App, Command, InteractiveShellProcess, Resource, ResourceCommand},
+    application::{App, Command, Resource, ResourceCommand, ResourceShellProcess},
     domain::{DetailViewId, ResourceId, ResourcePanelId, ResourceState, ResourceTarget},
     infrastructure::{
         process::{ProcessError, ProcessOutput, ProcessSpec},
@@ -225,7 +225,7 @@ async fn docker_maps_every_container_state_into_the_shared_vocabulary() {
 }
 
 /// `docker exec` attaches only to a running container, so no other state may
-/// carry the Interactive Shell that runs it. A container without one offers the
+/// carry the Resource Shell Session that runs it. A container without one offers the
 /// operation nowhere, which is how an unsupported shell stays absent.
 #[tokio::test]
 async fn only_a_running_container_carries_an_interactive_shell() {
@@ -256,10 +256,7 @@ async fn only_a_running_container_carries_an_interactive_shell() {
         shells,
         [(
             "container-running",
-            InteractiveShellProcess::new(
-                "docker",
-                &["exec", "-it", "container-running", "/bin/sh"],
-            ),
+            ResourceShellProcess::new("docker", &["exec", "-it", "container-running", "/bin/sh"],),
         )]
     );
 }

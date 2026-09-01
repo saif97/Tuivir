@@ -124,7 +124,8 @@ The file may contain only the commands you want to change. A configured list
 replaces that command's complete default list; an empty list disables the
 command. Keys are case-sensitive and support printable characters, named keys
 such as `enter` and `pagedown`, `f1` through `f12`, and `ctrl+` or `alt+`
-modifiers. `ctrl+c` is always reserved as an emergency way to quit Tuivir.
+modifiers. Outside a focused Resource Shell Session, `ctrl+c` is reserved as
+an emergency way to quit Tuivir.
 Invalid or conflicting bindings are reported at startup and none of the file is
 applied.
 
@@ -138,6 +139,20 @@ tuivir
 
 The interface shows the available commands and their key bindings in the
 footer. Run `tuivir --help` for command-line options.
+
+### Resource Shell Sessions
+
+Resources that support a shell expose a Shell Detail View Tab. Select that tab
+and press Enter to start its embedded Resource Shell Session in Details, or
+press `E` from a Resource to start or resume it enlarged. The same session stays
+alive while you navigate and moves between presentations without restarting.
+
+When terminal input is focused, keys — including `Ctrl-C` — go to the shell.
+Use the `Ctrl-B` prefix: `Ctrl-B q` returns input to Tuivir (and restores the
+Details layout from an enlarged shell), and `Ctrl-B z` toggles the current
+session's size. Quitting Tuivir asks for confirmation when Resource Shell
+Sessions are still live; confirmation ends only their local Provider CLI
+processes, not the underlying Resources.
 
 ## Releasing
 

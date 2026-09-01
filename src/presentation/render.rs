@@ -8,11 +8,30 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph},
 };
 
-use crate::application::{AppState, DetailSelection, FocusedPane};
+use crate::application::{
+    AppState, Confirmation, DetailSelection, FocusedPane, ResourceShellSession,
+    ResourceShellSessionLifecycle,
+};
 use crate::application::{
     DetailContent, ResourceDetailsView, ResourcePanelView, WorkspacePresentation, WorkspaceView,
 };
 use crate::domain::{ResourceState, ResourceTarget};
+
+/// A host-adapted terminal screen. The presentation layer owns no PTY or
+/// emulator object; it only receives visible cells and their resolved style.
+#[derive(Clone, Debug)]
+pub struct ResourceShellScreen {
+    pub lines: Vec<Vec<ResourceShellCell>>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ResourceShellCell {
+    pub text: String,
+    pub foreground: Option<Color>,
+    pub background: Option<Color>,
+    pub cursor: bool,
+    pub selected: bool,
+}
 
 use super::screen_layout::{
     DETAIL_VIEW_GAP, ScreenLayout, active_target_label, command_error_area, confirmation_area,
@@ -81,6 +100,29 @@ pub fn render(state: &AppState, frame: &mut Frame<'_>) {
 /// The host measures once per frame and keeps that layout for mouse routing, so
 /// what the user clicks is what they see.
 pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &ScreenLayout) {
+    if let (Some(session), Some(shell)) = (
+        state.enlarged_resource_shell_session(),
+        layout.resource_shell.as_ref(),
+    ) {
+        if let Some(header) = shell.header {
+            let identity = state
+                .enlarged_resource_shell_identity()
+                .unwrap_or_else(|| "Resource Shell Session".to_owned());
+            frame.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::styled(
+                        identity,
+                        themed_style(ThemeRole::Primary).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw("  Ctrl-B q restore"),
+                ])),
+                header,
+            );
+        }
+        render_resource_shell_state(Some(session), frame, shell.terminal);
+        render_confirmation(state, frame);
+        return;
+    }
     render_provider_bar(state, frame, layout);
     render_command_bar(state, frame, layout.status);
 
@@ -110,6 +152,7 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
     render_details_panel(
         provider.name(),
         workspace_view,
+        state.visible_resource_shell_session(),
         &state.running_commands,
         state.focused_pane == FocusedPane::Details,
         state.hints.focus_details.as_deref(),
@@ -150,26 +193,49 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
         );
     }
 
+    render_confirmation(state, frame);
+}
+
+fn render_confirmation(state: &AppState, frame: &mut Frame<'_>) {
     if let (Some(confirmation), Some(area)) =
         (&state.confirmation, confirmation_area(state, frame.area()))
     {
         frame.render_widget(Clear, area);
-        let mut lines = vec![Line::from(format!(
-            "Delete {} resource {} ({})?",
-            confirmation.provider_name, confirmation.resource_name, confirmation.target
-        ))];
-        // Deleting anything but a stopped Resource stops it first, so say so
-        // before the single confirmation that authorises both. The wording
-        // stays on the outcome: a paused or restarting Resource is not running,
-        // but removing it still stops it.
-        match confirmation.state {
-            Some(ResourceState::Stopped) => {}
-            Some(_) => lines.push(Line::from("It will be stopped and removed.")),
-            None => lines.push(Line::from("It will be permanently removed.")),
-        }
+        let (title, lines) = match confirmation {
+            Confirmation::ResourceCommand(confirmation) => {
+                let mut lines = vec![Line::from(format!(
+                    "Delete {} resource {} ({})?",
+                    confirmation.provider_name, confirmation.resource_name, confirmation.target
+                ))];
+                // Deleting anything but a stopped Resource stops it first, so
+                // say so before the single confirmation that authorises both.
+                match confirmation.state {
+                    Some(ResourceState::Stopped) => {}
+                    Some(_) => lines.push(Line::from("It will be stopped and removed.")),
+                    None => lines.push(Line::from("It will be permanently removed.")),
+                }
+                (" Confirm deletion ", lines)
+            }
+            Confirmation::QuitResourceShellSessions => {
+                let session_count = state.live_resource_shell_sessions().count();
+                let noun = if session_count == 1 {
+                    "Resource Shell Session"
+                } else {
+                    "Resource Shell Sessions"
+                };
+                (
+                    " Confirm Quit ",
+                    vec![
+                        Line::from(format!("Quit Tuivir and end {session_count} {noun}?")),
+                        Line::from("The underlying Resources will keep running."),
+                    ],
+                )
+            }
+        };
+        let mut lines = lines;
         lines.push(Line::from("Press y/Enter to confirm or n/Esc to cancel."));
         frame.render_widget(
-            Paragraph::new(lines).block(modal_block(" Confirm deletion ", ThemeRole::Warning)),
+            Paragraph::new(lines).block(modal_block(title, ThemeRole::Warning)),
             area,
         );
     }
@@ -522,9 +588,11 @@ pub(super) fn pane_block(title: String, focused: bool, chrome: PaneChrome) -> Bl
         .borders(borders)
 }
 
+#[allow(clippy::too_many_arguments)] // Rendering receives the already-measured host frame.
 fn render_details_panel(
     provider_name: &str,
     view: Option<&WorkspaceView<'_>>,
+    resource_shell_session: Option<&ResourceShellSession>,
     running_commands: &[crate::application::RunningResourceCommand],
     focused: bool,
     details_hint: Option<&str>,
@@ -599,6 +667,8 @@ fn render_details_panel(
             .style(themed_style(ThemeRole::Warning).add_modifier(Modifier::BOLD)),
             rows[1],
         );
+    } else if view.is_some_and(|view| view.shell_selected) {
+        render_resource_shell_state(resource_shell_session, frame, rows[1]);
     } else if let Some(details) = view.and_then(|view| view.details) {
         render_detail_content(provider_name, details, frame, rows[1]);
     }
@@ -611,7 +681,74 @@ fn render_details_panel(
             .is_some_and(|selected| selected.id == detail_view.id);
         spans.push(detail_view_tab(&detail_view.title, selected));
     }
+    if view.is_some_and(|view| view.offers_shell) {
+        spans.push(Span::raw(gap(DETAIL_VIEW_GAP)));
+        spans.push(detail_view_tab(
+            "Shell",
+            view.is_some_and(|view| view.shell_selected),
+        ));
+    }
     frame.render_widget(Paragraph::new(Line::from(spans)), rows[0]);
+}
+
+fn render_resource_shell_state(
+    session: Option<&ResourceShellSession>,
+    frame: &mut Frame<'_>,
+    area: Rect,
+) {
+    let text = match session.map(|session| &session.lifecycle) {
+        None => "Press Enter to start Shell".to_owned(),
+        Some(ResourceShellSessionLifecycle::Starting) => "Starting Shell…".to_owned(),
+        Some(ResourceShellSessionLifecycle::Running) => String::new(),
+        Some(ResourceShellSessionLifecycle::Exited) => "Session exited".to_owned(),
+        Some(ResourceShellSessionLifecycle::StartFailed(reason)) => {
+            format!("Shell failed to start: {reason}\nPress Enter to retry")
+        }
+    };
+    if !text.is_empty() {
+        frame.render_widget(Paragraph::new(text), area);
+    }
+}
+
+/// Renders the host-owned emulator screen inside the Details content bounds.
+/// The screen is text-only here; terminal cell styling is progressively mapped
+/// by the host adapter without giving application state terminal-engine types.
+pub fn render_resource_shell_text(text: &str, frame: &mut Frame<'_>, area: Rect) {
+    frame.render_widget(Paragraph::new(text), area);
+}
+
+/// Renders the host-adapted terminal grid without flattening terminal colour
+/// or cursor state into ordinary Details text.
+pub fn render_resource_shell_screen(
+    screen: ResourceShellScreen,
+    frame: &mut Frame<'_>,
+    area: Rect,
+) {
+    let lines = screen
+        .lines
+        .into_iter()
+        .map(|cells| {
+            Line::from(
+                cells
+                    .into_iter()
+                    .map(|cell| {
+                        let mut style = Style::default();
+                        if let Some(foreground) = cell.foreground {
+                            style = style.fg(foreground);
+                        }
+                        if let Some(background) = cell.background {
+                            style = style.bg(background);
+                        }
+                        if cell.cursor || cell.selected {
+                            style = style.add_modifier(Modifier::REVERSED);
+                        }
+                        Span::styled(cell.text, style)
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect::<Vec<_>>();
+    frame.render_widget(Paragraph::new(lines), area);
 }
 
 fn detail_view_tab(title: &str, selected: bool) -> Span<'static> {
