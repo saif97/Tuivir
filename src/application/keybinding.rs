@@ -1,5 +1,7 @@
 use std::fmt;
 
+use super::Key;
+
 /// One reason application keybinding policy refused a set of overrides.
 ///
 /// Validation is atomic: every discoverable diagnostic is collected and no
@@ -40,6 +42,21 @@ pub enum KeybindingError {
     },
     /// A Command other than Quit tried to claim the emergency `ctrl+c`.
     ReservedKey { id: String, key: String },
+}
+
+pub(crate) fn duplicate_keys(keys: &[Key]) -> Vec<Key> {
+    let mut seen = Vec::new();
+    let mut duplicates = Vec::new();
+    for key in keys {
+        if seen.contains(key) {
+            if !duplicates.contains(key) {
+                duplicates.push(*key);
+            }
+        } else {
+            seen.push(*key);
+        }
+    }
+    duplicates
 }
 
 impl fmt::Display for KeybindingError {

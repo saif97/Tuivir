@@ -142,11 +142,7 @@ impl ShellInputRouter {
     }
 
     fn route(&mut self, session_id: ResourceShellSessionId, key: KeyEvent) -> ShellKeyRoute {
-        if self.active_session != Some(session_id) {
-            self.active_session = Some(session_id);
-            self.focused = true;
-            self.prefix_pending = None;
-        }
+        self.activate_session(session_id, true);
         if let Some(prefix) = self.prefix_pending.take() {
             let configured_key = presentation::key_from_event(key);
             if matches!(
@@ -195,11 +191,7 @@ impl ShellInputRouter {
         session_id: ResourceShellSessionId,
         key: KeyEvent,
     ) -> ShellKeyRoute {
-        if self.active_session != Some(session_id) {
-            self.active_session = Some(session_id);
-            self.focused = false;
-            self.prefix_pending = None;
-        }
+        self.activate_session(session_id, false);
         if self.prefix_pending.take().is_some() {
             let key = presentation::key_from_event(key);
             return self.control_for(key).unwrap_or(ShellKeyRoute::ToTuivir);
@@ -208,6 +200,14 @@ impl ShellInputRouter {
             self.prefix_pending = Some(key);
         }
         ShellKeyRoute::ToTuivir
+    }
+
+    fn activate_session(&mut self, session_id: ResourceShellSessionId, focused: bool) {
+        if self.active_session != Some(session_id) {
+            self.active_session = Some(session_id);
+            self.focused = focused;
+            self.prefix_pending = None;
+        }
     }
 
     fn control_for(&self, key: Option<tuivir::application::Key>) -> Option<ShellKeyRoute> {
@@ -227,11 +227,7 @@ impl ShellInputRouter {
         text: &str,
         bracketed_paste: bool,
     ) -> ShellKeyRoute {
-        if self.active_session != Some(session_id) {
-            self.active_session = Some(session_id);
-            self.focused = true;
-            self.prefix_pending = None;
-        }
+        self.activate_session(session_id, true);
         if !self.focused {
             return ShellKeyRoute::ToTuivir;
         }
@@ -260,11 +256,7 @@ impl ShellInputRouter {
             self.selection_gesture = ShellSelectionGesture::Idle;
             return ShellPointerRoute::ToTuivir;
         };
-        if self.active_session != Some(session_id) {
-            self.active_session = Some(session_id);
-            self.focused = false;
-            self.prefix_pending = None;
-        }
+        self.activate_session(session_id, false);
         if mouse_reporting && self.focused {
             return terminal_mouse_bytes(event, position, sgr_mouse)
                 .map_or(ShellPointerRoute::None, ShellPointerRoute::ToPty);
@@ -651,9 +643,11 @@ fn terminal_modifier_suffix(modifiers: KeyModifiers) -> String {
         + u8::from(modifiers.contains(KeyModifiers::SHIFT))
         + 2 * u8::from(modifiers.contains(KeyModifiers::ALT))
         + 4 * u8::from(modifiers.contains(KeyModifiers::CONTROL));
-    (modifier != 1)
-        .then(|| format!(";{modifier}"))
-        .unwrap_or_default()
+    if modifier != 1 {
+        format!(";{modifier}")
+    } else {
+        String::new()
+    }
 }
 
 async fn run(

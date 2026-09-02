@@ -154,9 +154,10 @@ pub fn load(env: &Env, reader: &dyn ReadFile) -> Result<CommandRegistry, LoadErr
             });
         }
     };
-    let (overrides, shell_prefix, shell_keybindings) = raw.into_overrides();
-    let registry = CommandRegistry::effective(&overrides);
-    let shell_controls = ResourceShellControls::effective(shell_prefix, shell_keybindings);
+    let overrides = raw.into_overrides();
+    let registry = CommandRegistry::effective(&overrides.keybindings);
+    let shell_controls =
+        ResourceShellControls::effective(overrides.shell_prefix, overrides.shell_keybindings);
     match (registry, shell_controls) {
         (Ok(registry), Ok(shell_controls)) => {
             Ok(registry.with_resource_shell_controls(shell_controls))
@@ -212,26 +213,27 @@ struct RawResourceShell {
 }
 
 impl RawConfig {
-    fn into_overrides(
-        self,
-    ) -> (
-        Vec<(String, Vec<String>)>,
-        Option<String>,
-        Vec<(String, Vec<String>)>,
-    ) {
+    fn into_overrides(self) -> RawOverrides {
         let shell = self.resource_shell.unwrap_or(RawResourceShell {
             prefix: None,
             keybindings: None,
         });
-        (
-            self.keybindings
-                .map(|table| table.into_iter().collect())
-                .unwrap_or_default(),
-            shell.prefix,
-            shell
+        RawOverrides {
+            keybindings: self
                 .keybindings
                 .map(|table| table.into_iter().collect())
                 .unwrap_or_default(),
-        )
+            shell_prefix: shell.prefix,
+            shell_keybindings: shell
+                .keybindings
+                .map(|table| table.into_iter().collect())
+                .unwrap_or_default(),
+        }
     }
+}
+
+struct RawOverrides {
+    keybindings: Vec<(String, Vec<String>)>,
+    shell_prefix: Option<String>,
+    shell_keybindings: Vec<(String, Vec<String>)>,
 }

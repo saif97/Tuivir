@@ -1,4 +1,4 @@
-use super::{Key, KeybindingError};
+use super::{Key, KeybindingError, keybinding::duplicate_keys};
 
 /// Effective terminal controls owned by Tuivir while a Resource Shell Session
 /// has keyboard focus.
@@ -70,7 +70,12 @@ impl ResourceShellControls {
                     }
                 })
                 .collect::<Vec<_>>();
-            errors.extend(duplicate_keys(&id, &parsed));
+            errors.extend(duplicate_keys(&parsed).into_iter().map(|key| {
+                KeybindingError::DuplicateShellKey {
+                    id: id.clone(),
+                    key: key.to_string(),
+                }
+            }));
             match id.as_str() {
                 "focus_tuivir" => {
                     if parsed.is_empty() {
@@ -111,22 +116,4 @@ impl ResourceShellControls {
             Err(errors)
         }
     }
-}
-
-fn duplicate_keys(id: &str, keys: &[Key]) -> Vec<KeybindingError> {
-    let mut seen = Vec::new();
-    let mut errors = Vec::new();
-    for key in keys {
-        if !seen.contains(key) {
-            seen.push(*key);
-        } else if !errors.iter().any(|error| {
-            matches!(error, KeybindingError::DuplicateShellKey { key: duplicate, .. } if duplicate == &key.to_string())
-        }) {
-            errors.push(KeybindingError::DuplicateShellKey {
-                id: id.to_owned(),
-                key: key.to_string(),
-            });
-        }
-    }
-    errors
 }
