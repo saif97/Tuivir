@@ -132,6 +132,40 @@ fn invalid_resource_shell_controls_reject_the_entire_configuration() {
 }
 
 #[test]
+fn shell_control_conflicts_and_prefix_collisions_are_reported_together() {
+    let path = PathBuf::from("/cfg/tuivir.toml");
+    let env = Env {
+        config_file: Some(path.clone()),
+        ..Default::default()
+    };
+    let fs = MemoryFs::with(
+        path.clone(),
+        "[resource_shell]\nprefix = \"x\"\n\
+         [resource_shell.keybindings]\n\
+         focus_tuivir = [\"x\", \"q\"]\n\
+         toggle_zoom = [\"q\"]\n",
+    );
+
+    assert_eq!(
+        load(&env, &fs).unwrap_err(),
+        LoadError::Invalid {
+            path,
+            errors: vec![
+                ConfigError::ShellPrefixCollision {
+                    id: "focus_tuivir".to_owned(),
+                    key: "x".to_owned(),
+                },
+                ConfigError::ConflictingShellKey {
+                    key: "q".to_owned(),
+                    first: "focus_tuivir".to_owned(),
+                    second: "toggle_zoom".to_owned(),
+                },
+            ],
+        }
+    );
+}
+
+#[test]
 fn an_empty_explicit_config_file_means_compiled_defaults() {
     let path = PathBuf::from("/cfg/tuivir.toml");
     let env = Env {
