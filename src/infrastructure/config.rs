@@ -6,7 +6,7 @@ use std::{
 
 use serde::Deserialize;
 
-use crate::application::{CommandRegistry, KeybindingError};
+use crate::application::{CommandRegistry, KeybindingError, ResourceShellControls};
 
 /// The environment Tuivir consults to discover its configuration file.
 ///
@@ -154,8 +154,19 @@ pub fn load(env: &Env, reader: &dyn ReadFile) -> Result<CommandRegistry, LoadErr
             });
         }
     };
-    let overrides = raw.into_overrides();
-    CommandRegistry::effective(&overrides).map_err(|errors| LoadError::Invalid { path, errors })
+    let (overrides, shell_prefix, shell_keybindings) = raw.into_overrides();
+    let registry = CommandRegistry::effective(&overrides);
+    let shell_controls = ResourceShellControls::effective(shell_prefix, shell_keybindings);
+    match (registry, shell_controls) {
+        (Ok(registry), Ok(shell_controls)) => {
+            Ok(registry.with_resource_shell_controls(shell_controls))
+        }
+        (registry, shell_controls) => {
+            let mut errors = registry.err().unwrap_or_default();
+            errors.extend(shell_controls.err().unwrap_or_default());
+            Err(LoadError::Invalid { path, errors })
+        }
+    }
 }
 
 /// Selects exactly one discovered path, or `None` when neither `XDG_CONFIG_HOME`
@@ -190,12 +201,37 @@ fn discovered_path(env: &Env) -> Result<Option<PathBuf>, LoadError> {
 #[serde(deny_unknown_fields)]
 struct RawConfig {
     keybindings: Option<BTreeMap<String, Vec<String>>>,
+    resource_shell: Option<RawResourceShell>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawResourceShell {
+    prefix: Option<String>,
+    keybindings: Option<BTreeMap<String, Vec<String>>>,
 }
 
 impl RawConfig {
-    fn into_overrides(self) -> Vec<(String, Vec<String>)> {
-        self.keybindings
-            .map(|table| table.into_iter().collect())
-            .unwrap_or_default()
+    fn into_overrides(
+        self,
+    ) -> (
+        Vec<(String, Vec<String>)>,
+        Option<String>,
+        Vec<(String, Vec<String>)>,
+    ) {
+        let shell = self.resource_shell.unwrap_or(RawResourceShell {
+            prefix: None,
+            keybindings: None,
+        });
+        (
+            self.keybindings
+                .map(|table| table.into_iter().collect())
+                .unwrap_or_default(),
+            shell.prefix,
+            shell
+                .keybindings
+                .map(|table| table.into_iter().collect())
+                .unwrap_or_default(),
+        )
     }
 }

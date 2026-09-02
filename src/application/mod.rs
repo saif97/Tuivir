@@ -4,6 +4,7 @@ mod key;
 mod keybinding;
 mod pane_boundary;
 mod provider;
+mod resource_shell_controls;
 mod shell;
 mod workspace;
 
@@ -22,6 +23,7 @@ pub use provider::{
     DetailView, LifecycleCommandPolicy, ProviderRequest, ProviderRequestId, Resource,
     ResourceDetails, ResourcePanel, WorkspaceError, WorkspaceSnapshot, lifecycle_commands,
 };
+pub use resource_shell_controls::ResourceShellControls;
 pub use shell::{
     ResourceShellEffect, ResourceShellPresentation, ResourceShellProcess, ResourceShellSession,
     ResourceShellSessionId, ResourceShellSessionLifecycle,

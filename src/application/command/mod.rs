@@ -7,7 +7,7 @@ mod defaults;
 pub use defaults::NUMBERED_RESOURCE_PANEL_CAPACITY;
 use defaults::{BUILTIN_COMMANDS, CommandDefinition, RESOURCE_PANEL_FOCUS_COMMANDS, WORKSPACE};
 
-use super::{Key, KeybindingError};
+use super::{Key, KeybindingError, ResourceShellControls};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ResourceCommand {
@@ -169,6 +169,7 @@ pub struct EffectiveCommand {
 #[derive(Clone, Debug)]
 pub struct CommandRegistry {
     commands: Vec<EffectiveCommand>,
+    resource_shell_controls: ResourceShellControls,
 }
 
 impl Default for CommandRegistry {
@@ -205,7 +206,10 @@ impl CommandRegistry {
                     ],
                 }),
         );
-        Self { commands }
+        Self {
+            commands,
+            resource_shell_controls: ResourceShellControls::default(),
+        }
     }
 
     /// Layers a `[keybindings]` table over the compiled defaults.
@@ -355,6 +359,17 @@ impl CommandRegistry {
             .iter()
             .find(|registered| registered.command == command)
             .and_then(|registered| registered.keys.first().copied())
+    }
+
+    /// The validated controls that temporarily route Resource Shell Session
+    /// input back through Tuivir.
+    pub fn resource_shell_controls(&self) -> &ResourceShellControls {
+        &self.resource_shell_controls
+    }
+
+    pub fn with_resource_shell_controls(mut self, controls: ResourceShellControls) -> Self {
+        self.resource_shell_controls = controls;
+        self
     }
 }
 
