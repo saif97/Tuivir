@@ -24,8 +24,8 @@ mod resource_shell_runtime;
 use resource_shell_runtime::{ResourceShellRuntime, ResourceShellRuntimeEvent};
 use tuivir::{
     application::{
-        App, AppEvent, Command, CommandRegistry, ProviderRequest, ResourceShellEffect,
-        ResourceShellSessionId,
+        App, AppEvent, Command, CommandRegistry, ProviderRequest, ResourceShellControls,
+        ResourceShellEffect, ResourceShellSessionId,
     },
     infrastructure::{
         config::{Env, FileSystemReader, load},
@@ -84,15 +84,21 @@ enum ShellControl {
     Quit,
 }
 
-/// Host-local keyboard focus for the currently visible PTY. `Ctrl-B q`
-/// releases it, returning ordinary keys to Tuivir without ever sending the
-/// prefix or release gesture to the provider process.
-#[derive(Default)]
+/// Host-local keyboard focus for the currently visible PTY. The configured
+/// Shell Prefix gives its next key to Tuivir without sending either control to
+/// the provider process.
 struct ShellInputRouter {
+    controls: ResourceShellControls,
     active_session: Option<ResourceShellSessionId>,
     focused: bool,
-    prefix_pending: bool,
+    prefix_pending: Option<KeyEvent>,
     selection_gesture: ShellSelectionGesture,
+}
+
+impl Default for ShellInputRouter {
+    fn default() -> Self {
+        Self::new(ResourceShellControls::default())
+    }
 }
 
 enum ShellKeyRoute {
@@ -125,26 +131,39 @@ enum ShellSelectionGesture {
 }
 
 impl ShellInputRouter {
+    fn new(controls: ResourceShellControls) -> Self {
+        Self {
+            controls,
+            active_session: None,
+            focused: false,
+            prefix_pending: None,
+            selection_gesture: ShellSelectionGesture::default(),
+        }
+    }
+
     fn route(&mut self, session_id: ResourceShellSessionId, key: KeyEvent) -> ShellKeyRoute {
         if self.active_session != Some(session_id) {
             self.active_session = Some(session_id);
             self.focused = true;
-            self.prefix_pending = false;
+            self.prefix_pending = None;
         }
-        if self.prefix_pending {
-            self.prefix_pending = false;
-            if key.code == KeyCode::Char('q') && key.modifiers.is_empty() {
+        if let Some(prefix) = self.prefix_pending.take() {
+            let configured_key = presentation::key_from_event(key);
+            if configured_key.is_some_and(|key| self.controls.focus_tuivir().contains(&key)) {
                 self.focused = false;
                 return ShellKeyRoute::Released;
             }
-            if key.code == KeyCode::Char('z') && key.modifiers.is_empty() {
+            if configured_key.is_some_and(|key| self.controls.toggle_zoom().contains(&key)) {
                 return ShellKeyRoute::ToggleSize;
             }
-            if key.code == KeyCode::Char('b') && key.modifiers == KeyModifiers::CONTROL {
-                return ShellKeyRoute::ToPty(vec![0x02]);
+            if configured_key.is_some_and(|key| key == self.controls.prefix()) {
+                return terminal_key_bytes(prefix)
+                    .map_or(ShellKeyRoute::ToTuivir, ShellKeyRoute::ToPty);
             }
             if let Some(bytes) = terminal_key_bytes(key) {
-                return ShellKeyRoute::ToPty([&[0x02][..], bytes.as_slice()].concat());
+                let mut forwarded = terminal_key_bytes(prefix).unwrap_or_default();
+                forwarded.extend(bytes);
+                return ShellKeyRoute::ToPty(forwarded);
             }
             return ShellKeyRoute::ToTuivir;
         }
@@ -155,8 +174,8 @@ impl ShellInputRouter {
             }
             return ShellKeyRoute::ToTuivir;
         }
-        if key.code == KeyCode::Char('b') && key.modifiers == KeyModifiers::CONTROL {
-            self.prefix_pending = true;
+        if presentation::key_from_event(key).is_some_and(|key| key == self.controls.prefix()) {
+            self.prefix_pending = Some(key);
             return ShellKeyRoute::ToTuivir;
         }
         terminal_key_bytes(key).map_or(ShellKeyRoute::ToTuivir, ShellKeyRoute::ToPty)
@@ -173,20 +192,20 @@ impl ShellInputRouter {
         if self.active_session != Some(session_id) {
             self.active_session = Some(session_id);
             self.focused = false;
-            self.prefix_pending = false;
+            self.prefix_pending = None;
         }
-        if self.prefix_pending {
-            self.prefix_pending = false;
-            return match (key.code, key.modifiers) {
-                (KeyCode::Char('q'), modifiers) if modifiers.is_empty() => ShellKeyRoute::Released,
-                (KeyCode::Char('z'), modifiers) if modifiers.is_empty() => {
-                    ShellKeyRoute::ToggleSize
-                }
-                _ => ShellKeyRoute::ToTuivir,
+        if self.prefix_pending.take().is_some() {
+            let key = presentation::key_from_event(key);
+            return if key.is_some_and(|key| self.controls.focus_tuivir().contains(&key)) {
+                ShellKeyRoute::Released
+            } else if key.is_some_and(|key| self.controls.toggle_zoom().contains(&key)) {
+                ShellKeyRoute::ToggleSize
+            } else {
+                ShellKeyRoute::ToTuivir
             };
         }
-        if key.code == KeyCode::Char('b') && key.modifiers == KeyModifiers::CONTROL {
-            self.prefix_pending = true;
+        if presentation::key_from_event(key).is_some_and(|key| key == self.controls.prefix()) {
+            self.prefix_pending = Some(key);
         }
         ShellKeyRoute::ToTuivir
     }
@@ -200,7 +219,7 @@ impl ShellInputRouter {
         if self.active_session != Some(session_id) {
             self.active_session = Some(session_id);
             self.focused = true;
-            self.prefix_pending = false;
+            self.prefix_pending = None;
         }
         if !self.focused {
             return ShellKeyRoute::ToTuivir;
@@ -226,14 +245,14 @@ impl ShellInputRouter {
     ) -> ShellPointerRoute {
         let Some(position) = terminal_position(viewport, event) else {
             self.focused = false;
-            self.prefix_pending = false;
+            self.prefix_pending = None;
             self.selection_gesture = ShellSelectionGesture::Idle;
             return ShellPointerRoute::ToTuivir;
         };
         if self.active_session != Some(session_id) {
             self.active_session = Some(session_id);
             self.focused = false;
-            self.prefix_pending = false;
+            self.prefix_pending = None;
         }
         if mouse_reporting && self.focused {
             return terminal_mouse_bytes(event, position, sgr_mouse)
@@ -587,13 +606,13 @@ async fn run(
     let cli = Arc::new(TokioCliRunner) as Arc<dyn CliRunner>;
     let runtime = ProviderRuntime::with_builtin_providers(cli);
     let (completion_tx, mut completion_rx) = mpsc::unbounded_channel();
+    let mut shell_input = ShellInputRouter::new(registry.resource_shell_controls().clone());
     let mut app = App::with_registry_and_pane_boundary(registry, pane_boundary);
     let state_storage = FileSystemReader;
     let mut clipboard = Osc52Clipboard(io::stdout());
     let mut detail_dispatch = DetailDispatchQueue::new(DETAIL_DISPATCH_QUIET_PERIOD);
     let (resource_shell_events, mut resource_shell_event_rx) = mpsc::unbounded_channel();
     let mut resource_shell_runtime = ResourceShellRuntime::default();
-    let mut shell_input = ShellInputRouter::default();
 
     for discovered in runtime.discover().await {
         let requests = app.update(discovered.into_event());

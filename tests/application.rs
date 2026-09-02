@@ -11,10 +11,11 @@ use tokio::sync::{Barrier, Notify, mpsc};
 use tuivir::{
     application::{
         App, AppEvent, AppState, Command, CommandRegistry, CommandScope, DetailView, FocusedPane,
-        LifecycleCommandPolicy, PaneBoundary, ProviderRequest, Resource, ResourceCommand,
-        ResourceDetails, ResourcePanel, ResourceShellEffect, ResourceShellPresentation,
-        ResourceShellProcess, ResourceShellSessionId, ResourceShellSessionLifecycle,
-        WorkspaceError, WorkspaceLoadState, WorkspaceSnapshot, lifecycle_commands,
+        Key, LifecycleCommandPolicy, PaneBoundary, ProviderRequest, Resource, ResourceCommand,
+        ResourceDetails, ResourcePanel, ResourceShellControls, ResourceShellEffect,
+        ResourceShellPresentation, ResourceShellProcess, ResourceShellSessionId,
+        ResourceShellSessionLifecycle, WorkspaceError, WorkspaceLoadState, WorkspaceSnapshot,
+        lifecycle_commands,
     },
     domain::{
         DetailViewId, Provider, ProviderId, ResourceId, ResourcePanelId, ResourceState,
@@ -1432,12 +1433,43 @@ fn an_enlarged_resource_shell_keeps_its_identity_and_restore_hint_above_the_term
         "rendered screen:\n{screen}"
     );
     assert!(
-        screen.contains("Ctrl-B q restore"),
+        screen.contains("Ctrl-] q restore") && screen.contains("Ctrl-] z resize"),
         "rendered screen:\n{screen}"
     );
     assert!(
         !screen.contains("Containers"),
         "the enlarged shell owns the former Tuivir layout:\n{screen}"
+    );
+}
+
+#[test]
+fn an_enlarged_resource_shell_displays_its_configured_prefix_and_preferred_controls() {
+    let registry =
+        CommandRegistry::builtin().with_resource_shell_controls(ResourceShellControls::new(
+            Key::parse("f5").expect("f5 is a key"),
+            vec![
+                Key::parse("x").expect("x is a key"),
+                Key::parse("q").expect("q is a key"),
+            ],
+            vec![Key::parse("f6").expect("f6 is a key")],
+        ));
+    let mut app = App::with_registry(registry);
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
+
+    handle_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('E'), KeyModifiers::NONE),
+    );
+
+    let screen = render_to_text(app.state(), 80, 24);
+    assert!(screen.contains("f5 x restore") && screen.contains("f5 f6 resize"));
+    assert!(
+        !screen.contains("f5 q restore"),
+        "first binding is the hint"
     );
 }
 

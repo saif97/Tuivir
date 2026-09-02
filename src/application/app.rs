@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use super::workspace::{DetailCompletion, ProviderWorkspaceState};
 use super::{
     Command, CommandRegistry, CommandScope, Key, NUMBERED_RESOURCE_PANEL_CAPACITY, PaneBoundary,
-    ProviderRequest, ProviderRequestId, ResourceCommand, ResourceDetails, ResourceShellEffect,
-    ResourceShellPresentation, ResourceShellSession, ResourceShellSessionId,
+    ProviderRequest, ProviderRequestId, ResourceCommand, ResourceDetails, ResourceShellControls,
+    ResourceShellEffect, ResourceShellPresentation, ResourceShellSession, ResourceShellSessionId,
     ResourceShellSessionLifecycle, WorkspaceError, WorkspaceSnapshot,
 };
 use crate::domain::{DetailViewId, Provider, ProviderId, ResourceState, ResourceTarget};
@@ -119,6 +119,9 @@ pub struct AppState {
     /// Session lifetime stays in `resource_shell_sessions`; moving this value
     /// never starts or stops a host runtime.
     pub resource_shell_presentation: ResourceShellPresentation,
+    /// Effective Resource Shell Session controls projected into render state so
+    /// visible hints use the same configuration as host input routing.
+    pub resource_shell_controls: ResourceShellControls,
     /// Dispatched Resource Commands that have not completed yet, in dispatch
     /// order.
     ///
@@ -330,6 +333,7 @@ impl App {
         let state = AppState {
             hints,
             pane_boundary,
+            resource_shell_controls: commands.resource_shell_controls().clone(),
             ..AppState::default()
         };
         Self {

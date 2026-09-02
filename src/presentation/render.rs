@@ -114,7 +114,22 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
                         identity,
                         themed_style(ThemeRole::Primary).add_modifier(Modifier::BOLD),
                     ),
-                    Span::raw("  Ctrl-B q restore"),
+                    Span::raw(format!(
+                        "  {} {} restore",
+                        shell_prefix_hint(state.resource_shell_controls.prefix()),
+                        state.resource_shell_controls.focus_tuivir()[0],
+                    )),
+                    state
+                        .resource_shell_controls
+                        .toggle_zoom()
+                        .first()
+                        .map(|key| {
+                            Span::raw(format!(
+                                "  {} {key} resize",
+                                shell_prefix_hint(state.resource_shell_controls.prefix()),
+                            ))
+                        })
+                        .unwrap_or_else(|| Span::raw("")),
                 ])),
                 header,
             );
@@ -194,6 +209,13 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
     }
 
     render_confirmation(state, frame);
+}
+
+fn shell_prefix_hint(prefix: crate::application::Key) -> String {
+    prefix
+        .to_string()
+        .replace("ctrl+", "Ctrl-")
+        .replace("alt+", "Alt-")
 }
 
 fn render_confirmation(state: &AppState, frame: &mut Frame<'_>) {
