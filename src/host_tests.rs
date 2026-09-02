@@ -660,6 +660,59 @@ fn ctrl_b_is_forwarded_without_a_compatibility_prefix() {
 }
 
 #[test]
+fn modified_and_named_shell_prefixes_forward_their_exact_terminal_bytes() {
+    let session = tuivir::application::ResourceShellSessionId::new(7);
+    let mut alt_router = ShellInputRouter::new(ResourceShellControls::new(
+        tuivir::application::Key::parse("alt+x").expect("alt+x is a key"),
+        vec![tuivir::application::Key::parse("q").expect("q is a key")],
+        vec![],
+    ));
+
+    assert!(matches!(
+        alt_router.route(
+            session,
+            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT)
+        ),
+        ShellKeyRoute::ToTuivir
+    ));
+    assert!(matches!(
+        alt_router.route(
+            session,
+            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT)
+        ),
+        ShellKeyRoute::ToPty(bytes) if bytes == b"\x1bx"
+    ));
+    assert!(matches!(
+        alt_router.route(
+            session,
+            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT)
+        ),
+        ShellKeyRoute::ToTuivir
+    ));
+    assert!(matches!(
+        alt_router.route(session, KeyEvent::new(KeyCode::F(13), KeyModifiers::NONE)),
+        ShellKeyRoute::ToPty(bytes) if bytes == b"\x1bx\x1b[25~"
+    ));
+
+    let mut backtab_router = ShellInputRouter::new(ResourceShellControls::new(
+        tuivir::application::Key::parse("shift+tab").expect("shift+tab is a key"),
+        vec![tuivir::application::Key::parse("q").expect("q is a key")],
+        vec![],
+    ));
+    assert!(matches!(
+        backtab_router.route(
+            session,
+            KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)
+        ),
+        ShellKeyRoute::ToTuivir
+    ));
+    assert!(matches!(
+        backtab_router.route(session, KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)),
+        ShellKeyRoute::ToPty(bytes) if bytes == b"\x1b[Z"
+    ));
+}
+
+#[test]
 fn focused_resource_shell_session_receives_escape_ctrl_c_and_function_keys() {
     let session = tuivir::application::ResourceShellSessionId::new(7);
     let mut router = ShellInputRouter::default();

@@ -149,11 +149,17 @@ impl ShellInputRouter {
         }
         if let Some(prefix) = self.prefix_pending.take() {
             let configured_key = presentation::key_from_event(key);
-            if configured_key.is_some_and(|key| self.controls.focus_tuivir().contains(&key)) {
+            if matches!(
+                self.control_for(configured_key),
+                Some(ShellKeyRoute::Released)
+            ) {
                 self.focused = false;
                 return ShellKeyRoute::Released;
             }
-            if configured_key.is_some_and(|key| self.controls.toggle_zoom().contains(&key)) {
+            if matches!(
+                self.control_for(configured_key),
+                Some(ShellKeyRoute::ToggleSize)
+            ) {
                 return ShellKeyRoute::ToggleSize;
             }
             if configured_key.is_some_and(|key| key == self.controls.prefix()) {
@@ -181,7 +187,7 @@ impl ShellInputRouter {
         terminal_key_bytes(key).map_or(ShellKeyRoute::ToTuivir, ShellKeyRoute::ToPty)
     }
 
-    /// Reserves only Tuivir's terminal-prefix controls while no live PTY can
+    /// Reserves only Tuivir's Shell Prefix controls while no live PTY can
     /// receive input. This keeps the enlarged exit and start-failure screens
     /// escapable without pretending their sessions can accept ordinary keys.
     fn route_without_terminal(
@@ -196,18 +202,23 @@ impl ShellInputRouter {
         }
         if self.prefix_pending.take().is_some() {
             let key = presentation::key_from_event(key);
-            return if key.is_some_and(|key| self.controls.focus_tuivir().contains(&key)) {
-                ShellKeyRoute::Released
-            } else if key.is_some_and(|key| self.controls.toggle_zoom().contains(&key)) {
-                ShellKeyRoute::ToggleSize
-            } else {
-                ShellKeyRoute::ToTuivir
-            };
+            return self.control_for(key).unwrap_or(ShellKeyRoute::ToTuivir);
         }
         if presentation::key_from_event(key).is_some_and(|key| key == self.controls.prefix()) {
             self.prefix_pending = Some(key);
         }
         ShellKeyRoute::ToTuivir
+    }
+
+    fn control_for(&self, key: Option<tuivir::application::Key>) -> Option<ShellKeyRoute> {
+        let key = key?;
+        if self.controls.focus_tuivir().contains(&key) {
+            Some(ShellKeyRoute::Released)
+        } else if self.controls.toggle_zoom().contains(&key) {
+            Some(ShellKeyRoute::ToggleSize)
+        } else {
+            None
+        }
     }
 
     fn route_paste(
@@ -566,7 +577,7 @@ fn resource_shell_output_requires_redraw(app: &App, session_id: ResourceShellSes
 /// about PTYs or terminal engines. Alacritty remains the owner of output
 /// parsing and terminal state.
 fn terminal_key_bytes(event: KeyEvent) -> Option<Vec<u8>> {
-    let bytes = match event.code {
+    let mut bytes = match event.code {
         KeyCode::Char(character) if event.modifiers.contains(KeyModifiers::CONTROL) => {
             vec![(character.to_ascii_uppercase() as u8) & 0x1f]
         }
@@ -575,26 +586,74 @@ fn terminal_key_bytes(event: KeyEvent) -> Option<Vec<u8>> {
         KeyCode::Backspace => vec![0x7f],
         KeyCode::Esc => vec![0x1b],
         KeyCode::Tab => vec![b'\t'],
-        KeyCode::Up => b"\x1b[A".to_vec(),
-        KeyCode::Down => b"\x1b[B".to_vec(),
-        KeyCode::Right => b"\x1b[C".to_vec(),
-        KeyCode::Left => b"\x1b[D".to_vec(),
-        KeyCode::Home => b"\x1b[H".to_vec(),
-        KeyCode::End => b"\x1b[F".to_vec(),
-        KeyCode::Delete => b"\x1b[3~".to_vec(),
-        KeyCode::F(1) => b"\x1bOP".to_vec(),
-        KeyCode::F(2) => b"\x1bOQ".to_vec(),
-        KeyCode::F(3) => b"\x1bOR".to_vec(),
-        KeyCode::F(4) => b"\x1bOS".to_vec(),
+        KeyCode::BackTab => b"\x1b[Z".to_vec(),
+        KeyCode::Up => terminal_named_key_bytes('A', event.modifiers),
+        KeyCode::Down => terminal_named_key_bytes('B', event.modifiers),
+        KeyCode::Right => terminal_named_key_bytes('C', event.modifiers),
+        KeyCode::Left => terminal_named_key_bytes('D', event.modifiers),
+        KeyCode::Home => terminal_named_key_bytes('H', event.modifiers),
+        KeyCode::End => terminal_named_key_bytes('F', event.modifiers),
+        KeyCode::PageUp => terminal_tilde_key_bytes(5, event.modifiers),
+        KeyCode::PageDown => terminal_tilde_key_bytes(6, event.modifiers),
+        KeyCode::Insert => terminal_tilde_key_bytes(2, event.modifiers),
+        KeyCode::Delete => terminal_tilde_key_bytes(3, event.modifiers),
+        KeyCode::F(number @ 1..=4) => terminal_function_key_bytes(number, event.modifiers),
         KeyCode::F(number @ 5..=12) => format!(
-            "\x1b[{}~",
-            [15, 17, 18, 19, 20, 21, 23, 24][usize::from(number - 5)]
+            "\x1b[{}{}~",
+            [15, 17, 18, 19, 20, 21, 23, 24][usize::from(number - 5)],
+            terminal_modifier_suffix(event.modifiers),
         )
         .into_bytes(),
-        KeyCode::F(number) => format!("\x1b[{}~", 12 + number).into_bytes(),
+        KeyCode::F(number) => format!(
+            "\x1b[{}{}~",
+            12 + number,
+            terminal_modifier_suffix(event.modifiers),
+        )
+        .into_bytes(),
         _ => return None,
     };
+    if event.modifiers.contains(KeyModifiers::ALT)
+        && matches!(
+            event.code,
+            KeyCode::Char(_) | KeyCode::Enter | KeyCode::Backspace | KeyCode::Esc | KeyCode::Tab
+        )
+    {
+        bytes.insert(0, 0x1b);
+    }
     Some(bytes)
+}
+
+fn terminal_named_key_bytes(final_byte: char, modifiers: KeyModifiers) -> Vec<u8> {
+    let suffix = terminal_modifier_suffix(modifiers);
+    if suffix.is_empty() {
+        format!("\x1b[{final_byte}").into_bytes()
+    } else {
+        format!("\x1b[1{suffix}{final_byte}").into_bytes()
+    }
+}
+
+fn terminal_tilde_key_bytes(number: u8, modifiers: KeyModifiers) -> Vec<u8> {
+    format!("\x1b[{number}{}~", terminal_modifier_suffix(modifiers)).into_bytes()
+}
+
+fn terminal_function_key_bytes(number: u8, modifiers: KeyModifiers) -> Vec<u8> {
+    let final_byte = ['P', 'Q', 'R', 'S'][usize::from(number - 1)];
+    let suffix = terminal_modifier_suffix(modifiers);
+    if suffix.is_empty() {
+        format!("\x1bO{final_byte}").into_bytes()
+    } else {
+        format!("\x1b[1{suffix}{final_byte}").into_bytes()
+    }
+}
+
+fn terminal_modifier_suffix(modifiers: KeyModifiers) -> String {
+    let modifier = 1
+        + u8::from(modifiers.contains(KeyModifiers::SHIFT))
+        + 2 * u8::from(modifiers.contains(KeyModifiers::ALT))
+        + 4 * u8::from(modifiers.contains(KeyModifiers::CONTROL));
+    (modifier != 1)
+        .then(|| format!(";{modifier}"))
+        .unwrap_or_default()
 }
 
 async fn run(
