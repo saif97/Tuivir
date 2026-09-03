@@ -24,8 +24,8 @@ mod resource_shell_runtime;
 use resource_shell_runtime::{ResourceShellRuntime, ResourceShellRuntimeEvent};
 use tuivir::{
     application::{
-        App, AppEvent, Command, CommandRegistry, ProviderRequest, ResourceShellEffect,
-        ResourceShellSessionId,
+        App, AppEvent, Command, CommandRegistry, ProviderRequest, ResourceShellControls,
+        ResourceShellEffect, ResourceShellSessionId,
     },
     infrastructure::{
         config::{Env, FileSystemReader, load},
@@ -84,15 +84,21 @@ enum ShellControl {
     Quit,
 }
 
-/// Host-local keyboard focus for the currently visible PTY. `Ctrl-B q`
-/// releases it, returning ordinary keys to Tuivir without ever sending the
-/// prefix or release gesture to the provider process.
-#[derive(Default)]
+/// Host-local keyboard focus for the currently visible PTY. The configured
+/// Shell Prefix gives its next key to Tuivir without sending either control to
+/// the provider process.
 struct ShellInputRouter {
+    controls: ResourceShellControls,
     active_session: Option<ResourceShellSessionId>,
     focused: bool,
-    prefix_pending: bool,
+    prefix_pending: Option<KeyEvent>,
     selection_gesture: ShellSelectionGesture,
+}
+
+impl Default for ShellInputRouter {
+    fn default() -> Self {
+        Self::new(ResourceShellControls::default())
+    }
 }
 
 enum ShellKeyRoute {
@@ -125,26 +131,41 @@ enum ShellSelectionGesture {
 }
 
 impl ShellInputRouter {
-    fn route(&mut self, session_id: ResourceShellSessionId, key: KeyEvent) -> ShellKeyRoute {
-        if self.active_session != Some(session_id) {
-            self.active_session = Some(session_id);
-            self.focused = true;
-            self.prefix_pending = false;
+    fn new(controls: ResourceShellControls) -> Self {
+        Self {
+            controls,
+            active_session: None,
+            focused: false,
+            prefix_pending: None,
+            selection_gesture: ShellSelectionGesture::default(),
         }
-        if self.prefix_pending {
-            self.prefix_pending = false;
-            if key.code == KeyCode::Char('q') && key.modifiers.is_empty() {
+    }
+
+    fn route(&mut self, session_id: ResourceShellSessionId, key: KeyEvent) -> ShellKeyRoute {
+        self.activate_session(session_id, true);
+        if let Some(prefix) = self.prefix_pending.take() {
+            let configured_key = presentation::key_from_event(key);
+            if matches!(
+                self.control_for(configured_key),
+                Some(ShellKeyRoute::Released)
+            ) {
                 self.focused = false;
                 return ShellKeyRoute::Released;
             }
-            if key.code == KeyCode::Char('z') && key.modifiers.is_empty() {
+            if matches!(
+                self.control_for(configured_key),
+                Some(ShellKeyRoute::ToggleSize)
+            ) {
                 return ShellKeyRoute::ToggleSize;
             }
-            if key.code == KeyCode::Char('b') && key.modifiers == KeyModifiers::CONTROL {
-                return ShellKeyRoute::ToPty(vec![0x02]);
+            if configured_key.is_some_and(|key| key == self.controls.prefix()) {
+                return terminal_key_bytes(prefix)
+                    .map_or(ShellKeyRoute::ToTuivir, ShellKeyRoute::ToPty);
             }
             if let Some(bytes) = terminal_key_bytes(key) {
-                return ShellKeyRoute::ToPty([&[0x02][..], bytes.as_slice()].concat());
+                let mut forwarded = terminal_key_bytes(prefix).unwrap_or_default();
+                forwarded.extend(bytes);
+                return ShellKeyRoute::ToPty(forwarded);
             }
             return ShellKeyRoute::ToTuivir;
         }
@@ -155,14 +176,14 @@ impl ShellInputRouter {
             }
             return ShellKeyRoute::ToTuivir;
         }
-        if key.code == KeyCode::Char('b') && key.modifiers == KeyModifiers::CONTROL {
-            self.prefix_pending = true;
+        if presentation::key_from_event(key).is_some_and(|key| key == self.controls.prefix()) {
+            self.prefix_pending = Some(key);
             return ShellKeyRoute::ToTuivir;
         }
         terminal_key_bytes(key).map_or(ShellKeyRoute::ToTuivir, ShellKeyRoute::ToPty)
     }
 
-    /// Reserves only Tuivir's terminal-prefix controls while no live PTY can
+    /// Reserves only Tuivir's Shell Prefix controls while no live PTY can
     /// receive input. This keeps the enlarged exit and start-failure screens
     /// escapable without pretending their sessions can accept ordinary keys.
     fn route_without_terminal(
@@ -170,25 +191,34 @@ impl ShellInputRouter {
         session_id: ResourceShellSessionId,
         key: KeyEvent,
     ) -> ShellKeyRoute {
-        if self.active_session != Some(session_id) {
-            self.active_session = Some(session_id);
-            self.focused = false;
-            self.prefix_pending = false;
+        self.activate_session(session_id, false);
+        if self.prefix_pending.take().is_some() {
+            let key = presentation::key_from_event(key);
+            return self.control_for(key).unwrap_or(ShellKeyRoute::ToTuivir);
         }
-        if self.prefix_pending {
-            self.prefix_pending = false;
-            return match (key.code, key.modifiers) {
-                (KeyCode::Char('q'), modifiers) if modifiers.is_empty() => ShellKeyRoute::Released,
-                (KeyCode::Char('z'), modifiers) if modifiers.is_empty() => {
-                    ShellKeyRoute::ToggleSize
-                }
-                _ => ShellKeyRoute::ToTuivir,
-            };
-        }
-        if key.code == KeyCode::Char('b') && key.modifiers == KeyModifiers::CONTROL {
-            self.prefix_pending = true;
+        if presentation::key_from_event(key).is_some_and(|key| key == self.controls.prefix()) {
+            self.prefix_pending = Some(key);
         }
         ShellKeyRoute::ToTuivir
+    }
+
+    fn activate_session(&mut self, session_id: ResourceShellSessionId, focused: bool) {
+        if self.active_session != Some(session_id) {
+            self.active_session = Some(session_id);
+            self.focused = focused;
+            self.prefix_pending = None;
+        }
+    }
+
+    fn control_for(&self, key: Option<tuivir::application::Key>) -> Option<ShellKeyRoute> {
+        let key = key?;
+        if self.controls.focus_tuivir().contains(&key) {
+            Some(ShellKeyRoute::Released)
+        } else if self.controls.toggle_zoom().contains(&key) {
+            Some(ShellKeyRoute::ToggleSize)
+        } else {
+            None
+        }
     }
 
     fn route_paste(
@@ -197,11 +227,7 @@ impl ShellInputRouter {
         text: &str,
         bracketed_paste: bool,
     ) -> ShellKeyRoute {
-        if self.active_session != Some(session_id) {
-            self.active_session = Some(session_id);
-            self.focused = true;
-            self.prefix_pending = false;
-        }
+        self.activate_session(session_id, true);
         if !self.focused {
             return ShellKeyRoute::ToTuivir;
         }
@@ -226,15 +252,11 @@ impl ShellInputRouter {
     ) -> ShellPointerRoute {
         let Some(position) = terminal_position(viewport, event) else {
             self.focused = false;
-            self.prefix_pending = false;
+            self.prefix_pending = None;
             self.selection_gesture = ShellSelectionGesture::Idle;
             return ShellPointerRoute::ToTuivir;
         };
-        if self.active_session != Some(session_id) {
-            self.active_session = Some(session_id);
-            self.focused = false;
-            self.prefix_pending = false;
-        }
+        self.activate_session(session_id, false);
         if mouse_reporting && self.focused {
             return terminal_mouse_bytes(event, position, sgr_mouse)
                 .map_or(ShellPointerRoute::None, ShellPointerRoute::ToPty);
@@ -547,7 +569,7 @@ fn resource_shell_output_requires_redraw(app: &App, session_id: ResourceShellSes
 /// about PTYs or terminal engines. Alacritty remains the owner of output
 /// parsing and terminal state.
 fn terminal_key_bytes(event: KeyEvent) -> Option<Vec<u8>> {
-    let bytes = match event.code {
+    let mut bytes = match event.code {
         KeyCode::Char(character) if event.modifiers.contains(KeyModifiers::CONTROL) => {
             vec![(character.to_ascii_uppercase() as u8) & 0x1f]
         }
@@ -556,26 +578,76 @@ fn terminal_key_bytes(event: KeyEvent) -> Option<Vec<u8>> {
         KeyCode::Backspace => vec![0x7f],
         KeyCode::Esc => vec![0x1b],
         KeyCode::Tab => vec![b'\t'],
-        KeyCode::Up => b"\x1b[A".to_vec(),
-        KeyCode::Down => b"\x1b[B".to_vec(),
-        KeyCode::Right => b"\x1b[C".to_vec(),
-        KeyCode::Left => b"\x1b[D".to_vec(),
-        KeyCode::Home => b"\x1b[H".to_vec(),
-        KeyCode::End => b"\x1b[F".to_vec(),
-        KeyCode::Delete => b"\x1b[3~".to_vec(),
-        KeyCode::F(1) => b"\x1bOP".to_vec(),
-        KeyCode::F(2) => b"\x1bOQ".to_vec(),
-        KeyCode::F(3) => b"\x1bOR".to_vec(),
-        KeyCode::F(4) => b"\x1bOS".to_vec(),
+        KeyCode::BackTab => b"\x1b[Z".to_vec(),
+        KeyCode::Up => terminal_named_key_bytes('A', event.modifiers),
+        KeyCode::Down => terminal_named_key_bytes('B', event.modifiers),
+        KeyCode::Right => terminal_named_key_bytes('C', event.modifiers),
+        KeyCode::Left => terminal_named_key_bytes('D', event.modifiers),
+        KeyCode::Home => terminal_named_key_bytes('H', event.modifiers),
+        KeyCode::End => terminal_named_key_bytes('F', event.modifiers),
+        KeyCode::PageUp => terminal_tilde_key_bytes(5, event.modifiers),
+        KeyCode::PageDown => terminal_tilde_key_bytes(6, event.modifiers),
+        KeyCode::Insert => terminal_tilde_key_bytes(2, event.modifiers),
+        KeyCode::Delete => terminal_tilde_key_bytes(3, event.modifiers),
+        KeyCode::F(number @ 1..=4) => terminal_function_key_bytes(number, event.modifiers),
         KeyCode::F(number @ 5..=12) => format!(
-            "\x1b[{}~",
-            [15, 17, 18, 19, 20, 21, 23, 24][usize::from(number - 5)]
+            "\x1b[{}{}~",
+            [15, 17, 18, 19, 20, 21, 23, 24][usize::from(number - 5)],
+            terminal_modifier_suffix(event.modifiers),
         )
         .into_bytes(),
-        KeyCode::F(number) => format!("\x1b[{}~", 12 + number).into_bytes(),
+        KeyCode::F(number) => format!(
+            "\x1b[{}{}~",
+            12 + number,
+            terminal_modifier_suffix(event.modifiers),
+        )
+        .into_bytes(),
         _ => return None,
     };
+    if event.modifiers.contains(KeyModifiers::ALT)
+        && matches!(
+            event.code,
+            KeyCode::Char(_) | KeyCode::Enter | KeyCode::Backspace | KeyCode::Esc | KeyCode::Tab
+        )
+    {
+        bytes.insert(0, 0x1b);
+    }
     Some(bytes)
+}
+
+fn terminal_named_key_bytes(final_byte: char, modifiers: KeyModifiers) -> Vec<u8> {
+    let suffix = terminal_modifier_suffix(modifiers);
+    if suffix.is_empty() {
+        format!("\x1b[{final_byte}").into_bytes()
+    } else {
+        format!("\x1b[1{suffix}{final_byte}").into_bytes()
+    }
+}
+
+fn terminal_tilde_key_bytes(number: u8, modifiers: KeyModifiers) -> Vec<u8> {
+    format!("\x1b[{number}{}~", terminal_modifier_suffix(modifiers)).into_bytes()
+}
+
+fn terminal_function_key_bytes(number: u8, modifiers: KeyModifiers) -> Vec<u8> {
+    let final_byte = ['P', 'Q', 'R', 'S'][usize::from(number - 1)];
+    let suffix = terminal_modifier_suffix(modifiers);
+    if suffix.is_empty() {
+        format!("\x1bO{final_byte}").into_bytes()
+    } else {
+        format!("\x1b[1{suffix}{final_byte}").into_bytes()
+    }
+}
+
+fn terminal_modifier_suffix(modifiers: KeyModifiers) -> String {
+    let modifier = 1
+        + u8::from(modifiers.contains(KeyModifiers::SHIFT))
+        + 2 * u8::from(modifiers.contains(KeyModifiers::ALT))
+        + 4 * u8::from(modifiers.contains(KeyModifiers::CONTROL));
+    if modifier != 1 {
+        format!(";{modifier}")
+    } else {
+        String::new()
+    }
 }
 
 async fn run(
@@ -587,13 +659,13 @@ async fn run(
     let cli = Arc::new(TokioCliRunner) as Arc<dyn CliRunner>;
     let runtime = ProviderRuntime::with_builtin_providers(cli);
     let (completion_tx, mut completion_rx) = mpsc::unbounded_channel();
+    let mut shell_input = ShellInputRouter::new(registry.resource_shell_controls().clone());
     let mut app = App::with_registry_and_pane_boundary(registry, pane_boundary);
     let state_storage = FileSystemReader;
     let mut clipboard = Osc52Clipboard(io::stdout());
     let mut detail_dispatch = DetailDispatchQueue::new(DETAIL_DISPATCH_QUIET_PERIOD);
     let (resource_shell_events, mut resource_shell_event_rx) = mpsc::unbounded_channel();
     let mut resource_shell_runtime = ResourceShellRuntime::default();
-    let mut shell_input = ShellInputRouter::default();
 
     for discovered in runtime.discover().await {
         let requests = app.update(discovered.into_event());

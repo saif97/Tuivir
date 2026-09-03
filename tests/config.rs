@@ -5,7 +5,10 @@ use std::{
 };
 
 use tuivir::{
-    application::{Command, CommandScope, Key, KeybindingError as ConfigError, ResourceCommand},
+    application::{
+        Command, CommandScope, Key, KeybindingError as ConfigError, ResourceCommand,
+        ResourceShellControls,
+    },
     infrastructure::config::{Env, FileSystemReader, LoadError, ReadFile, load},
 };
 
@@ -67,6 +70,98 @@ fn an_explicit_config_file_overrides_one_binding_and_leaves_the_rest() {
         registry.resolve(CommandScope::ResourceView, key("r")),
         Some(Command::Resource(ResourceCommand::Restart)),
         "an unmentioned Command keeps its defaults"
+    );
+}
+
+#[test]
+fn resource_shell_controls_layer_over_their_defaults() {
+    let path = PathBuf::from("/cfg/tuivir.toml");
+    let env = Env {
+        config_file: Some(path.clone()),
+        ..Default::default()
+    };
+    let fs = MemoryFs::with(
+        path,
+        "[resource_shell]\nprefix = \"f5\"\n\
+         [resource_shell.keybindings]\n\
+         focus_tuivir = [\"x\", \"q\"]\n\
+         toggle_zoom = []\n",
+    );
+
+    let registry = load(&env, &fs).expect("a valid configuration");
+
+    assert_eq!(
+        registry.resource_shell_controls(),
+        &ResourceShellControls::new(key("f5"), vec![key("x"), key("q")], vec![])
+    );
+}
+
+#[test]
+fn invalid_resource_shell_controls_reject_the_entire_configuration() {
+    let path = PathBuf::from("/cfg/tuivir.toml");
+    let env = Env {
+        config_file: Some(path.clone()),
+        ..Default::default()
+    };
+    let fs = MemoryFs::with(
+        path.clone(),
+        "[resource_shell]\nprefix = \"f13\"\n\
+         [resource_shell.keybindings]\n\
+         focus_tuivir = []\n\
+         toggle_zoom = [\"z\", \"z\"]\n",
+    );
+
+    assert_eq!(
+        load(&env, &fs).unwrap_err(),
+        LoadError::Invalid {
+            path,
+            errors: vec![
+                ConfigError::InvalidShellPrefix {
+                    key: "f13".to_owned(),
+                },
+                ConfigError::EmptyShellKeybinding {
+                    id: "focus_tuivir".to_owned(),
+                },
+                ConfigError::DuplicateShellKey {
+                    id: "toggle_zoom".to_owned(),
+                    key: "z".to_owned(),
+                },
+            ],
+        }
+    );
+}
+
+#[test]
+fn shell_control_conflicts_and_prefix_collisions_are_reported_together() {
+    let path = PathBuf::from("/cfg/tuivir.toml");
+    let env = Env {
+        config_file: Some(path.clone()),
+        ..Default::default()
+    };
+    let fs = MemoryFs::with(
+        path.clone(),
+        "[resource_shell]\nprefix = \"x\"\n\
+         [resource_shell.keybindings]\n\
+         focus_tuivir = [\"x\", \"q\"]\n\
+         toggle_zoom = [\"q\"]\n",
+    );
+
+    assert_eq!(
+        load(&env, &fs).unwrap_err(),
+        LoadError::Invalid {
+            path,
+            errors: vec![
+                ConfigError::ShellPrefixCollision {
+                    id: "focus_tuivir".to_owned(),
+                    key: "x".to_owned(),
+                },
+                ConfigError::ConflictingShellKey {
+                    key: "q".to_owned(),
+                    first: "focus_tuivir".to_owned(),
+                    second: "toggle_zoom".to_owned(),
+                },
+            ],
+        }
     );
 }
 

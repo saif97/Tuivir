@@ -7,7 +7,7 @@ mod defaults;
 pub use defaults::NUMBERED_RESOURCE_PANEL_CAPACITY;
 use defaults::{BUILTIN_COMMANDS, CommandDefinition, RESOURCE_PANEL_FOCUS_COMMANDS, WORKSPACE};
 
-use super::{Key, KeybindingError};
+use super::{Key, KeybindingError, ResourceShellControls, keybinding::duplicate_keys};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ResourceCommand {
@@ -169,6 +169,7 @@ pub struct EffectiveCommand {
 #[derive(Clone, Debug)]
 pub struct CommandRegistry {
     commands: Vec<EffectiveCommand>,
+    resource_shell_controls: ResourceShellControls,
 }
 
 impl Default for CommandRegistry {
@@ -205,7 +206,10 @@ impl CommandRegistry {
                     ],
                 }),
         );
-        Self { commands }
+        Self {
+            commands,
+            resource_shell_controls: ResourceShellControls::default(),
+        }
     }
 
     /// Layers a `[keybindings]` table over the compiled defaults.
@@ -231,7 +235,12 @@ impl CommandRegistry {
                     }
                 })
                 .collect::<Vec<_>>();
-            errors.extend(duplicate_keys(id, &parsed));
+            errors.extend(duplicate_keys(&parsed).into_iter().map(|key| {
+                KeybindingError::DuplicateKey {
+                    id: id.clone(),
+                    key: key.to_string(),
+                }
+            }));
             match registry
                 .commands
                 .iter_mut()
@@ -356,6 +365,17 @@ impl CommandRegistry {
             .find(|registered| registered.command == command)
             .and_then(|registered| registered.keys.first().copied())
     }
+
+    /// The validated controls that temporarily route Resource Shell Session
+    /// input back through Tuivir.
+    pub fn resource_shell_controls(&self) -> &ResourceShellControls {
+        &self.resource_shell_controls
+    }
+
+    pub fn with_resource_shell_controls(mut self, controls: ResourceShellControls) -> Self {
+        self.resource_shell_controls = controls;
+        self
+    }
 }
 
 fn effective_command(definition: &CommandDefinition) -> EffectiveCommand {
@@ -370,30 +390,4 @@ fn effective_command(definition: &CommandDefinition) -> EffectiveCommand {
             .map(|text| Key::parse(text).expect("compiled default keys are representable"))
             .collect(),
     }
-}
-
-/// Reports each key one Command lists more than once, naming it once however
-/// many times it was repeated.
-///
-/// Keys are compared after parsing, so two spellings of one key — `space` and a
-/// literal blank — are the duplicate they actually are.
-fn duplicate_keys(id: &str, keys: &[Key]) -> Vec<KeybindingError> {
-    let mut seen = Vec::new();
-    let mut duplicated = Vec::new();
-    for key in keys {
-        if seen.contains(key) {
-            if !duplicated.contains(key) {
-                duplicated.push(*key);
-            }
-        } else {
-            seen.push(*key);
-        }
-    }
-    duplicated
-        .into_iter()
-        .map(|key| KeybindingError::DuplicateKey {
-            id: id.to_owned(),
-            key: key.to_string(),
-        })
-        .collect()
 }

@@ -109,13 +109,7 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
                 .enlarged_resource_shell_identity()
                 .unwrap_or_else(|| "Resource Shell Session".to_owned());
             frame.render_widget(
-                Paragraph::new(Line::from(vec![
-                    Span::styled(
-                        identity,
-                        themed_style(ThemeRole::Primary).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw("  Ctrl-B q restore"),
-                ])),
+                Paragraph::new(resource_shell_header(state, identity)),
                 header,
             );
         }
@@ -194,6 +188,29 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
     }
 
     render_confirmation(state, frame);
+}
+
+fn shell_prefix_hint(prefix: crate::application::Key) -> String {
+    prefix
+        .to_string()
+        .replace("ctrl+", "Ctrl-")
+        .replace("alt+", "Alt-")
+}
+
+fn resource_shell_header(state: &AppState, identity: String) -> Line<'static> {
+    let controls = &state.resource_shell_controls;
+    let prefix = shell_prefix_hint(controls.prefix());
+    let mut spans = vec![
+        Span::styled(
+            identity,
+            themed_style(ThemeRole::Primary).add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(format!("  {prefix} {} restore", controls.focus_tuivir()[0])),
+    ];
+    if let Some(key) = controls.toggle_zoom().first() {
+        spans.push(Span::raw(format!("  {prefix} {key} resize")));
+    }
+    Line::from(spans)
 }
 
 fn render_confirmation(state: &AppState, frame: &mut Frame<'_>) {

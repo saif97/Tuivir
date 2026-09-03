@@ -116,6 +116,13 @@ resource_restart = ["r"]
 resource_resume = ["p"]
 resource_shell = ["E"]
 resource_delete = ["d"]
+
+[resource_shell]
+prefix = "ctrl+]"
+
+[resource_shell.keybindings]
+focus_tuivir = ["q"]
+toggle_zoom = ["z"]
 ```
 
 </details>
@@ -148,11 +155,18 @@ press `E` from a Resource to start or resume it enlarged. The same session stays
 alive while you navigate and moves between presentations without restarting.
 
 When terminal input is focused, keys — including `Ctrl-C` — go to the shell.
-Use the `Ctrl-B` prefix: `Ctrl-B q` returns input to Tuivir (and restores the
-Details layout from an enlarged shell), and `Ctrl-B z` toggles the current
-session's size. Quitting Tuivir asks for confirmation when Resource Shell
-Sessions are still live; confirmation ends only their local Provider CLI
-processes, not the underlying Resources.
+The Shell Prefix defaults to `Ctrl-]`; use `Ctrl-] q` to return input to
+Tuivir (and restore Details from an enlarged session), or `Ctrl-] z` to change
+the current session's presentation without releasing keyboard focus. Configure
+`resource_shell.prefix` with any supported key, and configure the ordered
+`focus_tuivir` and `toggle_zoom` Keybindings under
+`resource_shell.keybindings`. The first Keybinding is the inline hint;
+`focus_tuivir` must contain a key and an empty `toggle_zoom` list disables it.
+Repeating the Shell Prefix sends it literally to the Resource Shell Session,
+and any other following key sends both keys to the session. Quitting Tuivir
+asks for confirmation when Resource Shell Sessions are still live;
+confirmation ends only their local Provider CLI processes, not the underlying
+Resources.
 
 ## Releasing
 

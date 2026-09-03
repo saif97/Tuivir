@@ -20,7 +20,7 @@ use ratatui::style::Color;
 use tuivir::{
     application::{
         App, AppEvent, DetailView, ProviderRequest, Resource, ResourceCommand, ResourcePanel,
-        ResourceShellProcess, WorkspaceSnapshot,
+        ResourceShellControls, ResourceShellProcess, WorkspaceSnapshot,
     },
     application::{Command, ResourceShellEffect, ResourceShellSessionLifecycle},
     domain::{Provider, ProviderId, ResourceId, ResourcePanelId, ResourceState, TargetEnvironment},
@@ -492,7 +492,7 @@ fn quit_confirmation_claims_enter_before_an_unfocused_resource_shell() {
 }
 
 #[test]
-fn ctrl_b_q_releases_a_resource_shell_sessions_keyboard_focus() {
+fn ctrl_right_bracket_q_releases_a_resource_shell_sessions_keyboard_focus() {
     let session = tuivir::application::ResourceShellSessionId::new(7);
     let mut router = ShellInputRouter::default();
 
@@ -503,7 +503,7 @@ fn ctrl_b_q_releases_a_resource_shell_sessions_keyboard_focus() {
     assert!(matches!(
         router.route(
             session,
-            KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)
+            KeyEvent::new(KeyCode::Char(']'), KeyModifiers::CONTROL)
         ),
         ShellKeyRoute::ToTuivir
     ));
@@ -524,14 +524,14 @@ fn ctrl_b_q_releases_a_resource_shell_sessions_keyboard_focus() {
 }
 
 #[test]
-fn ctrl_b_z_toggles_the_resource_shell_sessions_size_without_reaching_its_pty() {
+fn ctrl_right_bracket_z_toggles_the_resource_shell_sessions_size_without_reaching_its_pty() {
     let session = tuivir::application::ResourceShellSessionId::new(7);
     let mut router = ShellInputRouter::default();
 
     assert!(matches!(
         router.route(
             session,
-            KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)
+            KeyEvent::new(KeyCode::Char(']'), KeyModifiers::CONTROL)
         ),
         ShellKeyRoute::ToTuivir
     ));
@@ -557,7 +557,7 @@ fn releasing_an_enlarged_resource_shell_restores_the_details_presentation() {
 }
 
 #[test]
-fn ctrl_b_q_restores_an_enlarged_session_after_its_process_exits() {
+fn ctrl_right_bracket_q_restores_an_enlarged_session_after_its_process_exits() {
     let mut app = app_on_a_loaded_workspace();
     app.invoke(Command::OpenShell);
     let session = app.state().resource_shell_sessions[0].id;
@@ -569,7 +569,7 @@ fn ctrl_b_q_restores_an_enlarged_session_after_its_process_exits() {
     assert!(matches!(
         router.route_without_terminal(
             session,
-            KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)
+            KeyEvent::new(KeyCode::Char(']'), KeyModifiers::CONTROL)
         ),
         ShellKeyRoute::ToTuivir
     ));
@@ -585,23 +585,23 @@ fn ctrl_b_q_restores_an_enlarged_session_after_its_process_exits() {
 }
 
 #[test]
-fn ctrl_b_ctrl_b_sends_one_literal_prefix_to_the_resource_shell_session() {
+fn repeating_ctrl_right_bracket_sends_one_literal_prefix_to_the_resource_shell_session() {
     let session = tuivir::application::ResourceShellSessionId::new(7);
     let mut router = ShellInputRouter::default();
 
     assert!(matches!(
         router.route(
             session,
-            KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)
+            KeyEvent::new(KeyCode::Char(']'), KeyModifiers::CONTROL)
         ),
         ShellKeyRoute::ToTuivir
     ));
     assert!(matches!(
         router.route(
             session,
-            KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)
+            KeyEvent::new(KeyCode::Char(']'), KeyModifiers::CONTROL)
         ),
-        ShellKeyRoute::ToPty(bytes) if bytes == [0x02]
+        ShellKeyRoute::ToPty(bytes) if bytes == [0x1d]
     ));
 }
 
@@ -613,13 +613,102 @@ fn a_prefix_followed_by_an_unrecognised_key_reaches_the_resource_shell_session()
     assert!(matches!(
         router.route(
             session,
-            KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)
+            KeyEvent::new(KeyCode::Char(']'), KeyModifiers::CONTROL)
         ),
         ShellKeyRoute::ToTuivir
     ));
     assert!(matches!(
         router.route(session, KeyEvent::new(KeyCode::F(13), KeyModifiers::NONE)),
-        ShellKeyRoute::ToPty(bytes) if bytes == b"\x02\x1b[25~"
+        ShellKeyRoute::ToPty(bytes) if bytes == b"\x1d\x1b[25~"
+    ));
+}
+
+#[test]
+fn a_function_key_can_be_the_configured_shell_prefix() {
+    let session = tuivir::application::ResourceShellSessionId::new(7);
+    let mut router = ShellInputRouter::new(ResourceShellControls::new(
+        tuivir::application::Key::parse("f5").expect("f5 is a key"),
+        vec![tuivir::application::Key::parse("x").expect("x is a key")],
+        vec![],
+    ));
+
+    assert!(matches!(
+        router.route(session, KeyEvent::new(KeyCode::F(5), KeyModifiers::NONE)),
+        ShellKeyRoute::ToTuivir
+    ));
+    assert!(matches!(
+        router.route(
+            session,
+            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)
+        ),
+        ShellKeyRoute::Released
+    ));
+}
+
+#[test]
+fn ctrl_b_is_forwarded_without_a_compatibility_prefix() {
+    let session = tuivir::application::ResourceShellSessionId::new(7);
+    let mut router = ShellInputRouter::default();
+
+    assert!(matches!(
+        router.route(
+            session,
+            KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)
+        ),
+        ShellKeyRoute::ToPty(bytes) if bytes == [0x02]
+    ));
+}
+
+#[test]
+fn modified_and_named_shell_prefixes_forward_their_exact_terminal_bytes() {
+    let session = tuivir::application::ResourceShellSessionId::new(7);
+    let mut alt_router = ShellInputRouter::new(ResourceShellControls::new(
+        tuivir::application::Key::parse("alt+x").expect("alt+x is a key"),
+        vec![tuivir::application::Key::parse("q").expect("q is a key")],
+        vec![],
+    ));
+
+    assert!(matches!(
+        alt_router.route(
+            session,
+            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT)
+        ),
+        ShellKeyRoute::ToTuivir
+    ));
+    assert!(matches!(
+        alt_router.route(
+            session,
+            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT)
+        ),
+        ShellKeyRoute::ToPty(bytes) if bytes == b"\x1bx"
+    ));
+    assert!(matches!(
+        alt_router.route(
+            session,
+            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT)
+        ),
+        ShellKeyRoute::ToTuivir
+    ));
+    assert!(matches!(
+        alt_router.route(session, KeyEvent::new(KeyCode::F(13), KeyModifiers::NONE)),
+        ShellKeyRoute::ToPty(bytes) if bytes == b"\x1bx\x1b[25~"
+    ));
+
+    let mut backtab_router = ShellInputRouter::new(ResourceShellControls::new(
+        tuivir::application::Key::parse("shift+tab").expect("shift+tab is a key"),
+        vec![tuivir::application::Key::parse("q").expect("q is a key")],
+        vec![],
+    ));
+    assert!(matches!(
+        backtab_router.route(
+            session,
+            KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)
+        ),
+        ShellKeyRoute::ToTuivir
+    ));
+    assert!(matches!(
+        backtab_router.route(session, KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)),
+        ShellKeyRoute::ToPty(bytes) if bytes == b"\x1b[Z"
     ));
 }
 
