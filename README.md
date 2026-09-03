@@ -118,7 +118,7 @@ resource_shell = ["E"]
 resource_delete = ["d"]
 
 [resource_shell]
-prefix = "ctrl+]"
+prefix = "ctrl+t"
 
 [resource_shell.keybindings]
 focus_tuivir = ["q"]
@@ -155,8 +155,8 @@ press `E` from a Resource to start or resume it enlarged. The same session stays
 alive while you navigate and moves between presentations without restarting.
 
 When terminal input is focused, keys — including `Ctrl-C` — go to the shell.
-The Shell Prefix defaults to `Ctrl-]`; use `Ctrl-] q` to return input to
-Tuivir (and restore Details from an enlarged session), or `Ctrl-] z` to change
+The Shell Prefix defaults to `Ctrl-T`; use `Ctrl-T q` to return input to
+Tuivir (and restore Details from an enlarged session), or `Ctrl-T z` to change
 the current session's presentation without releasing keyboard focus. Configure
 `resource_shell.prefix` with any supported key, and configure the ordered
 `focus_tuivir` and `toggle_zoom` Keybindings under

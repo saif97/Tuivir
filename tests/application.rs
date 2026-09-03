@@ -1433,7 +1433,7 @@ fn an_enlarged_resource_shell_keeps_its_identity_and_restore_hint_above_the_term
         "rendered screen:\n{screen}"
     );
     assert!(
-        screen.contains("Ctrl-] q restore") && screen.contains("Ctrl-] z resize"),
+        screen.contains("Ctrl-T q restore") && screen.contains("Ctrl-T z resize"),
         "rendered screen:\n{screen}"
     );
     assert!(
