@@ -725,7 +725,7 @@ async fn run(
                             .is_some();
                         let route = app
                             .state()
-                            .visible_running_resource_shell_session()
+                            .keyboard_running_resource_shell_session()
                             .map(|session| shell_input.route(session.id, key))
                             .or_else(|| {
                                 enlarged.then(|| {
@@ -738,7 +738,7 @@ async fn run(
                             });
                         match route {
                             Some(ShellKeyRoute::ToPty(bytes)) => {
-                                let session = app.state().visible_running_resource_shell_session()
+                                let session = app.state().keyboard_running_resource_shell_session()
                                     .expect("a routed Resource Shell Session stays visible");
                                 let _ = resource_shell_runtime.write(session.id, bytes);
                                 (ShellControl::Continue, Vec::new())
@@ -755,7 +755,7 @@ async fn run(
                                 if command == Some(Command::CopyDetails)
                                     && let Some(session) = app
                                         .state()
-                                        .visible_running_resource_shell_session()
+                                        .keyboard_running_resource_shell_session()
                                     && let Some(text) = resource_shell_runtime.selected_text(session.id)
                                 {
                                     if let Err(error) = clipboard.copy(&text) {
@@ -813,7 +813,7 @@ async fn run(
                     Event::Paste(text) => {
                         if let Some(session) = app
                             .state()
-                            .visible_running_resource_shell_session()
+                            .keyboard_running_resource_shell_session()
                         {
                             let bracketed_paste = resource_shell_runtime
                                 .input_modes(session.id)
