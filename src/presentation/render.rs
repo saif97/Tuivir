@@ -191,10 +191,18 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
 }
 
 fn shell_prefix_hint(prefix: crate::application::Key) -> String {
-    prefix
+    let hint = prefix
         .to_string()
         .replace("ctrl+", "Ctrl-")
-        .replace("alt+", "Alt-")
+        .replace("alt+", "Alt-");
+    if let Some(key) = hint.strip_prefix("Ctrl-")
+        && key.len() == 1
+        && key.as_bytes()[0].is_ascii_alphabetic()
+    {
+        format!("Ctrl-{}", key.to_ascii_uppercase())
+    } else {
+        hint
+    }
 }
 
 fn resource_shell_header(state: &AppState, identity: String) -> Line<'static> {

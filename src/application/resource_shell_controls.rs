@@ -12,7 +12,7 @@ pub struct ResourceShellControls {
 impl Default for ResourceShellControls {
     fn default() -> Self {
         Self::new(
-            Key::character(']').with_ctrl(),
+            Key::character('t').with_ctrl(),
             vec![Key::character('q')],
             vec![Key::character('z')],
         )
