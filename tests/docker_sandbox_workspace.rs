@@ -414,7 +414,7 @@ async fn discovered_docker_sandbox_omits_an_unselected_environment() {
         "snapshot-backed Info starts no Provider request: {detail_requests:?}"
     );
     assert!(screen.contains("Docker Sandbox"), "{screen}");
-    assert!(screen.contains("[1] Docker Sandbox"), "{screen}");
+    assert!(screen.contains("Docker Sandbox"), "{screen}");
     assert!(!screen.contains("Docker Sandbox ·"), "{screen}");
     assert!(screen.contains("Sandboxes"), "{screen}");
     assert!(screen.contains("claude-tuivir"), "{screen}");
@@ -449,7 +449,7 @@ async fn reachable_docker_sandbox_without_sandboxes_renders_a_distinct_empty_sta
     app.update(refresh_completed(request, sandboxes.refresh(&cli).await));
 
     let screen = render_to_text(app.state(), 100, 24);
-    assert!(screen.contains("[1] Docker Sandbox"), "{screen}");
+    assert!(screen.contains("Docker Sandbox"), "{screen}");
     assert!(screen.contains("No resources"), "{screen}");
     assert!(
         !screen.contains("No Docker Sandbox sandboxes found"),

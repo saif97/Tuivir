@@ -232,7 +232,6 @@ fn shell_focus_and_navigation_defaults_resolve_in_their_own_scopes() {
         (CommandScope::ProviderSelector, "q", Command::Quit),
         (CommandScope::ResourceView, "?", Command::ToggleHelp),
         (CommandScope::ResourceView, "ctrl+r", Command::Refresh),
-        (CommandScope::ResourceView, "1", Command::FocusProviders),
         (
             CommandScope::ResourceView,
             "2",
@@ -254,6 +253,7 @@ fn shell_focus_and_navigation_defaults_resolve_in_their_own_scopes() {
         (CommandScope::ResourceView, "down", Command::SelectNext),
         (CommandScope::ResourceView, "k", Command::SelectPrevious),
         (CommandScope::ResourceView, "up", Command::SelectPrevious),
+        (CommandScope::ResourceView, "e", Command::OpenShellInDetails),
         (CommandScope::ProviderSelector, "j", Command::SelectNext),
         (CommandScope::ProviderSelector, "k", Command::SelectPrevious),
         (CommandScope::ResourceView, "]", Command::NextWorkspace),
