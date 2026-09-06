@@ -172,6 +172,19 @@ impl AppState {
             .filter(|session| session.lifecycle == ResourceShellSessionLifecycle::Running)
     }
 
+    /// The running visible session that owns keyboard input. A Shell Detail
+    /// View stays visible while a Resource Panel has focus, but it must not
+    /// intercept that panel's navigation Commands.
+    pub fn keyboard_running_resource_shell_session(&self) -> Option<&ResourceShellSession> {
+        if self.enlarged_resource_shell_session().is_some()
+            || self.focused_pane == FocusedPane::Details
+        {
+            self.visible_running_resource_shell_session()
+        } else {
+            None
+        }
+    }
+
     /// The session occupying Tuivir's enlarged presentation, if any.
     pub fn enlarged_resource_shell_session(&self) -> Option<&ResourceShellSession> {
         let ResourceShellPresentation::Enlarged(session_id) = self.resource_shell_presentation
@@ -622,7 +635,9 @@ impl App {
                 requests
             }
             Command::FocusProviders => {
-                self.state.focused_pane = FocusedPane::Providers;
+                // The provider row switches Active Workspaces but is not a
+                // keyboard Pane. Keep navigation in the Resource Panels.
+                self.state.focused_pane = FocusedPane::Resources;
                 Vec::new()
             }
             Command::FocusResourcePanel(index) => {
@@ -713,6 +728,10 @@ impl App {
                 self.open_shell();
                 Vec::new()
             }
+            Command::OpenShellInDetails => {
+                self.open_shell_in_details();
+                Vec::new()
+            }
             Command::StartResourceShell => {
                 self.start_selected_resource_shell();
                 Vec::new()
@@ -731,7 +750,7 @@ impl App {
                 if index >= self.state.providers.len() {
                     return Vec::new();
                 }
-                self.state.focused_pane = FocusedPane::Providers;
+                self.state.focused_pane = FocusedPane::Resources;
                 self.activate_provider(index)
             }
             Command::SelectResource { panel, resource } => {
@@ -1157,6 +1176,18 @@ impl App {
         }
     }
 
+    /// Opens the selected Resource's Shell Detail View Tab in Details.
+    fn open_shell_in_details(&mut self) {
+        let started = self
+            .state
+            .active_workspace_mut()
+            .is_some_and(ProviderWorkspaceState::select_resource_shell_tab);
+        if started {
+            self.state.focused_pane = FocusedPane::Details;
+            self.start_selected_resource_shell();
+        }
+    }
+
     fn start_selected_resource_shell(&mut self) -> Option<ResourceShellSessionId> {
         let provider = self.state.active_workspace()?;
         if !provider.selected_resource_shell_tab() {
@@ -1255,7 +1286,7 @@ impl App {
                         Command::Resource(command) if !available_commands.contains(&command) => {
                             format!("{} (unavailable)", registered.description)
                         }
-                        Command::OpenShell if !offers_a_shell => {
+                        Command::OpenShell | Command::OpenShellInDetails if !offers_a_shell => {
                             format!("{} (unavailable)", registered.description)
                         }
                         _ => registered.description.to_owned(),
@@ -1298,25 +1329,22 @@ impl App {
 
     fn cycle_focus(&mut self, delta: isize) {
         let Some(provider) = self.state.active_workspace() else {
-            self.state.focused_pane = FocusedPane::Providers;
+            self.state.focused_pane = FocusedPane::Resources;
             return;
         };
         let Some(panel_count) = provider.resource_panel_count() else {
-            self.state.focused_pane = FocusedPane::Providers;
+            self.state.focused_pane = FocusedPane::Resources;
             return;
         };
         let current = match self.state.focused_pane {
+            FocusedPane::Resources => provider.focused_resource_panel_index().unwrap_or(0),
+            FocusedPane::Details => panel_count,
             FocusedPane::Providers => 0,
-            FocusedPane::Resources => provider
-                .focused_resource_panel_index()
-                .map_or(0, |index| index + 1),
-            FocusedPane::Details => panel_count + 1,
         };
-        let pane_count = panel_count + 2;
+        let pane_count = panel_count + 1;
         let next = (current as isize + delta).rem_euclid(pane_count as isize) as usize;
         match next {
-            0 => self.state.focused_pane = FocusedPane::Providers,
-            next if next <= panel_count => self.focus_resource_panel(next - 1),
+            next if next < panel_count => self.focus_resource_panel(next),
             _ => self.state.focused_pane = FocusedPane::Details,
         }
     }

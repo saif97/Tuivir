@@ -1119,7 +1119,7 @@ fn clicking_a_provider_workspace_makes_it_active() {
     assert_eq!(app.state().active_provider, Some(0));
     assert_eq!(
         app.state().focused_pane,
-        tuivir::application::FocusedPane::Providers
+        tuivir::application::FocusedPane::Resources
     );
 }
 

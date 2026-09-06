@@ -1525,6 +1525,53 @@ fn selecting_the_shell_detail_view_tab_is_inert() {
 }
 
 #[test]
+fn opening_a_shell_in_details_selects_its_tab_and_starts_the_session() {
+    let mut app = App::new();
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
+
+    app.invoke(Command::OpenShellInDetails);
+
+    assert_eq!(app.state().focused_pane, FocusedPane::Details);
+    assert!(app.state().enlarged_resource_shell_session().is_none());
+    assert_eq!(app.state().resource_shell_sessions.len(), 1);
+}
+
+#[test]
+fn a_visible_shell_only_receives_keyboard_input_while_details_has_focus() {
+    let mut app = App::new();
+    ready_workspace(
+        &mut app,
+        docker_discovery(),
+        snapshot(&[("container-a", "api", "nginx:1.27")]),
+    );
+    app.invoke(Command::OpenShellInDetails);
+    let session_id = app.state().resource_shell_sessions[0].id;
+    app.update(AppEvent::ResourceShellStarted { session_id });
+
+    assert_eq!(
+        app.state().keyboard_running_resource_shell_session(),
+        Some(&app.state().resource_shell_sessions[0])
+    );
+
+    app.invoke(Command::FocusResourcePanel(0));
+
+    assert!(
+        app.state()
+            .visible_running_resource_shell_session()
+            .is_some()
+    );
+    assert!(
+        app.state()
+            .keyboard_running_resource_shell_session()
+            .is_none()
+    );
+}
+
+#[test]
 fn enter_on_the_shell_tab_starts_one_session_with_the_provider_command() {
     let mut app = App::new();
     ready_workspace(
@@ -2128,12 +2175,7 @@ fn provider_bar_precedes_the_workspace_panes() {
 
     let screen = render_to_text(app.state(), 100, 24);
     let mut lines = screen.lines();
-    assert!(
-        lines
-            .next()
-            .expect("provider row")
-            .starts_with("[1] Docker")
-    );
+    assert!(lines.next().expect("provider row").starts_with("Docker"));
     assert!(
         lines
             .next()
@@ -2152,7 +2194,7 @@ fn numbered_panels_render_their_navigation_shortcuts() {
     );
 
     let screen = render_to_text(app.state(), 100, 24);
-    assert!(screen.starts_with("[1] Docker"));
+    assert!(screen.starts_with("Docker"));
     assert!(screen.contains("[2] Containers"));
 }
 
@@ -2255,7 +2297,7 @@ fn bracket_keys_switch_the_active_workspace() {
         KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE),
     );
     assert_eq!(requests.len(), 1, "new Active Workspace is refreshed");
-    assert!(render_to_text(app.state(), 100, 24).starts_with("[1] Docker   [1] Fixture"));
+    assert!(render_to_text(app.state(), 100, 24).starts_with("Docker   Fixture"));
 
     let (_, requests) = handle_key(
         &mut app,
@@ -2264,11 +2306,11 @@ fn bracket_keys_switch_the_active_workspace() {
     // Returning refreshes Docker and asks again for the detail view whose load
     // was abandoned on the way out.
     assert_eq!(requests.len(), 1, "unexpected requests: {requests:?}");
-    assert!(render_to_text(app.state(), 100, 24).starts_with("[1] Docker   [1] Fixture"));
+    assert!(render_to_text(app.state(), 100, 24).starts_with("Docker   Fixture"));
 }
 
 #[test]
-fn numbered_provider_panel_activates_incus_and_requests_its_refresh() {
+fn workspace_key_activates_incus_and_requests_its_refresh() {
     let mut app = App::new();
     ready_workspace(
         &mut app,
@@ -2280,14 +2322,9 @@ fn numbered_provider_panel_activates_incus_and_requests_its_refresh() {
         "inactive workspaces remain idle"
     );
 
-    let (_, focus_requests) = handle_key(
-        &mut app,
-        KeyEvent::new(KeyCode::Char('1'), KeyModifiers::NONE),
-    );
-    assert!(focus_requests.is_empty());
     let (_, activation_requests) = handle_key(
         &mut app,
-        KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
+        KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE),
     );
 
     let request = activation_requests
@@ -2301,7 +2338,7 @@ fn numbered_provider_panel_activates_incus_and_requests_its_refresh() {
             ..
         } if provider_id == ProviderId::new("incus")
     ));
-    assert!(render_to_text(app.state(), 100, 24).starts_with("▶ [1] Docker   [1] Incus"));
+    assert!(render_to_text(app.state(), 100, 24).starts_with("Docker   Incus"));
 }
 
 #[test]
@@ -2637,7 +2674,7 @@ fn focus_accents_a_pane_title_and_edge_without_a_thick_border() {
 
     app.invoke(Command::FocusProviders);
     let screen = render_to_text(app.state(), 80, 30);
-    assert!(screen.starts_with("▶ [1] Docker"), "rendered:\n{screen}");
+    assert!(screen.contains("▶ [3] Images"), "rendered:\n{screen}");
 }
 
 #[test]
@@ -2693,7 +2730,7 @@ fn provider_workspaces_render_as_navigation_segments_with_the_active_target_on_t
     let screen = render_to_text(app.state(), 80, 30);
     let provider_bar = screen.lines().next().expect("a Provider bar");
     assert!(
-        provider_bar.starts_with("[1] Docker   [1] Fixture"),
+        provider_bar.starts_with("Docker   Fixture"),
         "rendered:\n{screen}"
     );
     assert!(
@@ -2727,7 +2764,7 @@ fn the_default_target_environment_stays_visible_beside_the_provider_navigation()
 }
 
 #[test]
-fn the_active_workspace_stays_filled_when_the_providers_pane_has_focus() {
+fn the_active_workspace_stays_filled_without_focusing_the_provider_row() {
     let mut app = App::new();
     ready_workspace(&mut app, docker_discovery(), docker_multi_panel_snapshot());
     app.update(fixture_discovery().into_event());
@@ -2745,8 +2782,8 @@ fn the_active_workspace_stays_filled_when_the_providers_pane_has_focus() {
 
     app.invoke(Command::FocusProviders);
     assert!(
-        render_to_text(app.state(), 80, 30).starts_with("▶ [1] Docker   [1] Fixture"),
-        "the Providers Pane carries its own focus accent"
+        !render_to_text(app.state(), 80, 30).starts_with("▶ Docker   Fixture"),
+        "the provider row is not a focusable Pane"
     );
     assert_eq!(
         background_of(app.state(), 80, 30, "Docker"),
@@ -2810,14 +2847,13 @@ fn removing_the_focused_resource_panel_reconciles_its_command_scope() {
 }
 
 #[test]
-fn focus_cycles_through_provider_order_and_wraps() {
+fn focus_cycles_between_resource_panels_and_details_without_the_provider_row() {
     let mut app = App::new();
     ready_workspace(&mut app, docker_discovery(), docker_multi_panel_snapshot());
 
     let expected = [
         (FocusedPane::Resources, Some("images")),
         (FocusedPane::Details, None),
-        (FocusedPane::Providers, None),
         (FocusedPane::Resources, Some("containers")),
     ];
     for (focused, panel_id) in expected {
@@ -2832,7 +2868,17 @@ fn focus_cycles_through_provider_order_and_wraps() {
     }
 
     app.invoke(Command::FocusPreviousPane);
-    assert_eq!(app.state().focused_pane, FocusedPane::Providers);
+    assert_eq!(app.state().focused_pane, FocusedPane::Details);
+}
+
+#[test]
+fn provider_focus_command_keeps_focus_in_the_resource_panels() {
+    let mut app = App::new();
+    ready_workspace(&mut app, docker_discovery(), docker_multi_panel_snapshot());
+
+    app.invoke(Command::FocusProviders);
+
+    assert_eq!(app.state().focused_pane, FocusedPane::Resources);
 }
 
 #[test]
@@ -3782,7 +3828,7 @@ fn capital_k_moves_the_resource_selection_five_items_back_and_clamps_at_the_star
 /// Provider selector leaves `J` bound to nothing rather than moving the
 /// resource selection out from under the user.
 #[test]
-fn fast_navigation_does_nothing_while_the_provider_selector_has_focus() {
+fn provider_row_does_not_take_resource_navigation_focus() {
     let mut app = App::new();
     let initial = refresh_request(app.update(docker_discovery().into_event()));
     app.update(refresh_completed(initial, Ok(seven_resources())));
@@ -3792,7 +3838,7 @@ fn fast_navigation_does_nothing_while_the_provider_selector_has_focus() {
         KeyEvent::new(KeyCode::Char('1'), KeyModifiers::NONE),
     );
 
-    for pressed in ['J', 'K'] {
+    for (pressed, expected) in [('J', "Image: i5"), ('K', "Image: i0")] {
         let (control, requests) = handle_key(
             &mut app,
             KeyEvent::new(KeyCode::Char(pressed), KeyModifiers::SHIFT),
@@ -3806,8 +3852,8 @@ fn fast_navigation_does_nothing_while_the_provider_selector_has_focus() {
             "{pressed} left the Active Workspace alone"
         );
         assert!(
-            render_to_text(app.state(), 100, 24).contains("Image: i0"),
-            "{pressed} left the resource selection on the first resource"
+            render_to_text(app.state(), 100, 24).contains(expected),
+            "{pressed} moves the Resource Panel selection"
         );
     }
 }
@@ -4003,7 +4049,7 @@ fn escape_does_not_quit_when_no_modal_is_open() {
 #[test]
 fn an_overridden_focus_key_renders_its_effective_hint() {
     let registry =
-        CommandRegistry::effective(&[("focus_providers".to_owned(), vec!["f10".to_owned()])])
+        CommandRegistry::effective(&[("focus_resources".to_owned(), vec!["f10".to_owned()])])
             .expect("a valid override");
     let mut app = App::with_registry(registry);
     ready_workspace(
@@ -4014,11 +4060,11 @@ fn an_overridden_focus_key_renders_its_effective_hint() {
 
     let screen = render_to_text(app.state(), 100, 24);
     assert!(
-        screen.starts_with("[f10] Docker"),
+        screen.contains("[f10] Containers"),
         "the panel hint follows the effective binding:\n{screen}"
     );
     assert!(
-        !screen.contains("[1] Docker"),
+        !screen.contains("[2] Containers"),
         "the replaced default hint is gone:\n{screen}"
     );
 }
@@ -4046,7 +4092,7 @@ fn an_unbound_focus_command_omits_its_inline_hint() {
 fn one_override_changes_dispatch_help_and_the_inline_hint_together() {
     let registry = CommandRegistry::effective(&[
         ("resource_restart".to_owned(), vec!["x".to_owned()]),
-        ("focus_providers".to_owned(), vec!["f10".to_owned()]),
+        ("focus_resources".to_owned(), vec!["f10".to_owned()]),
     ])
     .expect("a valid override set");
     let mut app = App::with_registry(registry);
@@ -4058,7 +4104,7 @@ fn one_override_changes_dispatch_help_and_the_inline_hint_together() {
 
     // The inline hint follows the override.
     let screen = render_to_text(app.state(), 100, 24);
-    assert!(screen.starts_with("[f10] Docker"), "rendered:\n{screen}");
+    assert!(screen.contains("[f10] Containers"), "rendered:\n{screen}");
 
     // Contextual help follows the override.
     handle_key(

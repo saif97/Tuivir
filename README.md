@@ -78,7 +78,6 @@ app_quit = ["q"]
 app_help = ["?"]
 app_refresh = ["ctrl+r"]
 
-focus_providers = ["1"]
 focus_resources = ["2"]
 focus_resources_2 = ["3"]
 focus_resources_3 = ["4"]
@@ -149,10 +148,10 @@ footer. Run `tuivir --help` for command-line options.
 
 ### Resource Shell Sessions
 
-Resources that support a shell expose a Shell Detail View Tab. Select that tab
-and press Enter to start its embedded Resource Shell Session in Details, or
-press `E` from a Resource to start or resume it enlarged. The same session stays
-alive while you navigate and moves between presentations without restarting.
+Resources that support a shell expose a Shell Detail View Tab. Press `e` from a
+Resource to start or resume its embedded Resource Shell Session in Details, or
+press `E` to start or resume it enlarged. The same session stays alive while you
+navigate and moves between presentations without restarting.
 
 When terminal input is focused, keys — including `Ctrl-C` — go to the shell.
 The Shell Prefix defaults to `Ctrl-T`; use `Ctrl-T q` to return input to

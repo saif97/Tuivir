@@ -88,6 +88,9 @@ pub enum Command {
     /// Starts or resumes the selected Resource's Shell Detail View Tab in the
     /// enlarged presentation.
     OpenShell,
+    /// Starts or resumes the selected Resource's Shell Detail View Tab in
+    /// Details.
+    OpenShellInDetails,
     /// Explicitly starts the selected Resource's Shell Detail View Tab.
     StartResourceShell,
     /// Moves the visible Resource Shell Session between Details and its
@@ -187,9 +190,8 @@ impl CommandRegistry {
             .collect::<Vec<_>>();
         let focus_position = commands
             .iter()
-            .position(|registered| registered.command == Command::FocusProviders)
-            .expect("the Provider selector focus Command is registered")
-            + 1;
+            .position(|registered| registered.command == Command::FocusDetails)
+            .expect("the Details focus Command is registered");
         commands.splice(
             focus_position..focus_position,
             RESOURCE_PANEL_FOCUS_COMMANDS

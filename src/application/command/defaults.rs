@@ -119,13 +119,6 @@ pub(super) const BUILTIN_COMMANDS: &[CommandDefinition] = &[
         default_keys: &["ctrl+r"],
     },
     CommandDefinition {
-        id: "focus_providers",
-        description: "Focus providers",
-        command: Command::FocusProviders,
-        scopes: WORKSPACE,
-        default_keys: &["1"],
-    },
-    CommandDefinition {
         id: "focus_details",
         description: "Focus Details",
         command: Command::FocusDetails,
@@ -290,6 +283,13 @@ pub(super) const BUILTIN_COMMANDS: &[CommandDefinition] = &[
         command: Command::Resource(ResourceCommand::Resume),
         scopes: &[CommandScope::ResourceView],
         default_keys: &["p"],
+    },
+    CommandDefinition {
+        id: "resource_shell_details",
+        description: "Open Shell in Details",
+        command: Command::OpenShellInDetails,
+        scopes: RESOURCE_VIEW,
+        default_keys: &["e"],
     },
     CommandDefinition {
         id: "resource_shell",
