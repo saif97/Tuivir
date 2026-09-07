@@ -1,4 +1,5 @@
-# Tuivir
+# Tuivir 
+> Rhymes with tweezer & beaver
 
 A terminal interface for inspecting and operating resources managed by local
 virtualization and container providers.
