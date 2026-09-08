@@ -6,7 +6,7 @@ virtualization and container providers.
 
 <p align="center">
   <img
-    src="https://github.com/user-attachments/assets/c6f9713c-a175-4d1a-961a-dd24618eaecc"
+    src="https://github.com/user-attachments/assets/0ec5cbcf-2fbe-4e95-a393-72ff6e6b54c5"
     alt="Tuivir displaying Docker containers, images, volumes, and resource details"
     width="100%"
   />
