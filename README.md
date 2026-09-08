@@ -1,12 +1,12 @@
-# Tuivir 
-> Rhymes with tweezer & beaver
+# Tuivir
 
-A terminal interface for inspecting and operating resources managed by local
-virtualization and container providers.
+> “Rhymes” with *tweezer* & *beaver*.
+
+A provider-agnostic TUI for managing and inspecting VMs, containers, and microVMs.
 
 <p align="center">
   <img
-    src="https://github.com/user-attachments/assets/c6f9713c-a175-4d1a-961a-dd24618eaecc"
+    src="https://github.com/user-attachments/assets/0ec5cbcf-2fbe-4e95-a393-72ff6e6b54c5"
     alt="Tuivir displaying Docker containers, images, volumes, and resource details"
     width="100%"
   />
@@ -24,13 +24,6 @@ On Apple Silicon or Intel macOS:
 
 ```sh
 brew install saif97/tap/tuivir
-```
-
-Upgrade an existing installation with:
-
-```sh
-brew update
-brew upgrade tuivir
 ```
 
 ### Build from source
@@ -146,34 +139,6 @@ tuivir
 
 The interface shows the available commands and their key bindings in the
 footer. Run `tuivir --help` for command-line options.
-
-### Resource Shell Sessions
-
-Resources that support a shell expose a Shell Detail View Tab. Press `e` from a
-Resource to start or resume its embedded Resource Shell Session in Details, or
-press `E` to start or resume it enlarged. The same session stays alive while you
-navigate and moves between presentations without restarting.
-
-When terminal input is focused, keys — including `Ctrl-C` — go to the shell.
-The Shell Prefix defaults to `Ctrl-T`; use `Ctrl-T q` to return input to
-Tuivir (and restore Details from an enlarged session), or `Ctrl-T z` to change
-the current session's presentation without releasing keyboard focus. Configure
-`resource_shell.prefix` with any supported key, and configure the ordered
-`focus_tuivir` and `toggle_zoom` Keybindings under
-`resource_shell.keybindings`. The first Keybinding is the inline hint;
-`focus_tuivir` must contain a key and an empty `toggle_zoom` list disables it.
-Repeating the Shell Prefix sends it literally to the Resource Shell Session,
-and any other following key sends both keys to the session. Quitting Tuivir
-asks for confirmation when Resource Shell Sessions are still live;
-confirmation ends only their local Provider CLI processes, not the underlying
-Resources.
-
-## Releasing
-
-A maintainer publishes the Cargo version by pushing its matching stable tag,
-such as `v0.1.0`. If publication fails and leaves a draft GitHub Release,
-delete that draft and rerun the same GitHub Actions run. Correct an already
-published release with a new version rather than replacing its tag or assets.
 
 Tuivir is available under either the MIT License or the Apache License, Version
 2.0. See [LICENSE-MIT](LICENSE-MIT) and [LICENSE-APACHE](LICENSE-APACHE).
