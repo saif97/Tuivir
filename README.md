@@ -140,5 +140,15 @@ tuivir
 The interface shows the available commands and their key bindings in the
 footer. Run `tuivir --help` for command-line options.
 
+## Provider roadmap
+- [x] Docker
+- [x] Incus
+- [x] Docker Sandbox
+- [ ] Tart
+- [ ] Apple `container`
+- [ ] Podman
+
+- [ ] set resource size, ram, vCPU, etc
+
 Tuivir is available under either the MIT License or the Apache License, Version
 2.0. See [LICENSE-MIT](LICENSE-MIT) and [LICENSE-APACHE](LICENSE-APACHE).
