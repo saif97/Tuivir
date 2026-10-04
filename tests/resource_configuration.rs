@@ -701,3 +701,17 @@ async fn dispatched_configuration_stays_with_its_original_resource_and_freezes_i
     assert!(screen.contains("CPU limit (CPUs): 2"), "{screen}");
     cli.assert_exhausted();
 }
+
+#[tokio::test]
+async fn configuration_form_keeps_contextual_help_and_detail_tab_navigation() {
+    let (mut app, runtime) = docker_app(DOCKER_INITIAL).await;
+    let requests = app.invoke(Command::ActivateDetailView(4));
+    drive(&mut app, &runtime, requests).await;
+    press(&mut app, "?");
+    let screen = render_to_text(app.state(), 180, 36);
+    assert!(screen.contains("Apply Configuration Draft"), "{screen}");
+    assert!(screen.contains("Edit selected field"), "{screen}");
+    press(&mut app, "esc");
+    assert!(press(&mut app, "right").is_empty());
+    assert!(render_to_text(app.state(), 180, 36).contains("[ Shell ]"));
+}

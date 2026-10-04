@@ -82,6 +82,7 @@ pub(super) const WORKSPACE: &[CommandScope] = &[
 ];
 const SELECTABLE: &[CommandScope] = &[CommandScope::ProviderSelector, CommandScope::ResourceView];
 const RESOURCE_VIEW: &[CommandScope] = &[CommandScope::ResourceView];
+const DETAIL_TABS: &[CommandScope] = &[CommandScope::Details, CommandScope::ConfigurationForm];
 const DETAILS: &[CommandScope] = &[CommandScope::Details];
 /// Every modal scope. A modal replaces the workspace scope while it is open.
 const MODAL: &[CommandScope] = &[
@@ -157,6 +158,7 @@ pub(super) const BUILTIN_COMMANDS: &[CommandDefinition] = &[
             CommandScope::ResourceView,
             CommandScope::Details,
             CommandScope::HelpOverlay,
+            CommandScope::ConfigurationForm,
         ],
         default_keys: &["?"],
     },
@@ -237,14 +239,14 @@ pub(super) const BUILTIN_COMMANDS: &[CommandDefinition] = &[
         id: "detail_view_next",
         description: "Next detail view",
         command: Command::NextDetailView,
-        scopes: DETAILS,
+        scopes: DETAIL_TABS,
         default_keys: &["l", "right"],
     },
     CommandDefinition {
         id: "detail_view_previous",
         description: "Previous detail view",
         command: Command::PreviousDetailView,
-        scopes: DETAILS,
+        scopes: DETAIL_TABS,
         default_keys: &["h", "left"],
     },
     CommandDefinition {

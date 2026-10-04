@@ -1510,7 +1510,7 @@ impl App {
         }
         let scope = match &self.state.focused_pane {
             FocusedPane::Resources => CommandScope::ResourceView,
-            FocusedPane::Details => CommandScope::Details,
+            FocusedPane::Details => self.active_scope(),
             FocusedPane::Providers => return,
         };
         let Some(resource) = self.selected_resource() else {
