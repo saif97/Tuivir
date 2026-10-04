@@ -29,17 +29,23 @@ pub struct ConfigurationDraft {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FieldConstraint {
+    ReadOnly,
     CpuSelection { topology: bool },
     Quantity { percent: bool },
     Decimal,
     Bytes { minimum: u64, unlimited: bool },
 }
 impl ConfigurationField {
+    pub fn editable(&self) -> bool {
+        self.constraint != FieldConstraint::ReadOnly
+    }
+
     pub fn matches(&self, value: &str) -> bool {
         if self.value == value {
             return true;
         }
         match self.constraint {
+            FieldConstraint::ReadOnly => false,
             FieldConstraint::CpuSelection { .. } => false,
             FieldConstraint::Quantity { .. } => quantity_bytes(&self.value)
                 .zip(quantity_bytes(value))
@@ -61,6 +67,7 @@ impl ConfigurationField {
 
     pub fn validate(&self, value: &str) -> Result<(), String> {
         let valid = match self.constraint {
+            FieldConstraint::ReadOnly => false,
             FieldConstraint::CpuSelection { topology } => valid_cpu_selection(value, topology),
             FieldConstraint::Quantity { percent } => {
                 quantity_bytes(value).is_some_and(|n| n > 0)
@@ -81,6 +88,7 @@ impl ConfigurationField {
             Ok(())
         } else {
             Err(match self.constraint {
+                FieldConstraint::ReadOnly => "This field is read-only.".into(),
                 FieldConstraint::CpuSelection { topology } => format!(
                     "CPU setting must be a positive count or CPU IDs (0-3,5){}.",
                     if topology {

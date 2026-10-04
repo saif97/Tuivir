@@ -504,3 +504,45 @@ async fn incus_vm_topology_change_discloses_downtime_and_restores_running_state(
     assert!(render_to_text(app.state(), 180, 36).contains("Resource State: Running"));
     cli.assert_exhausted();
 }
+
+#[tokio::test]
+async fn sandbox_configuration_explains_read_only_limits_without_writes() {
+    let cli = Arc::new(FixtureCli::new([
+        (
+            ProcessSpec::new("sbx", &["version"]),
+            success("sbx version: v0.37.0"),
+        ),
+        (
+            ProcessSpec::new("sbx", &["ls", "--json"]),
+            success(include_str!("fixtures/docker-sandbox/sandboxes.json")),
+        ),
+        (
+            ProcessSpec::new("sbx", &["ls", "--json"]),
+            success(include_str!("fixtures/docker-sandbox/sandboxes.json")),
+        ),
+    ]));
+    let runtime = ProviderRuntime::new(
+        vec![Arc::new(
+            tuivir::infrastructure::provider::DockerSandboxWorkspace,
+        )],
+        cli.clone(),
+    );
+    let mut app = App::new();
+    let requests = app.update(runtime.discover().await.remove(0).into_event());
+    drive(&mut app, &runtime, requests).await;
+    let requests = app.invoke(Command::ActivateDetailView(2));
+    drive(&mut app, &runtime, requests).await;
+    let screen = render_to_text(app.state(), 180, 36);
+    assert!(
+        screen.contains("in-place CPU/memory resize is unsupported"),
+        "{screen}"
+    );
+    assert!(
+        screen.contains("CPU count: not reported (read-only)"),
+        "{screen}"
+    );
+    assert!(press(&mut app, "enter").is_empty());
+    assert!(press(&mut app, "ctrl+a").is_empty());
+    assert!(app.state().confirmation.is_none());
+    cli.assert_exhausted();
+}

@@ -725,7 +725,11 @@ fn render_details_panel(
                     } else {
                         field.value.clone()
                     };
-                    Line::from(format!("{marker}{}: {value}", field.label))
+                    Line::from(format!(
+                        "{marker}{}: {value}{}",
+                        field.label,
+                        if field.editable() { "" } else { " (read-only)" }
+                    ))
                 }));
                 lines.push(Line::from(format!("Resource State: {:?}", actual.state)));
                 lines.push(Line::from(actual.notice.as_str()));

@@ -763,7 +763,11 @@ impl App {
                     if let Some(draft) = self.state.configuration_drafts.get_mut(&key) {
                         match command {
                             Command::EditConfigurationField => {
-                                draft.editing = draft.actual.is_some()
+                                draft.editing = draft
+                                    .actual
+                                    .as_ref()
+                                    .and_then(|actual| actual.fields.get(draft.selected_field))
+                                    .is_some_and(super::ConfigurationField::editable)
                             }
                             Command::FinishConfigurationField => draft.editing = false,
                             Command::NextConfigurationField => {
