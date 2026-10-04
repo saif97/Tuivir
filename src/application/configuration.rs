@@ -7,6 +7,7 @@ pub struct ConfigurationField {
     pub label: String,
     pub value: String,
     pub constraint: FieldConstraint,
+    pub update: ConfigurationUpdate,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -233,4 +234,38 @@ fn quantity_bytes(value: &str) -> Option<u64> {
     let bytes = number * multiplier;
     (bytes.is_finite() && bytes >= 1.0 && bytes < u64::MAX as f64 && bytes.fract() == 0.0)
         .then_some(bytes as u64)
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ConfigurationUpdate {
+    Live,
+    Stopped,
+    CpuHotplug { maximum: u32 },
+}
+impl ConfigurationUpdate {
+    pub fn requires_stop(&self, proposed: &str) -> bool {
+        match self {
+            Self::Live => false,
+            Self::Stopped => true,
+            Self::CpuHotplug { maximum } => proposed
+                .parse::<u32>()
+                .ok()
+                .is_none_or(|count| count > *maximum),
+        }
+    }
+}
+impl ConfigurationReview {
+    pub fn downtime(&self) -> &'static str {
+        if self.actual.state == ResourceState::Stopped {
+            "Resource remains stopped."
+        } else if self
+            .changes
+            .iter()
+            .any(|change| change.field.update.requires_stop(&change.proposed))
+        {
+            "Downtime: stop/start the same Resource; return it to running."
+        } else {
+            "Live update; no restart required."
+        }
+    }
 }

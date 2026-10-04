@@ -478,3 +478,29 @@ async fn incus_partial_success_cleans_only_the_confirmed_field_and_keeps_the_err
     assert!(screen.contains("memory limit rejected"), "{screen}");
     cli.assert_exhausted();
 }
+
+#[tokio::test]
+async fn incus_vm_topology_change_discloses_downtime_and_restores_running_state() {
+    let initial = r#"[{"name":"api","type":"virtual-machine","status":"Running","expanded_config":{"limits.cpu":"sockets=1,cores=2","limits.memory":"512MiB"}}]"#;
+    let updated = r#"[{"name":"api","type":"virtual-machine","status":"Running","expanded_config":{"limits.cpu":"4","limits.memory":"512MiB"}}]"#;
+    let mut extra = vec![
+        incus_read(initial),
+        (ProcessSpec::new("incus", &["stop", "api"]), success("")),
+        (
+            ProcessSpec::new("incus", &["config", "set", "api", "limits.cpu=4"]),
+            success(""),
+        ),
+        (ProcessSpec::new("incus", &["start", "api"]), success("")),
+        incus_read(updated),
+    ];
+    extra.extend(incus_refresh());
+    let (mut app, runtime, cli) = incus_app(initial, extra).await;
+    edit_cpu(&mut app, &runtime, "4").await;
+    press(&mut app, "ctrl+a");
+    let screen = render_to_text(app.state(), 180, 36);
+    assert!(screen.contains("Downtime: stop/start"), "{screen}");
+    let requests = press(&mut app, "enter");
+    drive(&mut app, &runtime, requests).await;
+    assert!(render_to_text(app.state(), 180, 36).contains("Resource State: Running"));
+    cli.assert_exhausted();
+}

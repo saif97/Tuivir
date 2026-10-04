@@ -143,18 +143,22 @@ impl ProviderWorkspace for DockerWorkspace {
                 .first()
                 .ok_or_else(|| WorkspaceError::new("Docker returned no container"))?;
             let host = &row["HostConfig"];
-            use crate::application::{ConfigurationField, FieldConstraint, ResourceConfiguration};
+            use crate::application::{
+                ConfigurationField, ConfigurationUpdate, FieldConstraint, ResourceConfiguration,
+            };
             Ok(ResourceConfiguration {
                 fields: vec![
                     ConfigurationField {
                         id: "cpu".into(),
                         constraint: FieldConstraint::Decimal,
+                        update: ConfigurationUpdate::Live,
                         label: "CPU limit (CPUs)".into(),
                         value: (host["NanoCpus"].as_u64().unwrap_or(0) as f64 / 1_000_000_000.0)
                             .to_string(),
                     },
                     ConfigurationField {
                         id: "memory".into(),
+                        update: ConfigurationUpdate::Live,
                         constraint: FieldConstraint::Bytes {
                             minimum: 6 * 1024 * 1024,
                             unlimited: true,

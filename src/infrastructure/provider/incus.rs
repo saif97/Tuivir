@@ -157,29 +157,61 @@ impl ProviderWorkspace for IncusWorkspace {
         &'a self,
         cli: &'a dyn CliRunner,
         target: &'a ResourceTarget,
-        _actual: &'a crate::application::ResourceConfiguration,
+        actual: &'a crate::application::ResourceConfiguration,
         changes: &'a [crate::application::ConfigurationChange],
     ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
-            for change in changes {
-                if !["limits.cpu", "limits.memory"].contains(&change.field.id.as_str()) {
-                    return Err(WorkspaceError::new("Unsupported Incus configuration field"));
-                }
-                let assignment = format!("{}={}", change.field.id, change.proposed);
-                cli.run(ProcessSpec::new(
-                    "incus",
-                    &["config", "set", &target.resource_id().0, &assignment],
-                ))
-                .await
-                .map_err(|error| {
-                    WorkspaceError::new(provider_cli_error(
-                        PROVIDER_NAME,
-                        &error,
-                        "Incus could not update instance configuration",
-                    ))
-                })?;
+            let stop = actual.state == ResourceState::Running
+                && changes
+                    .iter()
+                    .any(|change| change.field.update.requires_stop(&change.proposed));
+            if stop {
+                self.execute_command(cli, target, ResourceCommand::Stop, Some(actual.state))
+                    .await?;
             }
-            Ok(())
+            let result = async {
+                for change in changes {
+                    if !["limits.cpu", "limits.memory"].contains(&change.field.id.as_str()) {
+                        return Err(WorkspaceError::new("Unsupported Incus configuration field"));
+                    }
+                    let assignment = format!("{}={}", change.field.id, change.proposed);
+                    cli.run(ProcessSpec::new(
+                        "incus",
+                        &["config", "set", &target.resource_id().0, &assignment],
+                    ))
+                    .await
+                    .map_err(|error| {
+                        WorkspaceError::new(provider_cli_error(
+                            PROVIDER_NAME,
+                            &error,
+                            "Incus could not update instance configuration",
+                        ))
+                    })?;
+                }
+                Ok(())
+            }
+            .await;
+            if stop {
+                if let Err(restart) = self
+                    .execute_command(
+                        cli,
+                        target,
+                        ResourceCommand::Start,
+                        Some(ResourceState::Stopped),
+                    )
+                    .await
+                {
+                    return Err(WorkspaceError::new(match result {
+                        Ok(()) => {
+                            format!("Settings saved, but restart failed: {}", restart.message)
+                        }
+                        Err(error) => {
+                            format!("{}; restart failed: {}", error.message, restart.message)
+                        }
+                    }));
+                }
+            }
+            result
         })
     }
 
@@ -225,7 +257,9 @@ impl ProviderWorkspace for IncusWorkspace {
             let config = row["expanded_config"]
                 .as_object()
                 .ok_or_else(|| WorkspaceError::new("Incus omitted effective configuration"))?;
-            use crate::application::{ConfigurationField, FieldConstraint, ResourceConfiguration};
+            use crate::application::{
+                ConfigurationField, ConfigurationUpdate, FieldConstraint, ResourceConfiguration,
+            };
             let value = |key: &str, default: &str| {
                 config
                     .get(key)
@@ -233,10 +267,24 @@ impl ProviderWorkspace for IncusWorkspace {
                     .unwrap_or(default)
                     .to_string()
             };
+            let cpu = value("limits.cpu", if vm { "1" } else { "" });
+            let cpu_update = if !vm {
+                ConfigurationUpdate::Live
+            } else if cpu.contains('=') || cpu.parse::<u32>().is_ok_and(|count| count > 64) {
+                ConfigurationUpdate::Stopped
+            } else {
+                ConfigurationUpdate::CpuHotplug { maximum: 64 }
+            };
+            let memory_update = if vm && value("limits.memory.hotplug", "true") == "false" {
+                ConfigurationUpdate::Stopped
+            } else {
+                ConfigurationUpdate::Live
+            };
             Ok(ResourceConfiguration {
                 fields: vec![
                     ConfigurationField {
                         id: "limits.cpu".into(),
+                        update: cpu_update,
                         label: if vm {
                             "CPU count, IDs or topology"
                         } else {
@@ -248,6 +296,7 @@ impl ProviderWorkspace for IncusWorkspace {
                     },
                     ConfigurationField {
                         id: "limits.memory".into(),
+                        update: memory_update,
                         label: "Memory limit (bytes, units or %)".into(),
                         value: value("limits.memory", if vm { "1GiB" } else { "" }),
                         constraint: FieldConstraint::Quantity { percent: true },

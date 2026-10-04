@@ -27,7 +27,7 @@ pub async fn apply_configuration(
         field
             .validate(&change.proposed)
             .map_err(WorkspaceError::new)?;
-        if !field.matches(&change.field.value) {
+        if field.update != change.field.update || !field.matches(&change.field.value) {
             return Err(WorkspaceError::new(
                 "Configuration changed externally. Review actual values and Apply again.",
             ));
@@ -47,6 +47,12 @@ pub async fn apply_configuration(
                 "Resource State or downtime requirements changed. Review and Apply again.".into(),
             ),
         };
+    }
+    if !matches!(
+        actual.state,
+        crate::domain::ResourceState::Running | crate::domain::ResourceState::Stopped
+    ) {
+        return ConfigurationOutcome { actual: Some(actual), error: Some("Configuration changes require a running or stopped Resource; resolve its current Resource State first.".into()) };
     }
     let result = workspace
         .write_configuration(cli, &review.target, &actual, &review.changes)

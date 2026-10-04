@@ -239,6 +239,7 @@ fn render_confirmation(state: &AppState, frame: &mut Frame<'_>) {
                         change.field.label, change.field.value, change.proposed
                     ))
                 }));
+                lines.push(Line::from(review.downtime()));
                 lines.push(Line::from(review.actual.notice.as_str()));
                 (" Confirm configuration ", lines)
             }
@@ -726,6 +727,7 @@ fn render_details_panel(
                     };
                     Line::from(format!("{marker}{}: {value}", field.label))
                 }));
+                lines.push(Line::from(format!("Resource State: {:?}", actual.state)));
                 lines.push(Line::from(actual.notice.as_str()));
                 lines.push(Line::from(if draft.editing {
                     "Editing draft; Enter/Esc keeps it. ctrl+u clears field."
