@@ -19,5 +19,8 @@ pub struct ResourceConfiguration {
 pub struct ConfigurationDraft {
     pub actual: Option<ResourceConfiguration>,
     pub error: Option<String>,
+    pub proposed: Vec<String>,
+    pub selected_field: usize,
+    pub editing: bool,
     pub(crate) request_id: Option<ProviderRequestId>,
 }

@@ -39,6 +39,13 @@ impl fmt::Display for ResourceCommand {
 /// completions stay in [`crate::application::AppEvent`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Command {
+    EditConfigurationField,
+    NextConfigurationField,
+    PreviousConfigurationField,
+    ConfigurationCharacter(char),
+    ConfigurationBackspace,
+    ClearConfigurationField,
+    FinishConfigurationField,
     Quit,
     ToggleHelp,
     /// Refreshes the Active Workspace now rather than waiting for the clock.
@@ -136,6 +143,8 @@ pub enum Command {
 /// unavailable Command is rejected when it is invoked, not hidden by scope.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum CommandScope {
+    ConfigurationForm,
+    ConfigurationInput,
     /// The provider selector has focus.
     ProviderSelector,
     /// The Provider Workspace's resource view has focus.

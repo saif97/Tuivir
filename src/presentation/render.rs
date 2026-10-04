@@ -698,13 +698,26 @@ fn render_details_panel(
         let mut lines = Vec::new();
         if let Some(draft) = state.selected_configuration() {
             if let Some(actual) = &draft.actual {
-                lines.extend(
-                    actual
-                        .fields
-                        .iter()
-                        .map(|field| Line::from(format!("{}: {}", field.label, field.value))),
-                );
+                lines.extend(actual.fields.iter().enumerate().map(|(index, field)| {
+                    let proposed = draft.proposed.get(index).unwrap_or(&field.value);
+                    let marker = if index == draft.selected_field {
+                        "> "
+                    } else {
+                        "  "
+                    };
+                    let value = if proposed != &field.value {
+                        format!("{} → {}", field.value, proposed)
+                    } else {
+                        field.value.clone()
+                    };
+                    Line::from(format!("{marker}{}: {value}", field.label))
+                }));
                 lines.push(Line::from(actual.notice.as_str()));
+                lines.push(Line::from(if draft.editing {
+                    "Editing draft; Enter/Esc keeps it. ctrl+u clears field."
+                } else {
+                    "Enter edits selected field; arrows select fields."
+                }));
             } else {
                 lines.push(Line::from("Loading Configuration…"));
             }

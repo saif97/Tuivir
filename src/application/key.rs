@@ -77,6 +77,16 @@ impl Named {
 }
 
 impl Key {
+    pub fn text_character(self) -> Option<char> {
+        if self.ctrl || self.alt {
+            return None;
+        }
+        match self.code {
+            KeyCode::Character(character) => Some(character),
+            _ => None,
+        }
+    }
+
     pub fn character(character: char) -> Self {
         Self::new(KeyCode::Character(character))
     }

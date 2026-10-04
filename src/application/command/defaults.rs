@@ -75,6 +75,7 @@ pub const NUMBERED_RESOURCE_PANEL_CAPACITY: usize = RESOURCE_PANEL_FOCUS_COMMAND
 /// Every scope in which the user is working inside a Provider Workspace rather
 /// than answering a modal.
 pub(super) const WORKSPACE: &[CommandScope] = &[
+    CommandScope::ConfigurationForm,
     CommandScope::ProviderSelector,
     CommandScope::ResourceView,
     CommandScope::Details,
@@ -91,6 +92,48 @@ const MODAL: &[CommandScope] = &[
 
 /// Defaults follow lazydocker wherever an equivalent Command exists.
 pub(super) const BUILTIN_COMMANDS: &[CommandDefinition] = &[
+    CommandDefinition {
+        id: "configuration_edit",
+        description: "Edit selected field",
+        command: Command::EditConfigurationField,
+        scopes: &[CommandScope::ConfigurationForm],
+        default_keys: &["enter"],
+    },
+    CommandDefinition {
+        id: "configuration_next_field",
+        description: "Next field",
+        command: Command::NextConfigurationField,
+        scopes: &[CommandScope::ConfigurationForm],
+        default_keys: &["down", "j"],
+    },
+    CommandDefinition {
+        id: "configuration_previous_field",
+        description: "Previous field",
+        command: Command::PreviousConfigurationField,
+        scopes: &[CommandScope::ConfigurationForm],
+        default_keys: &["up", "k"],
+    },
+    CommandDefinition {
+        id: "configuration_finish_field",
+        description: "Keep draft",
+        command: Command::FinishConfigurationField,
+        scopes: &[CommandScope::ConfigurationInput],
+        default_keys: &["enter", "esc"],
+    },
+    CommandDefinition {
+        id: "configuration_backspace",
+        description: "Delete character",
+        command: Command::ConfigurationBackspace,
+        scopes: &[CommandScope::ConfigurationInput],
+        default_keys: &["backspace"],
+    },
+    CommandDefinition {
+        id: "configuration_clear_field",
+        description: "Clear field",
+        command: Command::ClearConfigurationField,
+        scopes: &[CommandScope::ConfigurationInput],
+        default_keys: &["ctrl+u"],
+    },
     CommandDefinition {
         id: "app_quit",
         description: "Quit",

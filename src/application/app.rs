@@ -436,6 +436,11 @@ impl App {
                     draft.request_id = None;
                     match result {
                         Ok(actual) => {
+                            draft.proposed = actual
+                                .fields
+                                .iter()
+                                .map(|field| field.value.clone())
+                                .collect();
                             draft.actual = Some(actual);
                             draft.error = None;
                         }
@@ -497,6 +502,18 @@ impl App {
             CommandScope::CommandFailure
         } else if self.state.help_overlay.is_some() {
             CommandScope::HelpOverlay
+        } else if self.state.configuration_selected()
+            && self.state.focused_pane == FocusedPane::Details
+        {
+            if self
+                .state
+                .selected_configuration()
+                .is_some_and(|draft| draft.editing)
+            {
+                CommandScope::ConfigurationInput
+            } else {
+                CommandScope::ConfigurationForm
+            }
         } else {
             match &self.state.focused_pane {
                 FocusedPane::Providers => CommandScope::ProviderSelector,
@@ -514,6 +531,11 @@ impl App {
     /// scope. The caller normalizes the terminal event into the registry's
     /// [`Key`] type, so this never sees a crossterm event.
     pub fn resolve_command(&self, key: Key) -> Option<Command> {
+        if self.active_scope() == CommandScope::ConfigurationInput
+            && let Some(character) = key.text_character()
+        {
+            return Some(Command::ConfigurationCharacter(character));
+        }
         self.commands.resolve(self.active_scope(), key)
     }
 
@@ -658,6 +680,51 @@ impl App {
             workspace.clear_detail_selection();
         }
         match command {
+            Command::EditConfigurationField
+            | Command::NextConfigurationField
+            | Command::PreviousConfigurationField
+            | Command::ConfigurationCharacter(_)
+            | Command::ConfigurationBackspace
+            | Command::ClearConfigurationField
+            | Command::FinishConfigurationField => {
+                if let Some(workspace) = self.state.active_workspace() {
+                    let key = (
+                        workspace.id().clone(),
+                        workspace.selected_resource_target().unwrap(),
+                    );
+                    if let Some(draft) = self.state.configuration_drafts.get_mut(&key) {
+                        match command {
+                            Command::EditConfigurationField => {
+                                draft.editing = draft.actual.is_some()
+                            }
+                            Command::FinishConfigurationField => draft.editing = false,
+                            Command::NextConfigurationField => {
+                                draft.selected_field = (draft.selected_field + 1)
+                                    .min(draft.proposed.len().saturating_sub(1))
+                            }
+                            Command::PreviousConfigurationField => {
+                                draft.selected_field = draft.selected_field.saturating_sub(1)
+                            }
+                            _ if draft.editing => {
+                                if let Some(value) = draft.proposed.get_mut(draft.selected_field) {
+                                    match command {
+                                        Command::ConfigurationCharacter(character) => {
+                                            value.push(character)
+                                        }
+                                        Command::ConfigurationBackspace => {
+                                            value.pop();
+                                        }
+                                        Command::ClearConfigurationField => value.clear(),
+                                        _ => {}
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                Vec::new()
+            }
             Command::Quit => self.request_quit(),
             Command::ToggleHelp => {
                 self.toggle_help();
@@ -994,6 +1061,9 @@ impl App {
                 ConfigurationDraft {
                     actual: None,
                     error: None,
+                    proposed: Vec::new(),
+                    selected_field: 0,
+                    editing: false,
                     request_id: Some(request_id),
                 },
             );

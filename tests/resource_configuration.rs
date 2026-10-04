@@ -84,3 +84,30 @@ async fn configuration_tab_displays_current_docker_limits_with_units() {
     );
     assert!(screen.contains("Apply"), "{screen}");
 }
+
+fn press(app: &mut App, spelling: &str) -> Vec<ProviderRequest> {
+    let key = tuivir::application::Key::parse(spelling).unwrap();
+    let command = app
+        .resolve_command(key)
+        .unwrap_or_else(|| panic!("unbound {spelling}"));
+    app.invoke(command)
+}
+
+#[tokio::test]
+async fn typing_configuration_retains_an_unapplied_draft_across_navigation() {
+    let (mut app, runtime) = docker_app(r#"[{"HostConfig":{"NanoCpus":1500000000,"Memory":536870912},"State":{"Status":"running"}}]"#).await;
+    let requests = app.invoke(Command::ActivateDetailView(4));
+    drive(&mut app, &runtime, requests).await;
+    press(&mut app, "enter");
+    press(&mut app, "ctrl+u");
+    press(&mut app, "2");
+    press(&mut app, "enter");
+    let screen = render_to_text(app.state(), 140, 32);
+    assert!(screen.contains("1.5 → 2"), "{screen}");
+    app.invoke(Command::FocusResourcePanel(0));
+    app.invoke(Command::SelectNext);
+    app.invoke(Command::SelectPrevious);
+    app.invoke(Command::FocusDetails);
+    let screen = render_to_text(app.state(), 140, 32);
+    assert!(screen.contains("1.5 → 2"), "{screen}");
+}
