@@ -153,6 +153,84 @@ async fn custom_volume_resources(
 }
 
 impl ProviderWorkspace for IncusWorkspace {
+    fn load_configuration<'a>(
+        &'a self,
+        cli: &'a dyn CliRunner,
+        target: &'a ResourceTarget,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<crate::application::ResourceConfiguration, WorkspaceError>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            if target.panel_id().0 != INSTANCES_PANEL_ID {
+                return Err(WorkspaceError::new(
+                    "Incus configuration editing is only available for instances",
+                ));
+            }
+            let output = cli
+                .run(ProcessSpec::new(
+                    "incus",
+                    &["list", &target.resource_id().0, "--format=json"],
+                ))
+                .await
+                .map_err(|error| {
+                    WorkspaceError::new(provider_cli_error(
+                        PROVIDER_NAME,
+                        &error,
+                        "Could not load instance configuration",
+                    ))
+                })?;
+            let rows: Vec<serde_json::Value> =
+                serde_json::from_str(&output.stdout).map_err(|error| {
+                    WorkspaceError::new(format!("Malformed Incus configuration: {error}"))
+                })?;
+            let row = rows
+                .iter()
+                .find(|row| row["name"].as_str() == Some(&target.resource_id().0))
+                .ok_or_else(|| WorkspaceError::new("Incus instance no longer exists"))?;
+            let vm = row["type"].as_str() == Some("virtual-machine");
+            let config = row["expanded_config"]
+                .as_object()
+                .ok_or_else(|| WorkspaceError::new("Incus omitted effective configuration"))?;
+            use crate::application::{ConfigurationField, FieldConstraint, ResourceConfiguration};
+            let value = |key: &str, default: &str| {
+                config
+                    .get(key)
+                    .and_then(|value| value.as_str())
+                    .unwrap_or(default)
+                    .to_string()
+            };
+            Ok(ResourceConfiguration {
+                fields: vec![
+                    ConfigurationField {
+                        id: "limits.cpu".into(),
+                        label: if vm {
+                            "CPU count, IDs or topology"
+                        } else {
+                            "CPU count or IDs"
+                        }
+                        .into(),
+                        value: value("limits.cpu", if vm { "1" } else { "" }),
+                        constraint: FieldConstraint::CpuSelection { topology: vm },
+                    },
+                    ConfigurationField {
+                        id: "limits.memory".into(),
+                        label: "Memory limit (bytes, units or %)".into(),
+                        value: value("limits.memory", if vm { "1GiB" } else { "" }),
+                        constraint: FieldConstraint::Quantity { percent: true },
+                    },
+                ],
+                state: incus_resource_state(row["status"].as_str().unwrap_or("unknown")),
+                notice:
+                    "Edits set overrides on the selected instance; shared profiles stay unchanged."
+                        .into(),
+            })
+        })
+    }
+
     fn id(&self) -> ProviderId {
         ProviderId::new(PROVIDER_ID)
     }
@@ -394,6 +472,7 @@ fn instance_detail_views() -> Vec<DetailView> {
         DetailView::new(INFO_VIEW_ID, "Info"),
         DetailView::new(CONFIG_VIEW_ID, "Config"),
         DetailView::new(CONSOLE_LOG_VIEW_ID, "Console Log"),
+        DetailView::configuration(),
     ]
 }
 

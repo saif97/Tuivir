@@ -347,3 +347,65 @@ async fn successful_apply_reconciles_equivalent_cpu_input_and_unedited_external_
     );
     cli.assert_exhausted();
 }
+
+async fn incus_app(
+    initial: &str,
+    extra: Vec<(
+        ProcessSpec,
+        Result<
+            tuivir::infrastructure::process::ProcessOutput,
+            tuivir::infrastructure::process::ProcessError,
+        >,
+    )>,
+) -> (App, ProviderRuntime, Arc<FixtureCli>) {
+    let cli = Arc::new(FixtureCli::new(
+        [
+            (
+                ProcessSpec::new("incus", &["remote", "get-default"]),
+                success("local"),
+            ),
+            (
+                ProcessSpec::new("incus", &["project", "get-current"]),
+                success("default"),
+            ),
+            (
+                ProcessSpec::new("incus", &["list", "--format=json"]),
+                success(include_str!("fixtures/incus/instances.json")),
+            ),
+            (
+                ProcessSpec::new("incus", &["storage", "list", "--format=json"]),
+                success("[]"),
+            ),
+            (
+                ProcessSpec::new("incus", &["list", "api", "--format=json"]),
+                success(initial),
+            ),
+        ]
+        .into_iter()
+        .chain(extra),
+    ));
+    let runtime = ProviderRuntime::new(
+        vec![Arc::new(tuivir::infrastructure::provider::IncusWorkspace)],
+        cli.clone(),
+    );
+    let mut app = App::new();
+    let requests = app.update(runtime.discover().await.remove(0).into_event());
+    drive(&mut app, &runtime, requests).await;
+    (app, runtime, cli)
+}
+
+#[tokio::test]
+async fn incus_configuration_displays_effective_limits_with_provider_units() {
+    let initial = r#"[{"name":"api","type":"container","status":"Running","expanded_config":{"limits.cpu":"0-1,3","limits.memory":"50%"}}]"#;
+    let (mut app, runtime, cli) = incus_app(initial, vec![]).await;
+    let requests = app.invoke(Command::ActivateDetailView(4));
+    drive(&mut app, &runtime, requests).await;
+    let screen = render_to_text(app.state(), 160, 32);
+    assert!(screen.contains("CPU count or IDs: 0-1,3"), "{screen}");
+    assert!(
+        screen.contains("Memory limit (bytes, units or %): 50%"),
+        "{screen}"
+    );
+    assert!(screen.contains("selected instance"), "{screen}");
+    cli.assert_exhausted();
+}
