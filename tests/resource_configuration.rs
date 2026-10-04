@@ -605,3 +605,26 @@ async fn docker_update_failure_retains_attempted_values_alongside_actual_values(
     assert!(screen.contains("1.5 → 2"), "{screen}");
     cli.assert_exhausted();
 }
+#[tokio::test]
+async fn a_stopped_incus_vm_stays_stopped_after_configuration_changes() {
+    let initial = r#"[{"name":"api","type":"virtual-machine","status":"Stopped","expanded_config":{"limits.cpu":"sockets=1,cores=2","limits.memory":"512MiB"}}]"#;
+    let updated = r#"[{"name":"api","type":"virtual-machine","status":"Stopped","expanded_config":{"limits.cpu":"4","limits.memory":"512MiB"}}]"#;
+    let mut extra = vec![
+        incus_read(initial),
+        (
+            ProcessSpec::new("incus", &["config", "set", "api", "limits.cpu=4"]),
+            success(""),
+        ),
+        incus_read(updated),
+    ];
+    extra.extend(incus_refresh());
+    let (mut app, runtime, cli) = incus_app(initial, extra).await;
+    edit_cpu(&mut app, &runtime, "4").await;
+    press(&mut app, "ctrl+a");
+    assert!(render_to_text(app.state(), 180, 36).contains("Resource remains stopped"));
+    let requests = press(&mut app, "enter");
+    drive(&mut app, &runtime, requests).await;
+    assert!(render_to_text(app.state(), 180, 36).contains("Resource State: Stopped"));
+    cli.assert_exhausted();
+}
+
