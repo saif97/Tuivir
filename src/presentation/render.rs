@@ -145,6 +145,7 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
     );
     render_details_panel(
         provider.name(),
+        state,
         workspace_view,
         state.visible_resource_shell_session(),
         &state.running_commands,
@@ -616,6 +617,7 @@ pub(super) fn pane_block(title: String, focused: bool, chrome: PaneChrome) -> Bl
 #[allow(clippy::too_many_arguments)] // Rendering receives the already-measured host frame.
 fn render_details_panel(
     provider_name: &str,
+    state: &AppState,
     view: Option<&WorkspaceView<'_>>,
     resource_shell_session: Option<&ResourceShellSession>,
     running_commands: &[crate::application::RunningResourceCommand],
@@ -690,6 +692,28 @@ fn render_details_panel(
             ))
             .alignment(Alignment::Center)
             .style(themed_style(ThemeRole::Warning).add_modifier(Modifier::BOLD)),
+            rows[1],
+        );
+    } else if state.configuration_selected() {
+        let mut lines = Vec::new();
+        if let Some(draft) = state.selected_configuration() {
+            if let Some(actual) = &draft.actual {
+                lines.extend(
+                    actual
+                        .fields
+                        .iter()
+                        .map(|field| Line::from(format!("{}: {}", field.label, field.value))),
+                );
+                lines.push(Line::from(actual.notice.as_str()));
+            } else {
+                lines.push(Line::from("Loading Configuration…"));
+            }
+            if let Some(error) = &draft.error {
+                lines.push(Line::from(error.as_str()));
+            }
+        }
+        frame.render_widget(
+            Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: false }),
             rows[1],
         );
     } else if view.is_some_and(|view| view.shell_selected) {

@@ -59,6 +59,11 @@ impl ProviderRequestId {
 ///
 /// Infrastructure executes requests outside the single-owner application state.
 pub enum ProviderRequest {
+    LoadResourceConfiguration {
+        request_id: ProviderRequestId,
+        provider_id: ProviderId,
+        target: ResourceTarget,
+    },
     RefreshWorkspace {
         request_id: ProviderRequestId,
         provider_id: ProviderId,
@@ -117,9 +122,22 @@ pub struct DetailView {
 enum DetailViewSource {
     Provider,
     Snapshot,
+    Configuration,
 }
 
 impl DetailView {
+    pub fn configuration() -> Self {
+        Self {
+            id: DetailViewId::new("configuration"),
+            title: "Configuration".into(),
+            source: DetailViewSource::Configuration,
+        }
+    }
+
+    pub fn is_configuration(&self) -> bool {
+        self.source == DetailViewSource::Configuration
+    }
+
     pub fn new(id: impl Into<String>, title: impl Into<String>) -> Self {
         Self {
             id: DetailViewId::new(id),

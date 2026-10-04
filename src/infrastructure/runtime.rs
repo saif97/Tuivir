@@ -101,6 +101,25 @@ impl ProviderRuntime {
         events: tokio::sync::mpsc::UnboundedSender<AppEvent>,
     ) {
         match request {
+            ProviderRequest::LoadResourceConfiguration {
+                request_id,
+                provider_id,
+                target,
+            } => {
+                let Some(workspace) = self.workspace(&provider_id) else {
+                    return;
+                };
+                let cli = Arc::clone(&self.cli);
+                tokio::spawn(async move {
+                    let result = workspace.load_configuration(cli.as_ref(), &target).await;
+                    let _ = events.send(AppEvent::ResourceConfigurationCompleted {
+                        request_id,
+                        provider_id,
+                        target,
+                        result,
+                    });
+                });
+            }
             ProviderRequest::RefreshWorkspace {
                 request_id,
                 provider_id,

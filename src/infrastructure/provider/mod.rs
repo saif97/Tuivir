@@ -86,6 +86,24 @@ impl ProviderDiscovery {
 /// Implementations own CLI commands and parsing. They never render Ratatui
 /// widgets, keeping provider knowledge out of the shared shell.
 pub trait ProviderWorkspace: Send + Sync {
+    fn load_configuration<'a>(
+        &'a self,
+        _cli: &'a dyn CliRunner,
+        _target: &'a ResourceTarget,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<crate::application::ResourceConfiguration, WorkspaceError>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async {
+            Err(WorkspaceError::new(
+                "Configuration is unavailable for this Resource",
+            ))
+        })
+    }
+
     fn id(&self) -> ProviderId;
 
     /// Returns `None` when the provider CLI is absent; otherwise returns an

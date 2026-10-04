@@ -1,3 +1,5 @@
+mod configuration;
+pub use configuration::{ConfigurationDraft, ConfigurationField, ResourceConfiguration};
 mod app;
 mod command;
 mod key;

@@ -1,3 +1,4 @@
+use super::{ConfigurationDraft, ResourceConfiguration};
 use std::collections::HashMap;
 
 use super::workspace::{DetailCompletion, ProviderWorkspaceState};
@@ -15,6 +16,12 @@ use crate::domain::{DetailViewId, Provider, ProviderId, ResourceState, ResourceT
 /// User intentions are [`Command`]s, resolved from keys, not events. Keeping
 /// the two separate means a keypress never looks like a completed refresh.
 pub enum AppEvent {
+    ResourceConfigurationCompleted {
+        request_id: ProviderRequestId,
+        provider_id: ProviderId,
+        target: ResourceTarget,
+        result: Result<ResourceConfiguration, WorkspaceError>,
+    },
     ProviderDiscovered {
         provider: Provider,
         error: Option<WorkspaceError>,
@@ -97,6 +104,7 @@ fn operation_failure(
 
 #[derive(Default)]
 pub struct AppState {
+    pub configuration_drafts: HashMap<(ProviderId, ResourceTarget), ConfigurationDraft>,
     pub providers: Vec<ProviderWorkspaceState>,
     pub focused_pane: FocusedPane,
     /// Index into `providers` of the currently active provider — the one
@@ -143,6 +151,23 @@ pub struct AppState {
 }
 
 impl AppState {
+    pub fn selected_configuration(&self) -> Option<&ConfigurationDraft> {
+        let workspace = self.active_workspace()?;
+        let target = workspace.selected_resource_target()?;
+        self.configuration_drafts
+            .get(&(workspace.id().clone(), target))
+    }
+
+    pub fn configuration_selected(&self) -> bool {
+        self.active_workspace().is_some_and(|workspace| {
+            let super::WorkspacePresentation::Ready(view) = workspace.presentation() else {
+                return false;
+            };
+            view.selected_detail_view
+                .is_some_and(super::DetailView::is_configuration)
+        })
+    }
+
     /// Returns the single Provider Workspace currently visible to the user.
     pub fn active_workspace(&self) -> Option<&ProviderWorkspaceState> {
         self.active_provider
@@ -396,6 +421,29 @@ impl App {
 
     fn apply(&mut self, event: AppEvent) -> Vec<ProviderRequest> {
         match event {
+            AppEvent::ResourceConfigurationCompleted {
+                request_id,
+                provider_id,
+                target,
+                result,
+            } => {
+                if let Some(draft) = self
+                    .state
+                    .configuration_drafts
+                    .get_mut(&(provider_id, target))
+                    && draft.request_id == Some(request_id)
+                {
+                    draft.request_id = None;
+                    match result {
+                        Ok(actual) => {
+                            draft.actual = Some(actual);
+                            draft.error = None;
+                        }
+                        Err(error) => draft.error = Some(error.message),
+                    }
+                }
+                Vec::new()
+            }
             AppEvent::ProviderDiscovered { provider, error } => {
                 self.handle_provider_discovered(provider, error)
             }
@@ -930,6 +978,31 @@ impl App {
     /// target that changed replaces the pending request, which is what makes
     /// the previous one's result unwelcome.
     fn sync_details(&mut self) -> Vec<ProviderRequest> {
+        if self.state.configuration_selected() {
+            let workspace = self.state.active_workspace().unwrap();
+            let key = (
+                workspace.id().clone(),
+                workspace.selected_resource_target().unwrap(),
+            );
+            if self.state.configuration_drafts.contains_key(&key) {
+                return Vec::new();
+            }
+            let request_id = ProviderRequestId::new(self.next_request_id);
+            self.next_request_id += 1;
+            self.state.configuration_drafts.insert(
+                key.clone(),
+                ConfigurationDraft {
+                    actual: None,
+                    error: None,
+                    request_id: Some(request_id),
+                },
+            );
+            return vec![ProviderRequest::LoadResourceConfiguration {
+                request_id,
+                provider_id: key.0,
+                target: key.1,
+            }];
+        }
         let request_id = ProviderRequestId::new(self.next_request_id);
         let Some(provider) = self.state.active_workspace_mut() else {
             return Vec::new();

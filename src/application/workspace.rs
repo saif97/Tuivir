@@ -494,6 +494,10 @@ impl ProviderWorkspaceState {
             self.details = None;
             return None;
         };
+        if view.is_configuration() {
+            self.details = None;
+            return None;
+        }
         let detail_target = DetailTarget {
             resource: target,
             view_id: view.id.clone(),

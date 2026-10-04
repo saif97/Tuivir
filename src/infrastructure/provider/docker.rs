@@ -71,6 +71,60 @@ struct VolumeRow {
 }
 
 impl ProviderWorkspace for DockerWorkspace {
+    fn load_configuration<'a>(
+        &'a self,
+        cli: &'a dyn CliRunner,
+        target: &'a ResourceTarget,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<crate::application::ResourceConfiguration, WorkspaceError>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            let output = cli
+                .run(ProcessSpec::new(
+                    "docker",
+                    &["container", "inspect", &target.resource_id().0],
+                ))
+                .await
+                .map_err(|error| {
+                    WorkspaceError::new(provider_cli_error(
+                        PROVIDER_NAME,
+                        &error,
+                        "Could not load configuration",
+                    ))
+                })?;
+            let rows: Vec<serde_json::Value> =
+                serde_json::from_str(&output.stdout).map_err(|error| {
+                    WorkspaceError::new(format!("Malformed Docker configuration: {error}"))
+                })?;
+            let row = rows
+                .first()
+                .ok_or_else(|| WorkspaceError::new("Docker returned no container"))?;
+            let host = &row["HostConfig"];
+            use crate::application::{ConfigurationField, ResourceConfiguration};
+            Ok(ResourceConfiguration {
+                fields: vec![
+                    ConfigurationField {
+                        id: "cpu".into(),
+                        label: "CPU limit (CPUs)".into(),
+                        value: (host["NanoCpus"].as_u64().unwrap_or(0) as f64 / 1_000_000_000.0)
+                            .to_string(),
+                    },
+                    ConfigurationField {
+                        id: "memory".into(),
+                        label: "Memory limit (bytes)".into(),
+                        value: host["Memory"].as_u64().unwrap_or(0).to_string(),
+                    },
+                ],
+                state: docker_resource_state(row["State"]["Status"].as_str().unwrap_or("unknown")),
+                notice: "Apply changes explicitly; no restart required.".into(),
+            })
+        })
+    }
+
     fn id(&self) -> ProviderId {
         ProviderId::new(PROVIDER_ID)
     }
@@ -412,6 +466,7 @@ fn container_detail_views() -> Vec<DetailView> {
         DetailView::new(LOGS_VIEW_ID, "Logs"),
         DetailView::new(STATS_VIEW_ID, "Stats"),
         DetailView::new(INSPECT_VIEW_ID, "Inspect"),
+        DetailView::configuration(),
     ]
 }
 
