@@ -162,6 +162,7 @@ impl ProviderWorkspace for DockerWorkspace {
                         constraint: FieldConstraint::Bytes {
                             minimum: 6 * 1024 * 1024,
                             unlimited: true,
+                            maximum: host["MemorySwap"].as_u64().filter(|n| *n > 0),
                         },
                         label: "Memory limit (bytes)".into(),
                         value: host["Memory"].as_u64().unwrap_or(0).to_string(),

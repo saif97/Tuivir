@@ -30,10 +30,18 @@ pub struct ConfigurationDraft {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FieldConstraint {
     ReadOnly,
-    CpuSelection { topology: bool },
-    Quantity { percent: bool },
+    CpuSelection {
+        topology: bool,
+    },
+    Quantity {
+        percent: bool,
+    },
     Decimal,
-    Bytes { minimum: u64, unlimited: bool },
+    Bytes {
+        minimum: u64,
+        unlimited: bool,
+        maximum: Option<u64>,
+    },
 }
 impl ConfigurationField {
     pub fn editable(&self) -> bool {
@@ -80,9 +88,13 @@ impl ConfigurationField {
             FieldConstraint::Decimal => value
                 .parse::<f64>()
                 .is_ok_and(|n| n.is_finite() && n >= 0.0 && n <= u64::MAX as f64 / 1_000_000_000.0),
-            FieldConstraint::Bytes { minimum, unlimited } => value
-                .parse::<u64>()
-                .is_ok_and(|n| (unlimited && n == 0) || n >= minimum),
+            FieldConstraint::Bytes {
+                minimum,
+                unlimited,
+                maximum,
+            } => value.parse::<u64>().is_ok_and(|n| {
+                (unlimited && n == 0) || (n >= minimum && maximum.is_none_or(|max| n <= max))
+            }),
         };
         if valid {
             Ok(())
@@ -105,7 +117,15 @@ impl ConfigurationField {
                     "CPU limit must be a finite number of CPUs, 0 or greater (0 is unlimited)."
                         .into()
                 }
-                FieldConstraint::Bytes { minimum, unlimited } => format!(
+                FieldConstraint::Bytes {
+                    maximum: Some(maximum),
+                    ..
+                } if value.parse::<u64>().is_ok_and(|n| n > maximum) => format!(
+                    "Memory exceeds the existing memory+swap limit ({maximum} bytes). Adjust that limit outside Tuivir first."
+                ),
+                FieldConstraint::Bytes {
+                    minimum, unlimited, ..
+                } => format!(
                     "{} must be whole bytes, at least {minimum}{}.",
                     self.label,
                     if unlimited {

@@ -646,3 +646,23 @@ async fn refresh_retries_a_failed_configuration_load() {
     );
     cli.assert_exhausted();
 }
+
+#[tokio::test]
+async fn docker_memory_validation_explains_the_existing_memory_swap_ceiling() {
+    let (mut app, runtime) = docker_app(DOCKER_INITIAL).await;
+    edit_cpu(&mut app, &runtime, "1.5").await;
+    press(&mut app, "down");
+    press(&mut app, "enter");
+    press(&mut app, "ctrl+u");
+    for c in "2147483648".chars() {
+        press(&mut app, &c.to_string());
+    }
+    press(&mut app, "enter");
+    assert!(press(&mut app, "ctrl+a").is_empty());
+    assert!(app.state().confirmation.is_none());
+    let screen = render_to_text(app.state(), 180, 36);
+    assert!(
+        screen.contains("existing memory+swap limit (1073741824 bytes)"),
+        "{screen}"
+    );
+}
