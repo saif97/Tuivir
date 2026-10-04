@@ -15,6 +15,7 @@ pub struct ResourceConfiguration {
     pub fields: Vec<ConfigurationField>,
     pub state: ResourceState,
     pub notice: String,
+    pub stop_preserves_resource: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -169,6 +170,21 @@ impl ConfigurationDraft {
 
     pub fn validation_error(&self) -> Option<String> {
         let actual = self.actual.as_ref()?;
+        if actual.state != ResourceState::Stopped
+            && !actual.stop_preserves_resource
+            && actual
+                .fields
+                .iter()
+                .zip(&self.proposed)
+                .any(|(field, proposed)| {
+                    !field.matches(proposed) && field.update.requires_stop(proposed)
+                })
+        {
+            return Some(
+                "Stopping this Resource would remove it; this change cannot be applied in place."
+                    .into(),
+            );
+        }
         actual
             .fields
             .iter()

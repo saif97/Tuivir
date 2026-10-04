@@ -264,7 +264,8 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
                     })
                     .unwrap_or_else(|| "not reported".into())
             };
-            Ok(ResourceConfiguration { fields: vec![
+            Ok(ResourceConfiguration {
+                stop_preserves_resource: false, fields: vec![
                 ConfigurationField { id: "cpu".into(), label: "CPU count".into(), value: reported(row.cpus), constraint: FieldConstraint::ReadOnly, update: ConfigurationUpdate::Live },
                 ConfigurationField { id: "memory".into(), label: "Memory (Provider units)".into(), value: reported(row.memory), constraint: FieldConstraint::ReadOnly, update: ConfigurationUpdate::Live },
             ], state: sandbox_resource_state(&row.status), notice: "Docker Sandbox in-place CPU/memory resize is unsupported; values are read-only. Tuivir will not recreate the Resource.".into() })

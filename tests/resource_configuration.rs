@@ -715,3 +715,18 @@ async fn configuration_form_keeps_contextual_help_and_detail_tab_navigation() {
     assert!(press(&mut app, "right").is_empty());
     assert!(render_to_text(app.state(), 180, 36).contains("[ Shell ]"));
 }
+
+#[tokio::test]
+async fn a_running_ephemeral_vm_cannot_apply_a_change_that_would_delete_it() {
+    let initial = r#"[{"name":"api","type":"virtual-machine","status":"Running","ephemeral":true,"expanded_config":{"limits.cpu":"sockets=1,cores=2","limits.memory":"512MiB"}}]"#;
+    let (mut app, runtime, cli) = incus_app(initial, vec![]).await;
+    edit_cpu(&mut app, &runtime, "4").await;
+    assert!(press(&mut app, "ctrl+a").is_empty());
+    assert!(app.state().confirmation.is_none());
+    let screen = render_to_text(app.state(), 180, 36);
+    assert!(
+        screen.contains("Stopping this Resource would remove it"),
+        "{screen}"
+    );
+    cli.assert_exhausted();
+}

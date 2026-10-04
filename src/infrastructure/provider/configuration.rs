@@ -54,6 +54,20 @@ pub async fn apply_configuration(
     ) {
         return ConfigurationOutcome { actual: Some(actual), error: Some("Configuration changes require a running or stopped Resource; resolve its current Resource State first.".into()) };
     }
+    if actual.state != crate::domain::ResourceState::Stopped
+        && !actual.stop_preserves_resource
+        && review
+            .changes
+            .iter()
+            .any(|change| change.field.update.requires_stop(&change.proposed))
+    {
+        return ConfigurationOutcome {
+            actual: Some(actual),
+            error: Some(
+                "Stopping this Resource would remove it; refusing an in-place update.".into(),
+            ),
+        };
+    }
     let result = workspace
         .write_configuration(cli, &review.target, &actual, &review.changes)
         .await;

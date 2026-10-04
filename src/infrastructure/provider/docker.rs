@@ -147,6 +147,7 @@ impl ProviderWorkspace for DockerWorkspace {
                 ConfigurationField, ConfigurationUpdate, FieldConstraint, ResourceConfiguration,
             };
             Ok(ResourceConfiguration {
+                stop_preserves_resource: true,
                 fields: vec![
                     ConfigurationField {
                         id: "cpu".into(),

@@ -281,6 +281,7 @@ impl ProviderWorkspace for IncusWorkspace {
                 ConfigurationUpdate::Live
             };
             Ok(ResourceConfiguration {
+                stop_preserves_resource: row["ephemeral"].as_bool() != Some(true),
                 fields: vec![
                     ConfigurationField {
                         id: "limits.cpu".into(),
