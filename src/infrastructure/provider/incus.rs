@@ -291,7 +291,8 @@ impl ProviderWorkspace for IncusWorkspace {
             };
             let memory_update = if vm
                 && (!supports("memory_hotplug")
-                    || value("limits.memory.hotplug", "true") == "false")
+                    || value("limits.memory.hotplug", "true") == "false"
+                    || value("limits.memory.hugepages", "false") == "true")
             {
                 ConfigurationUpdate::Stopped
             } else {

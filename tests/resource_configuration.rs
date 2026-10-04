@@ -818,3 +818,34 @@ async fn fractional_incus_memory_percentages_are_rejected_before_apply() {
     assert!(render_to_text(app.state(), 180, 36).contains("whole percentage"));
     cli.assert_exhausted();
 }
+
+#[tokio::test]
+async fn huge_page_vm_memory_changes_disclose_downtime_even_with_hotplug_support() {
+    let initial = r#"[{"name":"api","type":"virtual-machine","status":"Running","expanded_config":{"limits.cpu":"2","limits.memory":"256MiB","limits.memory.hugepages":"true"}}]"#;
+    let updated = r#"[{"name":"api","type":"virtual-machine","status":"Running","expanded_config":{"limits.cpu":"2","limits.memory":"512MiB","limits.memory.hugepages":"true"}}]"#;
+    let mut extra = vec![
+        incus_read(initial),
+        (ProcessSpec::new("incus", &["stop", "api"]), success("")),
+        (
+            ProcessSpec::new("incus", &["config", "set", "api", "limits.memory=512MiB"]),
+            success(""),
+        ),
+        (ProcessSpec::new("incus", &["start", "api"]), success("")),
+        incus_read(updated),
+    ];
+    extra.extend(incus_refresh());
+    let (mut app, runtime, cli) = incus_app(initial, extra).await;
+    edit_cpu(&mut app, &runtime, "2").await;
+    press(&mut app, "down");
+    press(&mut app, "enter");
+    press(&mut app, "ctrl+u");
+    for c in "512MiB".chars() {
+        press(&mut app, &c.to_string());
+    }
+    press(&mut app, "enter");
+    press(&mut app, "ctrl+a");
+    assert!(render_to_text(app.state(), 180, 36).contains("Downtime: stop/start"));
+    let requests = press(&mut app, "enter");
+    drive(&mut app, &runtime, requests).await;
+    cli.assert_exhausted();
+}
