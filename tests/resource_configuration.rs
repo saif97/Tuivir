@@ -358,32 +358,69 @@ async fn incus_app(
         >,
     )>,
 ) -> (App, ProviderRuntime, Arc<FixtureCli>) {
-    let cli = Arc::new(FixtureCli::new(
-        [
-            (
-                ProcessSpec::new("incus", &["remote", "get-default"]),
-                success("local"),
-            ),
-            (
-                ProcessSpec::new("incus", &["project", "get-current"]),
-                success("default"),
-            ),
-            (
-                ProcessSpec::new("incus", &["list", "--format=json"]),
-                success(include_str!("fixtures/incus/instances.json")),
-            ),
-            (
-                ProcessSpec::new("incus", &["storage", "list", "--format=json"]),
-                success("[]"),
-            ),
-            (
-                ProcessSpec::new("incus", &["list", "api", "--format=json"]),
-                success(initial),
-            ),
-        ]
-        .into_iter()
-        .chain(extra),
-    ));
+    incus_app_with_capabilities(
+        initial,
+        extra,
+        &[
+            "cpu_hotplug",
+            "memory_hotplug",
+            "limits_memory_hotplug",
+            "instance_limits_cpu_topology",
+        ],
+    )
+    .await
+}
+
+async fn incus_app_with_capabilities(
+    initial: &str,
+    extra: Vec<(
+        ProcessSpec,
+        Result<
+            tuivir::infrastructure::process::ProcessOutput,
+            tuivir::infrastructure::process::ProcessError,
+        >,
+    )>,
+    capabilities: &[&str],
+) -> (App, ProviderRuntime, Arc<FixtureCli>) {
+    let mut responses = ([
+        (
+            ProcessSpec::new("incus", &["remote", "get-default"]),
+            success("local"),
+        ),
+        (
+            ProcessSpec::new("incus", &["project", "get-current"]),
+            success("default"),
+        ),
+        (
+            ProcessSpec::new("incus", &["list", "--format=json"]),
+            success(include_str!("fixtures/incus/instances.json")),
+        ),
+        (
+            ProcessSpec::new("incus", &["storage", "list", "--format=json"]),
+            success("[]"),
+        ),
+        (
+            ProcessSpec::new("incus", &["list", "api", "--format=json"]),
+            success(initial),
+        ),
+    ]
+    .into_iter()
+    .chain(extra))
+    .collect::<Vec<_>>();
+    let reads = responses
+        .iter()
+        .filter(|(spec, _)| {
+            spec.program == "incus" && spec.args.len() == 3 && spec.args[0] == "list"
+        })
+        .count();
+    let server = serde_json::json!({"api_extensions": capabilities}).to_string();
+    responses.extend((0..reads).map(|_| {
+        (
+            ProcessSpec::new("incus", &["query", "/1.0"]),
+            success(&server),
+        )
+    }));
+    let cli = Arc::new(FixtureCli::new(responses));
     let runtime = ProviderRuntime::new(
         vec![Arc::new(tuivir::infrastructure::provider::IncusWorkspace)],
         cli.clone(),
@@ -728,5 +765,38 @@ async fn a_running_ephemeral_vm_cannot_apply_a_change_that_would_delete_it() {
         screen.contains("Stopping this Resource would remove it"),
         "{screen}"
     );
+    cli.assert_exhausted();
+}
+
+#[tokio::test]
+async fn incus_without_memory_hotplug_stops_and_restarts_a_vm_for_memory_changes() {
+    let initial = r#"[{"name":"api","type":"virtual-machine","status":"Running","expanded_config":{"limits.cpu":"1","limits.memory":"256MiB"}}]"#;
+    let updated = r#"[{"name":"api","type":"virtual-machine","status":"Running","expanded_config":{"limits.cpu":"1","limits.memory":"512MiB"}}]"#;
+    let mut extra = vec![
+        incus_read(initial),
+        (ProcessSpec::new("incus", &["stop", "api"]), success("")),
+        (
+            ProcessSpec::new("incus", &["config", "set", "api", "limits.memory=512MiB"]),
+            success(""),
+        ),
+        (ProcessSpec::new("incus", &["start", "api"]), success("")),
+        incus_read(updated),
+    ];
+    extra.extend(incus_refresh());
+    let (mut app, runtime, cli) =
+        incus_app_with_capabilities(initial, extra, &["cpu_hotplug"]).await;
+    edit_cpu(&mut app, &runtime, "1").await;
+    press(&mut app, "down");
+    press(&mut app, "enter");
+    press(&mut app, "ctrl+u");
+    for c in "512MiB".chars() {
+        press(&mut app, &c.to_string());
+    }
+    press(&mut app, "enter");
+    press(&mut app, "ctrl+a");
+    assert!(render_to_text(app.state(), 180, 36).contains("Downtime: stop/start"));
+    let requests = press(&mut app, "enter");
+    drive(&mut app, &runtime, requests).await;
+    assert!(render_to_text(app.state(), 180, 36).contains("Resource State: Running"));
     cli.assert_exhausted();
 }

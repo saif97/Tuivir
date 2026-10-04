@@ -191,8 +191,8 @@ impl ProviderWorkspace for IncusWorkspace {
                 Ok(())
             }
             .await;
-            if stop {
-                if let Err(restart) = self
+            if stop
+                && let Err(restart) = self
                     .execute_command(
                         cli,
                         target,
@@ -200,16 +200,15 @@ impl ProviderWorkspace for IncusWorkspace {
                         Some(ResourceState::Stopped),
                     )
                     .await
-                {
-                    return Err(WorkspaceError::new(match result {
-                        Ok(()) => {
-                            format!("Settings saved, but restart failed: {}", restart.message)
-                        }
-                        Err(error) => {
-                            format!("{}; restart failed: {}", error.message, restart.message)
-                        }
-                    }));
-                }
+            {
+                return Err(WorkspaceError::new(match result {
+                    Ok(()) => {
+                        format!("Settings saved, but restart failed: {}", restart.message)
+                    }
+                    Err(error) => {
+                        format!("{}; restart failed: {}", error.message, restart.message)
+                    }
+                }));
             }
             result
         })
@@ -232,19 +231,32 @@ impl ProviderWorkspace for IncusWorkspace {
                     "Incus configuration editing is only available for instances",
                 ));
             }
-            let output = cli
-                .run(ProcessSpec::new(
+            let (output, server) = tokio::try_join!(
+                cli.run(ProcessSpec::new(
                     "incus",
-                    &["list", &target.resource_id().0, "--format=json"],
+                    &["list", &target.resource_id().0, "--format=json"]
+                )),
+                cli.run(ProcessSpec::new("incus", &["query", "/1.0"])),
+            )
+            .map_err(|error| {
+                WorkspaceError::new(provider_cli_error(
+                    PROVIDER_NAME,
+                    &error,
+                    "Could not load instance configuration and capabilities",
                 ))
-                .await
-                .map_err(|error| {
-                    WorkspaceError::new(provider_cli_error(
-                        PROVIDER_NAME,
-                        &error,
-                        "Could not load instance configuration",
-                    ))
+            })?;
+            let server: serde_json::Value =
+                serde_json::from_str(&server.stdout).map_err(|error| {
+                    WorkspaceError::new(format!("Malformed Incus capabilities: {error}"))
                 })?;
+            let extensions = server["api_extensions"]
+                .as_array()
+                .ok_or_else(|| WorkspaceError::new("Incus omitted server capabilities"))?;
+            let supports = |extension: &str| {
+                extensions
+                    .iter()
+                    .any(|value| value.as_str() == Some(extension))
+            };
             let rows: Vec<serde_json::Value> =
                 serde_json::from_str(&output.stdout).map_err(|error| {
                     WorkspaceError::new(format!("Malformed Incus configuration: {error}"))
@@ -270,12 +282,17 @@ impl ProviderWorkspace for IncusWorkspace {
             let cpu = value("limits.cpu", if vm { "1" } else { "" });
             let cpu_update = if !vm {
                 ConfigurationUpdate::Live
-            } else if cpu.contains('=') || cpu.parse::<u32>().is_ok_and(|count| count > 64) {
+            } else if !supports("cpu_hotplug")
+                || cpu.parse::<u32>().ok().is_none_or(|count| count > 64)
+            {
                 ConfigurationUpdate::Stopped
             } else {
                 ConfigurationUpdate::CpuHotplug { maximum: 64 }
             };
-            let memory_update = if vm && value("limits.memory.hotplug", "true") == "false" {
+            let memory_update = if vm
+                && (!supports("memory_hotplug")
+                    || value("limits.memory.hotplug", "true") == "false")
+            {
                 ConfigurationUpdate::Stopped
             } else {
                 ConfigurationUpdate::Live
@@ -286,14 +303,16 @@ impl ProviderWorkspace for IncusWorkspace {
                     ConfigurationField {
                         id: "limits.cpu".into(),
                         update: cpu_update,
-                        label: if vm {
+                        label: if vm && supports("instance_limits_cpu_topology") {
                             "CPU count, IDs or topology"
                         } else {
                             "CPU count or IDs"
                         }
                         .into(),
                         value: value("limits.cpu", if vm { "1" } else { "" }),
-                        constraint: FieldConstraint::CpuSelection { topology: vm },
+                        constraint: FieldConstraint::CpuSelection {
+                            topology: vm && supports("instance_limits_cpu_topology"),
+                        },
                     },
                     ConfigurationField {
                         id: "limits.memory".into(),
