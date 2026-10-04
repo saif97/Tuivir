@@ -1,5 +1,7 @@
 mod configuration;
-pub use configuration::{ConfigurationDraft, ConfigurationField, ResourceConfiguration};
+pub use configuration::{
+    ConfigurationDraft, ConfigurationField, FieldConstraint, ResourceConfiguration,
+};
 mod app;
 mod command;
 mod key;

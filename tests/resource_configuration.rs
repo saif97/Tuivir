@@ -111,3 +111,22 @@ async fn typing_configuration_retains_an_unapplied_draft_across_navigation() {
     let screen = render_to_text(app.state(), 140, 32);
     assert!(screen.contains("1.5 → 2"), "{screen}");
 }
+
+#[tokio::test]
+async fn invalid_cpu_is_explained_without_dispatching_provider_work() {
+    let (mut app, runtime) = docker_app(r#"[{"HostConfig":{"NanoCpus":1500000000,"Memory":536870912},"State":{"Status":"running"}}]"#).await;
+    let requests = app.invoke(Command::ActivateDetailView(4));
+    drive(&mut app, &runtime, requests).await;
+    press(&mut app, "enter");
+    press(&mut app, "ctrl+u");
+    press(&mut app, "-");
+    press(&mut app, "1");
+    press(&mut app, "enter");
+    assert!(press(&mut app, "ctrl+a").is_empty());
+    let screen = render_to_text(app.state(), 160, 32);
+    assert!(
+        screen.contains("CPU limit must be a finite number"),
+        "{screen}"
+    );
+    assert!(screen.contains("1.5 → -1"), "{screen}");
+}

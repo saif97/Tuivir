@@ -93,6 +93,13 @@ const MODAL: &[CommandScope] = &[
 /// Defaults follow lazydocker wherever an equivalent Command exists.
 pub(super) const BUILTIN_COMMANDS: &[CommandDefinition] = &[
     CommandDefinition {
+        id: "configuration_apply",
+        description: "Apply Configuration Draft",
+        command: Command::ApplyConfiguration,
+        scopes: &[CommandScope::ConfigurationForm],
+        default_keys: &["ctrl+a"],
+    },
+    CommandDefinition {
         id: "configuration_edit",
         description: "Edit selected field",
         command: Command::EditConfigurationField,

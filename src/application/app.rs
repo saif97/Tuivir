@@ -680,6 +680,7 @@ impl App {
             workspace.clear_detail_selection();
         }
         match command {
+            Command::ApplyConfiguration => Vec::new(),
             Command::EditConfigurationField
             | Command::NextConfigurationField
             | Command::PreviousConfigurationField

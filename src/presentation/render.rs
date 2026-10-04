@@ -721,6 +721,9 @@ fn render_details_panel(
             } else {
                 lines.push(Line::from("Loading Configuration…"));
             }
+            if let Some(error) = draft.validation_error() {
+                lines.push(Line::from(error));
+            }
             if let Some(error) = &draft.error {
                 lines.push(Line::from(error.as_str()));
             }

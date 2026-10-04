@@ -39,6 +39,7 @@ impl fmt::Display for ResourceCommand {
 /// completions stay in [`crate::application::AppEvent`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Command {
+    ApplyConfiguration,
     EditConfigurationField,
     NextConfigurationField,
     PreviousConfigurationField,
