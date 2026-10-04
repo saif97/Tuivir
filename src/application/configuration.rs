@@ -87,3 +87,9 @@ pub struct ConfigurationReview {
     pub actual: ResourceConfiguration,
     pub changes: Vec<ConfigurationChange>,
 }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConfigurationOutcome {
+    pub actual: Option<ResourceConfiguration>,
+    pub error: Option<String>,
+}

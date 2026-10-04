@@ -1,5 +1,7 @@
 use std::{future::Future, pin::Pin};
 
+mod configuration;
+pub(crate) use configuration::apply_configuration;
 mod docker;
 mod docker_sandbox;
 mod incus;
@@ -86,6 +88,20 @@ impl ProviderDiscovery {
 /// Implementations own CLI commands and parsing. They never render Ratatui
 /// widgets, keeping provider knowledge out of the shared shell.
 pub trait ProviderWorkspace: Send + Sync {
+    fn write_configuration<'a>(
+        &'a self,
+        _cli: &'a dyn CliRunner,
+        _target: &'a ResourceTarget,
+        _actual: &'a crate::application::ResourceConfiguration,
+        _changes: &'a [crate::application::ConfigurationChange],
+    ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>> {
+        Box::pin(async {
+            Err(WorkspaceError::new(
+                "This Resource does not support configuration writes",
+            ))
+        })
+    }
+
     fn load_configuration<'a>(
         &'a self,
         _cli: &'a dyn CliRunner,

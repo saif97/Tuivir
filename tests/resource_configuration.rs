@@ -27,41 +27,58 @@ async fn drive(app: &mut App, runtime: &ProviderRuntime, requests: Vec<ProviderR
 }
 
 async fn docker_app(inspect: &str) -> (App, ProviderRuntime) {
-    let cli = Arc::new(FixtureCli::new([
-        (
-            ProcessSpec::new("docker", &["context", "show"]),
-            success("default"),
-        ),
-        (
-            ProcessSpec::new(
-                "docker",
-                &[
-                    "container",
-                    "ls",
-                    "--all",
-                    "--no-trunc",
-                    "--format",
-                    "{{json .}}",
-                ],
+    docker_app_with(inspect, Vec::new()).await
+}
+
+async fn docker_app_with(
+    inspect: &str,
+    extra: Vec<(
+        ProcessSpec,
+        Result<
+            tuivir::infrastructure::process::ProcessOutput,
+            tuivir::infrastructure::process::ProcessError,
+        >,
+    )>,
+) -> (App, ProviderRuntime) {
+    let cli = Arc::new(FixtureCli::new(
+        [
+            (
+                ProcessSpec::new("docker", &["context", "show"]),
+                success("default"),
             ),
-            success(include_str!("fixtures/docker/containers.jsonl")),
-        ),
-        (
-            ProcessSpec::new(
-                "docker",
-                &["image", "ls", "--no-trunc", "--format", "{{json .}}"],
+            (
+                ProcessSpec::new(
+                    "docker",
+                    &[
+                        "container",
+                        "ls",
+                        "--all",
+                        "--no-trunc",
+                        "--format",
+                        "{{json .}}",
+                    ],
+                ),
+                success(include_str!("fixtures/docker/containers.jsonl")),
             ),
-            success(""),
-        ),
-        (
-            ProcessSpec::new("docker", &["volume", "ls", "--format", "{{json .}}"]),
-            success(""),
-        ),
-        (
-            ProcessSpec::new("docker", &["container", "inspect", "a1b2c3d4e5f6"]),
-            success(inspect),
-        ),
-    ]));
+            (
+                ProcessSpec::new(
+                    "docker",
+                    &["image", "ls", "--no-trunc", "--format", "{{json .}}"],
+                ),
+                success(""),
+            ),
+            (
+                ProcessSpec::new("docker", &["volume", "ls", "--format", "{{json .}}"]),
+                success(""),
+            ),
+            (
+                ProcessSpec::new("docker", &["container", "inspect", "a1b2c3d4e5f6"]),
+                success(inspect),
+            ),
+        ]
+        .into_iter()
+        .chain(extra),
+    ));
     let runtime = ProviderRuntime::new(vec![Arc::new(DockerWorkspace)], cli);
     let mut app = App::new();
     let discovery = runtime.discover().await.remove(0);
@@ -148,4 +165,90 @@ async fn apply_requires_review_of_old_and_new_values_and_can_be_cancelled() {
     assert!(press(&mut app, "esc").is_empty());
     assert!(app.state().confirmation.is_none());
     assert!(render_to_text(app.state(), 160, 32).contains("1.5 → 2"));
+}
+
+fn inspect_response(
+    body: &str,
+) -> (
+    ProcessSpec,
+    Result<
+        tuivir::infrastructure::process::ProcessOutput,
+        tuivir::infrastructure::process::ProcessError,
+    >,
+) {
+    (
+        ProcessSpec::new("docker", &["container", "inspect", "a1b2c3d4e5f6"]),
+        success(body),
+    )
+}
+fn docker_refresh() -> Vec<(
+    ProcessSpec,
+    Result<
+        tuivir::infrastructure::process::ProcessOutput,
+        tuivir::infrastructure::process::ProcessError,
+    >,
+)> {
+    vec![
+        (
+            ProcessSpec::new(
+                "docker",
+                &[
+                    "container",
+                    "ls",
+                    "--all",
+                    "--no-trunc",
+                    "--format",
+                    "{{json .}}",
+                ],
+            ),
+            success(include_str!("fixtures/docker/containers.jsonl")),
+        ),
+        (
+            ProcessSpec::new(
+                "docker",
+                &["image", "ls", "--no-trunc", "--format", "{{json .}}"],
+            ),
+            success(""),
+        ),
+        (
+            ProcessSpec::new("docker", &["volume", "ls", "--format", "{{json .}}"]),
+            success(""),
+        ),
+    ]
+}
+const DOCKER_INITIAL: &str = r#"[{"HostConfig":{"NanoCpus":1500000000,"Memory":536870912,"MemorySwap":1073741824},"State":{"Status":"running"}}]"#;
+const DOCKER_UPDATED: &str = r#"[{"HostConfig":{"NanoCpus":2000000000,"Memory":536870912,"MemorySwap":1073741824},"State":{"Status":"running"}}]"#;
+async fn edit_cpu(app: &mut App, runtime: &ProviderRuntime, value: &str) {
+    let requests = app.invoke(Command::ActivateDetailView(4));
+    drive(app, runtime, requests).await;
+    press(app, "enter");
+    press(app, "ctrl+u");
+    for character in value.chars() {
+        assert!(press(app, &character.to_string()).is_empty());
+    }
+    press(app, "enter");
+}
+#[tokio::test]
+async fn confirmed_docker_cpu_updates_the_same_container_and_cleans_the_draft() {
+    let mut extra = vec![
+        inspect_response(DOCKER_INITIAL),
+        (
+            ProcessSpec::new(
+                "docker",
+                &["container", "update", "--cpus", "2", "a1b2c3d4e5f6"],
+            ),
+            success("a1b2c3d4e5f6"),
+        ),
+        inspect_response(DOCKER_UPDATED),
+    ];
+    extra.extend(docker_refresh());
+    let (mut app, runtime) = docker_app_with(DOCKER_INITIAL, extra).await;
+    edit_cpu(&mut app, &runtime, "2").await;
+    press(&mut app, "ctrl+a");
+    let requests = press(&mut app, "enter");
+    assert!(!requests.is_empty(), "confirmation must dispatch the write");
+    drive(&mut app, &runtime, requests).await;
+    let screen = render_to_text(app.state(), 160, 32);
+    assert!(screen.contains("CPU limit (CPUs): 2"), "{screen}");
+    assert!(!screen.contains("1.5 → 2"), "{screen}");
 }

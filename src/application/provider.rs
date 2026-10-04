@@ -59,6 +59,10 @@ impl ProviderRequestId {
 ///
 /// Infrastructure executes requests outside the single-owner application state.
 pub enum ProviderRequest {
+    ApplyResourceConfiguration {
+        request_id: ProviderRequestId,
+        review: super::ConfigurationReview,
+    },
     LoadResourceConfiguration {
         request_id: ProviderRequestId,
         provider_id: ProviderId,

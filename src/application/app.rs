@@ -16,6 +16,12 @@ use crate::domain::{DetailViewId, Provider, ProviderId, ResourceState, ResourceT
 /// User intentions are [`Command`]s, resolved from keys, not events. Keeping
 /// the two separate means a keypress never looks like a completed refresh.
 pub enum AppEvent {
+    ResourceConfigurationApplied {
+        request_id: ProviderRequestId,
+        provider_id: ProviderId,
+        target: ResourceTarget,
+        outcome: super::ConfigurationOutcome,
+    },
     ResourceConfigurationCompleted {
         request_id: ProviderRequestId,
         provider_id: ProviderId,
@@ -422,6 +428,29 @@ impl App {
 
     fn apply(&mut self, event: AppEvent) -> Vec<ProviderRequest> {
         match event {
+            AppEvent::ResourceConfigurationApplied {
+                request_id,
+                provider_id,
+                target,
+                outcome,
+            } => {
+                let Some(draft) = self
+                    .state
+                    .configuration_drafts
+                    .get_mut(&(provider_id.clone(), target))
+                else {
+                    return Vec::new();
+                };
+                if draft.request_id != Some(request_id) {
+                    return Vec::new();
+                }
+                draft.request_id = None;
+                draft.error = outcome.error;
+                if let Some(actual) = outcome.actual {
+                    draft.actual = Some(actual);
+                }
+                vec![self.start_refresh(provider_id)]
+            }
             AppEvent::ResourceConfigurationCompleted {
                 request_id,
                 provider_id,
@@ -946,7 +975,25 @@ impl App {
     /// reported failure.
     fn confirm_or_dismiss(&mut self) -> Vec<ProviderRequest> {
         match self.state.confirmation.take() {
-            Some(Confirmation::ResourceConfiguration(_review)) => Vec::new(),
+            Some(Confirmation::ResourceConfiguration(review)) => {
+                let request_id = ProviderRequestId::new(self.next_request_id);
+                self.next_request_id += 1;
+                let Some(draft) = self
+                    .state
+                    .configuration_drafts
+                    .get_mut(&(review.provider_id.clone(), review.target.clone()))
+                else {
+                    return Vec::new();
+                };
+                if draft.request_id.is_some() {
+                    return Vec::new();
+                }
+                draft.request_id = Some(request_id);
+                draft.error = None;
+                self.pending_refreshes
+                    .retain(|_, id| id != &review.provider_id);
+                vec![ProviderRequest::ApplyResourceConfiguration { request_id, review }]
+            }
             Some(Confirmation::ResourceCommand(confirmation)) => {
                 self.dispatch_resource_command(confirmation)
             }

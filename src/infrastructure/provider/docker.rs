@@ -71,6 +71,44 @@ struct VolumeRow {
 }
 
 impl ProviderWorkspace for DockerWorkspace {
+    fn write_configuration<'a>(
+        &'a self,
+        cli: &'a dyn CliRunner,
+        target: &'a ResourceTarget,
+        _actual: &'a crate::application::ResourceConfiguration,
+        changes: &'a [crate::application::ConfigurationChange],
+    ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>> {
+        Box::pin(async move {
+            let mut args = vec!["container".to_owned(), "update".to_owned()];
+            for change in changes {
+                let flag = match change.field.id.as_str() {
+                    "cpu" => "--cpus",
+                    _ => {
+                        return Err(WorkspaceError::new(
+                            "Unsupported Docker configuration field",
+                        ));
+                    }
+                };
+                args.push(flag.to_owned());
+                args.push(change.proposed.clone());
+            }
+            args.push(target.resource_id().0.clone());
+            cli.run(ProcessSpec::new(
+                "docker",
+                &args.iter().map(String::as_str).collect::<Vec<_>>(),
+            ))
+            .await
+            .map_err(|error| {
+                WorkspaceError::new(provider_cli_error(
+                    PROVIDER_NAME,
+                    &error,
+                    "Docker could not update container configuration",
+                ))
+            })?;
+            Ok(())
+        })
+    }
+
     fn load_configuration<'a>(
         &'a self,
         cli: &'a dyn CliRunner,

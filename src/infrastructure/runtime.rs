@@ -101,6 +101,26 @@ impl ProviderRuntime {
         events: tokio::sync::mpsc::UnboundedSender<AppEvent>,
     ) {
         match request {
+            ProviderRequest::ApplyResourceConfiguration { request_id, review } => {
+                let Some(workspace) = self.workspace(&review.provider_id) else {
+                    return;
+                };
+                let cli = Arc::clone(&self.cli);
+                tokio::spawn(async move {
+                    let outcome = crate::infrastructure::provider::apply_configuration(
+                        workspace.as_ref(),
+                        cli.as_ref(),
+                        &review,
+                    )
+                    .await;
+                    let _ = events.send(AppEvent::ResourceConfigurationApplied {
+                        request_id,
+                        provider_id: review.provider_id,
+                        target: review.target,
+                        outcome,
+                    });
+                });
+            }
             ProviderRequest::LoadResourceConfiguration {
                 request_id,
                 provider_id,
