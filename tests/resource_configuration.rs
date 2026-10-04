@@ -546,3 +546,62 @@ async fn sandbox_configuration_explains_read_only_limits_without_writes() {
     assert!(app.state().confirmation.is_none());
     cli.assert_exhausted();
 }
+
+#[tokio::test]
+async fn incus_restart_failure_reports_saved_settings_and_refreshed_stopped_state() {
+    let initial = r#"[{"name":"api","type":"virtual-machine","status":"Running","expanded_config":{"limits.cpu":"sockets=1,cores=2","limits.memory":"512MiB"}}]"#;
+    let stopped = r#"[{"name":"api","type":"virtual-machine","status":"Stopped","expanded_config":{"limits.cpu":"4","limits.memory":"512MiB"}}]"#;
+    let mut extra = vec![
+        incus_read(initial),
+        (ProcessSpec::new("incus", &["stop", "api"]), success("")),
+        (
+            ProcessSpec::new("incus", &["config", "set", "api", "limits.cpu=4"]),
+            success(""),
+        ),
+        (
+            ProcessSpec::new("incus", &["start", "api"]),
+            common::failure("guest failed to boot"),
+        ),
+        incus_read(stopped),
+    ];
+    extra.extend(incus_refresh());
+    let (mut app, runtime, cli) = incus_app(initial, extra).await;
+    edit_cpu(&mut app, &runtime, "4").await;
+    press(&mut app, "ctrl+a");
+    let requests = press(&mut app, "enter");
+    drive(&mut app, &runtime, requests).await;
+    let screen = render_to_text(app.state(), 180, 36);
+    assert!(
+        screen.contains("Settings saved, but restart failed"),
+        "{screen}"
+    );
+    assert!(screen.contains("guest failed to boot"), "{screen}");
+    assert!(screen.contains("Resource State: Stopped"), "{screen}");
+    assert!(!screen.contains('→'), "{screen}");
+    cli.assert_exhausted();
+}
+
+#[tokio::test]
+async fn docker_update_failure_retains_attempted_values_alongside_actual_values() {
+    let mut extra = vec![
+        inspect_response(DOCKER_INITIAL),
+        (
+            ProcessSpec::new(
+                "docker",
+                &["container", "update", "--cpus", "2", "a1b2c3d4e5f6"],
+            ),
+            common::failure("CPU limit rejected"),
+        ),
+        inspect_response(DOCKER_INITIAL),
+    ];
+    extra.extend(docker_refresh());
+    let (mut app, runtime, cli) = docker_app_with(DOCKER_INITIAL, extra).await;
+    edit_cpu(&mut app, &runtime, "2").await;
+    press(&mut app, "ctrl+a");
+    let requests = press(&mut app, "enter");
+    drive(&mut app, &runtime, requests).await;
+    let screen = render_to_text(app.state(), 160, 32);
+    assert!(screen.contains("CPU limit rejected"), "{screen}");
+    assert!(screen.contains("1.5 → 2"), "{screen}");
+    cli.assert_exhausted();
+}
