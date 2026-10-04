@@ -27,7 +27,8 @@ async fn drive(app: &mut App, runtime: &ProviderRuntime, requests: Vec<ProviderR
 }
 
 async fn docker_app(inspect: &str) -> (App, ProviderRuntime) {
-    docker_app_with(inspect, Vec::new()).await
+    let (app, runtime, _) = docker_app_with(inspect, Vec::new()).await;
+    (app, runtime)
 }
 
 async fn docker_app_with(
@@ -39,7 +40,7 @@ async fn docker_app_with(
             tuivir::infrastructure::process::ProcessError,
         >,
     )>,
-) -> (App, ProviderRuntime) {
+) -> (App, ProviderRuntime, Arc<FixtureCli>) {
     let cli = Arc::new(FixtureCli::new(
         [
             (
@@ -79,12 +80,12 @@ async fn docker_app_with(
         .into_iter()
         .chain(extra),
     ));
-    let runtime = ProviderRuntime::new(vec![Arc::new(DockerWorkspace)], cli);
+    let runtime = ProviderRuntime::new(vec![Arc::new(DockerWorkspace)], cli.clone());
     let mut app = App::new();
     let discovery = runtime.discover().await.remove(0);
     let requests = app.update(discovery.into_event());
     drive(&mut app, &runtime, requests).await;
-    (app, runtime)
+    (app, runtime, cli)
 }
 
 #[tokio::test]
@@ -242,7 +243,7 @@ async fn confirmed_docker_cpu_updates_the_same_container_and_cleans_the_draft() 
         inspect_response(DOCKER_UPDATED),
     ];
     extra.extend(docker_refresh());
-    let (mut app, runtime) = docker_app_with(DOCKER_INITIAL, extra).await;
+    let (mut app, runtime, cli) = docker_app_with(DOCKER_INITIAL, extra).await;
     edit_cpu(&mut app, &runtime, "2").await;
     press(&mut app, "ctrl+a");
     let requests = press(&mut app, "enter");
@@ -251,4 +252,47 @@ async fn confirmed_docker_cpu_updates_the_same_container_and_cleans_the_draft() 
     let screen = render_to_text(app.state(), 160, 32);
     assert!(screen.contains("CPU limit (CPUs): 2"), "{screen}");
     assert!(!screen.contains("1.5 → 2"), "{screen}");
+    cli.assert_exhausted();
+}
+
+#[tokio::test]
+async fn confirmed_docker_memory_updates_without_changing_cpu_or_restarting() {
+    let updated = r#"[{"HostConfig":{"NanoCpus":1500000000,"Memory":805306368,"MemorySwap":1073741824},"State":{"Status":"running"}}]"#;
+    let mut extra = vec![
+        inspect_response(DOCKER_INITIAL),
+        (
+            ProcessSpec::new(
+                "docker",
+                &[
+                    "container",
+                    "update",
+                    "--memory",
+                    "805306368",
+                    "a1b2c3d4e5f6",
+                ],
+            ),
+            success("updated"),
+        ),
+        inspect_response(updated),
+    ];
+    extra.extend(docker_refresh());
+    let (mut app, runtime, cli) = docker_app_with(DOCKER_INITIAL, extra).await;
+    edit_cpu(&mut app, &runtime, "1.5").await;
+    press(&mut app, "down");
+    press(&mut app, "enter");
+    press(&mut app, "ctrl+u");
+    for c in "805306368".chars() {
+        press(&mut app, &c.to_string());
+    }
+    press(&mut app, "enter");
+    press(&mut app, "ctrl+a");
+    let requests = press(&mut app, "enter");
+    drive(&mut app, &runtime, requests).await;
+    let screen = render_to_text(app.state(), 160, 32);
+    assert!(
+        screen.contains("Memory limit (bytes): 805306368"),
+        "{screen}"
+    );
+    assert!(screen.contains("CPU limit (CPUs): 1.5"), "{screen}");
+    cli.assert_exhausted();
 }

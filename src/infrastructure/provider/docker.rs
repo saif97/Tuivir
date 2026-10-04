@@ -83,6 +83,7 @@ impl ProviderWorkspace for DockerWorkspace {
             for change in changes {
                 let flag = match change.field.id.as_str() {
                     "cpu" => "--cpus",
+                    "memory" => "--memory",
                     _ => {
                         return Err(WorkspaceError::new(
                             "Unsupported Docker configuration field",
