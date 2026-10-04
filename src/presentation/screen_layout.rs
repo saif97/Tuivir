@@ -181,7 +181,12 @@ pub fn confirmation_area(state: &AppState, area: Rect) -> Option<Rect> {
     state
         .confirmation
         .as_ref()
-        .map(|_| centered_rect(64, 5, area))
+        .map(|confirmation| match confirmation {
+            crate::application::Confirmation::ResourceConfiguration(review) => {
+                centered_rect(86, (review.changes.len() as u16).saturating_add(6), area)
+            }
+            _ => centered_rect(64, 5, area),
+        })
 }
 
 pub fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {

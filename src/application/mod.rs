@@ -1,6 +1,7 @@
 mod configuration;
 pub use configuration::{
-    ConfigurationDraft, ConfigurationField, FieldConstraint, ResourceConfiguration,
+    ConfigurationChange, ConfigurationDraft, ConfigurationField, ConfigurationReview,
+    FieldConstraint, ResourceConfiguration,
 };
 mod app;
 mod command;

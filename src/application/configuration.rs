@@ -73,3 +73,17 @@ impl ConfigurationDraft {
             .find_map(|(field, value)| field.validate(value).err())
     }
 }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConfigurationChange {
+    pub field: ConfigurationField,
+    pub proposed: String,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConfigurationReview {
+    pub provider_id: crate::domain::ProviderId,
+    pub target: crate::domain::ResourceTarget,
+    pub resource_name: String,
+    pub actual: ResourceConfiguration,
+    pub changes: Vec<ConfigurationChange>,
+}

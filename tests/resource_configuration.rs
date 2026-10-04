@@ -130,3 +130,22 @@ async fn invalid_cpu_is_explained_without_dispatching_provider_work() {
     );
     assert!(screen.contains("1.5 → -1"), "{screen}");
 }
+
+#[tokio::test]
+async fn apply_requires_review_of_old_and_new_values_and_can_be_cancelled() {
+    let (mut app, runtime) = docker_app(r#"[{"HostConfig":{"NanoCpus":1500000000,"Memory":536870912},"State":{"Status":"running"}}]"#).await;
+    let requests = app.invoke(Command::ActivateDetailView(4));
+    drive(&mut app, &runtime, requests).await;
+    press(&mut app, "enter");
+    press(&mut app, "ctrl+u");
+    press(&mut app, "2");
+    press(&mut app, "enter");
+    assert!(press(&mut app, "ctrl+a").is_empty());
+    let screen = render_to_text(app.state(), 160, 32);
+    assert!(screen.contains("Confirm configuration"), "{screen}");
+    assert!(screen.contains("CPU limit (CPUs): 1.5 → 2"), "{screen}");
+    assert!(screen.contains("no restart required"), "{screen}");
+    assert!(press(&mut app, "esc").is_empty());
+    assert!(app.state().confirmation.is_none());
+    assert!(render_to_text(app.state(), 160, 32).contains("1.5 → 2"));
+}

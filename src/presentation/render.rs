@@ -228,6 +228,20 @@ fn render_confirmation(state: &AppState, frame: &mut Frame<'_>) {
     {
         frame.render_widget(Clear, area);
         let (title, lines) = match confirmation {
+            Confirmation::ResourceConfiguration(review) => {
+                let mut lines = vec![Line::from(format!(
+                    "Apply changes to {}?",
+                    review.resource_name
+                ))];
+                lines.extend(review.changes.iter().map(|change| {
+                    Line::from(format!(
+                        "{}: {} → {}",
+                        change.field.label, change.field.value, change.proposed
+                    ))
+                }));
+                lines.push(Line::from(review.actual.notice.as_str()));
+                (" Confirm configuration ", lines)
+            }
             Confirmation::ResourceCommand(confirmation) => {
                 let mut lines = vec![Line::from(format!(
                     "Delete {} resource {} ({})?",
@@ -716,7 +730,7 @@ fn render_details_panel(
                 lines.push(Line::from(if draft.editing {
                     "Editing draft; Enter/Esc keeps it. ctrl+u clears field."
                 } else {
-                    "Enter edits selected field; arrows select fields."
+                    "Enter edits; arrows select; ctrl+a Apply."
                 }));
             } else {
                 lines.push(Line::from("Loading Configuration…"));

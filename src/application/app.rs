@@ -1,4 +1,4 @@
-use super::{ConfigurationDraft, ResourceConfiguration};
+use super::{ConfigurationChange, ConfigurationDraft, ConfigurationReview, ResourceConfiguration};
 use std::collections::HashMap;
 
 use super::workspace::{DetailCompletion, ProviderWorkspaceState};
@@ -317,6 +317,7 @@ pub struct ResourceCommandInvocation {
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// The deliberate operation awaiting the user's confirmation.
 pub enum Confirmation {
+    ResourceConfiguration(ConfigurationReview),
     ResourceCommand(ResourceCommandInvocation),
     QuitResourceShellSessions,
 }
@@ -680,7 +681,44 @@ impl App {
             workspace.clear_detail_selection();
         }
         match command {
-            Command::ApplyConfiguration => Vec::new(),
+            Command::ApplyConfiguration => {
+                if !self.state.configuration_selected() {
+                    return Vec::new();
+                }
+                let workspace = self.state.active_workspace().unwrap();
+                let target = workspace.selected_resource_target().unwrap();
+                let Some(draft) = self.state.selected_configuration() else {
+                    return Vec::new();
+                };
+                if draft.request_id.is_some() || draft.validation_error().is_some() {
+                    return Vec::new();
+                }
+                let Some(actual) = &draft.actual else {
+                    return Vec::new();
+                };
+                let changes = actual
+                    .fields
+                    .iter()
+                    .zip(&draft.proposed)
+                    .filter(|(field, proposed)| field.value != **proposed)
+                    .map(|(field, proposed)| ConfigurationChange {
+                        field: field.clone(),
+                        proposed: proposed.clone(),
+                    })
+                    .collect::<Vec<_>>();
+                if changes.is_empty() {
+                    return Vec::new();
+                }
+                self.state.confirmation =
+                    Some(Confirmation::ResourceConfiguration(ConfigurationReview {
+                        provider_id: workspace.id().clone(),
+                        resource_name: workspace.resource(&target).unwrap().name.clone(),
+                        target,
+                        actual: actual.clone(),
+                        changes,
+                    }));
+                Vec::new()
+            }
             Command::EditConfigurationField
             | Command::NextConfigurationField
             | Command::PreviousConfigurationField
@@ -908,6 +946,7 @@ impl App {
     /// reported failure.
     fn confirm_or_dismiss(&mut self) -> Vec<ProviderRequest> {
         match self.state.confirmation.take() {
+            Some(Confirmation::ResourceConfiguration(_review)) => Vec::new(),
             Some(Confirmation::ResourceCommand(confirmation)) => {
                 self.dispatch_resource_command(confirmation)
             }
