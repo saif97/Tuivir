@@ -288,6 +288,30 @@ fn render_confirmation(state: &AppState, frame: &mut Frame<'_>) {
 /// so the status identifies its target even while another Provider Workspace
 /// is active.
 fn render_command_bar(state: &AppState, frame: &mut Frame<'_>, area: Rect) {
+    let applying = state
+        .configuration_drafts
+        .iter()
+        .filter(|(_, draft)| draft.applying)
+        .map(|((provider_id, target), _)| {
+            let workspace = state
+                .providers
+                .iter()
+                .find(|workspace| workspace.id() == provider_id);
+            let provider = workspace.map_or("Provider", |workspace| workspace.name());
+            let name = workspace
+                .and_then(|workspace| workspace.resource(target))
+                .map(|resource| resource.name.clone())
+                .unwrap_or_else(|| target.to_string());
+            format!("Applying configuration to {provider} / {name}…")
+        })
+        .collect::<Vec<_>>();
+    if !applying.is_empty() {
+        frame.render_widget(
+            Paragraph::new(applying.join("; ")).style(themed_style(ThemeRole::Warning)),
+            area,
+        );
+        return;
+    }
     let mut spans = state
         .command_bar
         .iter()

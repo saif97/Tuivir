@@ -24,6 +24,7 @@ pub struct ConfigurationDraft {
     pub proposed: Vec<String>,
     pub selected_field: usize,
     pub editing: bool,
+    pub applying: bool,
     pub(crate) request_id: Option<ProviderRequestId>,
 }
 

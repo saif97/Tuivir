@@ -666,3 +666,38 @@ async fn docker_memory_validation_explains_the_existing_memory_swap_ceiling() {
         "{screen}"
     );
 }
+
+#[tokio::test]
+async fn dispatched_configuration_stays_with_its_original_resource_and_freezes_its_draft() {
+    let mut extra = vec![
+        inspect_response(DOCKER_INITIAL),
+        (
+            ProcessSpec::new(
+                "docker",
+                &["container", "update", "--cpus", "2", "a1b2c3d4e5f6"],
+            ),
+            success("updated"),
+        ),
+        inspect_response(DOCKER_UPDATED),
+    ];
+    extra.extend(docker_refresh());
+    let (mut app, runtime, cli) = docker_app_with(DOCKER_INITIAL, extra).await;
+    edit_cpu(&mut app, &runtime, "2").await;
+    press(&mut app, "ctrl+a");
+    let requests = press(&mut app, "enter");
+    press(&mut app, "enter");
+    assert!(!render_to_text(app.state(), 180, 36).contains("Editing draft"));
+    app.invoke(Command::FocusResourcePanel(0));
+    app.invoke(Command::SelectNext);
+    let screen = render_to_text(app.state(), 180, 36);
+    assert!(
+        screen.contains("Applying configuration to Docker / api"),
+        "{screen}"
+    );
+    drive(&mut app, &runtime, requests).await;
+    app.invoke(Command::SelectPrevious);
+    app.invoke(Command::FocusDetails);
+    let screen = render_to_text(app.state(), 180, 36);
+    assert!(screen.contains("CPU limit (CPUs): 2"), "{screen}");
+    cli.assert_exhausted();
+}

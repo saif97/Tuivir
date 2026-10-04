@@ -445,6 +445,7 @@ impl App {
                     return Vec::new();
                 }
                 draft.request_id = None;
+                draft.applying = false;
                 draft.error = outcome.error;
                 if let Some(actual) = outcome.actual {
                     draft.reconcile(actual);
@@ -756,6 +757,9 @@ impl App {
                         workspace.selected_resource_target().unwrap(),
                     );
                     if let Some(draft) = self.state.configuration_drafts.get_mut(&key) {
+                        if draft.request_id.is_some() {
+                            return Vec::new();
+                        }
                         match command {
                             Command::EditConfigurationField => {
                                 draft.editing = draft
@@ -1011,6 +1015,8 @@ impl App {
                     return Vec::new();
                 }
                 draft.request_id = Some(request_id);
+                draft.applying = true;
+                draft.editing = false;
                 draft.error = None;
                 self.pending_refreshes
                     .retain(|_, id| id != &review.provider_id);
@@ -1173,6 +1179,7 @@ impl App {
                     proposed: Vec::new(),
                     selected_field: 0,
                     editing: false,
+                    applying: false,
                     request_id: Some(request_id),
                 },
             );
