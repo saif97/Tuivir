@@ -260,6 +260,8 @@ impl AppState {
 /// First effective bindings projected for inline display.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct KeyHints {
+    pub configuration_form: Vec<HelpEntry>,
+    pub configuration_input: Vec<HelpEntry>,
     pub focus_providers: Option<String>,
     pub focus_resource_panels: Vec<Option<String>>,
     pub focus_details: Option<String>,
@@ -267,7 +269,32 @@ pub struct KeyHints {
 
 impl KeyHints {
     fn from_registry(registry: &CommandRegistry) -> Self {
+        let configuration_hints = |scope| {
+            registry
+                .in_scope(scope)
+                .filter(|entry| {
+                    matches!(
+                        entry.command,
+                        Command::ApplyConfiguration
+                            | Command::EditConfigurationField
+                            | Command::NextConfigurationField
+                            | Command::PreviousConfigurationField
+                            | Command::FinishConfigurationField
+                            | Command::ConfigurationBackspace
+                            | Command::ClearConfigurationField
+                    )
+                })
+                .filter_map(|entry| {
+                    entry.keys.first().map(|key| HelpEntry {
+                        key: key.to_string(),
+                        description: entry.description.into(),
+                    })
+                })
+                .collect()
+        };
         Self {
+            configuration_form: configuration_hints(CommandScope::ConfigurationForm),
+            configuration_input: configuration_hints(CommandScope::ConfigurationInput),
             focus_providers: registry
                 .first_key(Command::FocusProviders)
                 .map(|key| key.to_string()),

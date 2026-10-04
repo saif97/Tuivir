@@ -41,6 +41,25 @@ async fn docker_app_with(
         >,
     )>,
 ) -> (App, ProviderRuntime, Arc<FixtureCli>) {
+    docker_app_with_registry(
+        inspect,
+        extra,
+        tuivir::application::CommandRegistry::builtin(),
+    )
+    .await
+}
+
+async fn docker_app_with_registry(
+    inspect: &str,
+    extra: Vec<(
+        ProcessSpec,
+        Result<
+            tuivir::infrastructure::process::ProcessOutput,
+            tuivir::infrastructure::process::ProcessError,
+        >,
+    )>,
+    registry: tuivir::application::CommandRegistry,
+) -> (App, ProviderRuntime, Arc<FixtureCli>) {
     let cli = Arc::new(FixtureCli::new(
         [
             (
@@ -81,7 +100,7 @@ async fn docker_app_with(
         .chain(extra),
     ));
     let runtime = ProviderRuntime::new(vec![Arc::new(DockerWorkspace)], cli.clone());
-    let mut app = App::new();
+    let mut app = App::with_registry(registry);
     let discovery = runtime.discover().await.remove(0);
     let requests = app.update(discovery.into_event());
     drive(&mut app, &runtime, requests).await;
@@ -884,5 +903,32 @@ async fn existing_docker_cpu_quota_limits_are_loaded_and_updated_in_their_native
     let requests = press(&mut app, "enter");
     drive(&mut app, &runtime, requests).await;
     assert!(render_to_text(app.state(), 180, 36).contains("CPU limit (CPUs): 1"));
+    cli.assert_exhausted();
+}
+
+#[tokio::test]
+async fn configuration_instructions_follow_effective_keybindings() {
+    let registry = tuivir::application::CommandRegistry::effective(&[
+        ("configuration_edit".into(), vec!["e".into()]),
+        ("configuration_apply".into(), vec!["alt+a".into()]),
+        (
+            "configuration_finish_field".into(),
+            vec!["alt+enter".into()],
+        ),
+        ("configuration_clear_field".into(), vec!["alt+u".into()]),
+    ])
+    .unwrap();
+    let (mut app, runtime, cli) = docker_app_with_registry(DOCKER_INITIAL, vec![], registry).await;
+    let requests = app.invoke(Command::ActivateDetailView(4));
+    drive(&mut app, &runtime, requests).await;
+    let screen = render_to_text(app.state(), 180, 36);
+    assert!(!screen.contains("ctrl+a Apply"), "{screen}");
+    assert!(!screen.contains("Enter edits"), "{screen}");
+    assert!(screen.contains("alt+a"), "{screen}");
+    press(&mut app, "e");
+    let screen = render_to_text(app.state(), 180, 36);
+    assert!(screen.contains("alt+enter"), "{screen}");
+    assert!(screen.contains("alt+u"), "{screen}");
+    assert!(!screen.contains("ctrl+u clears"), "{screen}");
     cli.assert_exhausted();
 }

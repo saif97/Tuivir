@@ -757,11 +757,19 @@ fn render_details_panel(
                 }));
                 lines.push(Line::from(format!("Resource State: {:?}", actual.state)));
                 lines.push(Line::from(actual.notice.as_str()));
-                lines.push(Line::from(if draft.editing {
-                    "Editing draft; Enter/Esc keeps it. ctrl+u clears field."
+                if draft.editing {
+                    lines.push(Line::from("Editing draft; changes remain unapplied."));
+                }
+                let hints = if draft.editing {
+                    &state.hints.configuration_input
                 } else {
-                    "Enter edits; arrows select; ctrl+a Apply."
-                }));
+                    &state.hints.configuration_form
+                };
+                lines.extend(
+                    hints
+                        .iter()
+                        .map(|hint| Line::from(format!("{}  {}", hint.key, hint.description))),
+                );
             } else {
                 lines.push(Line::from("Loading Configuration…"));
             }
