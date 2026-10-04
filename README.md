@@ -97,6 +97,13 @@ detail_view_previous = ["h", "left"]
 detail_scroll_down = ["ctrl+d", "pagedown"]
 detail_scroll_up = ["ctrl+u", "pageup"]
 details_copy = ["y"]
+configuration_apply = ["ctrl+a"]
+configuration_edit = ["enter"]
+configuration_next_field = ["down", "j"]
+configuration_previous_field = ["up", "k"]
+configuration_finish_field = ["enter", "esc"]
+configuration_backspace = ["backspace"]
+configuration_clear_field = ["ctrl+u"]
 layout_boundary_left = ["<"]
 layout_boundary_right = [">"]
 
@@ -140,6 +147,30 @@ tuivir
 The interface shows the available commands and their key bindings in the
 footer. Run `tuivir --help` for command-line options.
 
+### Resource CPU and memory
+
+Select a Docker container or Incus instance, focus Details, and move to the
+Configuration tab with the left/right keys. Up/down selects a field; Enter
+edits it, Backspace removes a character, and Ctrl+U clears the input. Enter or
+Esc keeps the draft without writing. Ctrl+A opens a review of current and
+proposed values and any necessary downtime; confirm explicitly to Apply.
+Docker CPU limits accept decimal CPUs (0 is unlimited), and Docker memory
+limits accept whole bytes (0 is unlimited; nonzero limits must be at least
+6 MiB and fit the existing memory+swap limit). Incus accepts CPU counts or CPU
+IDs/ranges and memory sizes such as `512MiB` or `50%`. Supported servers also
+accept VM CPU topology syntax. Incus edits set instance overrides without
+changing shared profiles. Docker Sandbox limits are read-only where reported.
+
+Drafts survive Resource and Provider Workspace navigation for the current
+session. Refresh with Ctrl+R to reload actual values while keeping edits.
+Apply re-reads edited fields and refuses external conflicts until you review
+again. After failures, actual values and Resource State are refreshed; saved
+fields become clean and remaining attempted values stay in the draft. Required
+stop/start operates on the same Resource and preserves its original running or
+stopped state on success. Restart failures remain visible even when settings
+were saved. Automatic rollback and draft persistence across restarts are not
+provided.
+
 ## Provider roadmap
 - [x] Docker
 - [x] Incus
@@ -148,7 +179,7 @@ footer. Run `tuivir --help` for command-line options.
 - [ ] Apple `container`
 - [ ] Podman
 
-- [ ] set resource size, ram, vCPU, etc
+- [x] Edit Resource CPU and memory configuration
 
 Tuivir is available under either the MIT License or the Apache License, Version
 2.0. See [LICENSE-MIT](LICENSE-MIT) and [LICENSE-APACHE](LICENSE-APACHE).
