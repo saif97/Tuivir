@@ -800,3 +800,21 @@ async fn incus_without_memory_hotplug_stops_and_restarts_a_vm_for_memory_changes
     assert!(render_to_text(app.state(), 180, 36).contains("Resource State: Running"));
     cli.assert_exhausted();
 }
+
+#[tokio::test]
+async fn fractional_incus_memory_percentages_are_rejected_before_apply() {
+    let initial = r#"[{"name":"api","type":"container","status":"Running","expanded_config":{"limits.cpu":"2","limits.memory":"50%"}}]"#;
+    let (mut app, runtime, cli) = incus_app(initial, vec![]).await;
+    edit_cpu(&mut app, &runtime, "2").await;
+    press(&mut app, "down");
+    press(&mut app, "enter");
+    press(&mut app, "ctrl+u");
+    for c in "12.5%".chars() {
+        press(&mut app, &c.to_string());
+    }
+    press(&mut app, "enter");
+    assert!(press(&mut app, "ctrl+a").is_empty());
+    assert!(app.state().confirmation.is_none());
+    assert!(render_to_text(app.state(), 180, 36).contains("whole percentage"));
+    cli.assert_exhausted();
+}

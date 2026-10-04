@@ -84,8 +84,8 @@ impl ConfigurationField {
                     || (percent
                         && value
                             .strip_suffix('%')
-                            .and_then(|n| n.parse::<f64>().ok())
-                            .is_some_and(|n| n.is_finite() && n > 0.0 && n <= 100.0))
+                            .and_then(|n| n.parse::<u8>().ok())
+                            .is_some_and(|n| n > 0 && n <= 100))
             }
             FieldConstraint::Decimal => value
                 .parse::<f64>()
@@ -113,7 +113,11 @@ impl ConfigurationField {
                 ),
                 FieldConstraint::Quantity { percent } => format!(
                     "Memory must be positive bytes or a size such as 512MiB{}.",
-                    if percent { " or 1–100%" } else { "" }
+                    if percent {
+                        " or a whole percentage from 1–100%"
+                    } else {
+                        ""
+                    }
                 ),
                 FieldConstraint::Decimal => {
                     "CPU limit must be a finite number of CPUs, 0 or greater (0 is unlimited)."
