@@ -251,24 +251,26 @@ fn valid_cpu_selection(value: &str, topology: bool) -> bool {
             number > 0
         });
     }
-    let mut ids = std::collections::HashSet::new();
-    value.split(',').all(|part| {
+    let mut ranges = Vec::new();
+    for part in value.split(',') {
         let range = if let Some((start, end)) = part.split_once('-') {
             let (Ok(start), Ok(end)) = (start.parse::<u32>(), end.parse::<u32>()) else {
                 return false;
             };
             if end < start || end - start > 65536 {
                 return false;
-            };
-            start..=end
+            }
+            (start, end)
         } else {
             let Ok(id) = part.parse::<u32>() else {
                 return false;
             };
-            id..=id
+            (id, id)
         };
-        range.into_iter().all(|id| ids.insert(id))
-    })
+        ranges.push(range);
+    }
+    ranges.sort_unstable();
+    ranges.windows(2).all(|pair| pair[0].1 < pair[1].0)
 }
 
 fn quantity_bytes(value: &str) -> Option<u64> {
