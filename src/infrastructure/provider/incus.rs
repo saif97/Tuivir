@@ -279,6 +279,12 @@ impl ProviderWorkspace for IncusWorkspace {
                     .unwrap_or(default)
                     .to_string()
             };
+            let enabled =
+                |key: &str, default: bool| match value(key, "").to_ascii_lowercase().as_str() {
+                    "true" | "yes" | "1" | "on" => true,
+                    "false" | "no" | "0" | "off" => false,
+                    _ => default,
+                };
             let cpu = value("limits.cpu", if vm { "1" } else { "" });
             let cpu_update = if !vm {
                 ConfigurationUpdate::Live
@@ -291,8 +297,8 @@ impl ProviderWorkspace for IncusWorkspace {
             };
             let memory_update = if vm
                 && (!supports("memory_hotplug")
-                    || value("limits.memory.hotplug", "true") == "false"
-                    || value("limits.memory.hugepages", "false") == "true")
+                    || !enabled("limits.memory.hotplug", true)
+                    || enabled("limits.memory.hugepages", false))
             {
                 ConfigurationUpdate::Stopped
             } else {
