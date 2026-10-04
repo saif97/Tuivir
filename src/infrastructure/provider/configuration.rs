@@ -27,7 +27,7 @@ pub async fn apply_configuration(
         field
             .validate(&change.proposed)
             .map_err(WorkspaceError::new)?;
-        if field.value != change.field.value {
+        if !field.matches(&change.field.value) {
             return Err(WorkspaceError::new(
                 "Configuration changed externally. Review actual values and Apply again.",
             ));

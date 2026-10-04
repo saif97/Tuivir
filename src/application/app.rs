@@ -447,7 +447,7 @@ impl App {
                 draft.request_id = None;
                 draft.error = outcome.error;
                 if let Some(actual) = outcome.actual {
-                    draft.actual = Some(actual);
+                    draft.reconcile(actual);
                 }
                 vec![self.start_refresh(provider_id)]
             }
@@ -471,7 +471,7 @@ impl App {
                                 .iter()
                                 .map(|field| field.value.clone())
                                 .collect();
-                            draft.actual = Some(actual);
+                            draft.reconcile(actual);
                             draft.error = None;
                         }
                         Err(error) => draft.error = Some(error.message),
@@ -729,7 +729,7 @@ impl App {
                     .fields
                     .iter()
                     .zip(&draft.proposed)
-                    .filter(|(field, proposed)| field.value != **proposed)
+                    .filter(|(field, proposed)| !field.matches(proposed))
                     .map(|(field, proposed)| ConfigurationChange {
                         field: field.clone(),
                         proposed: proposed.clone(),

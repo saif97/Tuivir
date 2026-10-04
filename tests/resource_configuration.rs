@@ -296,3 +296,54 @@ async fn confirmed_docker_memory_updates_without_changing_cpu_or_restarting() {
     assert!(screen.contains("CPU limit (CPUs): 1.5"), "{screen}");
     cli.assert_exhausted();
 }
+
+#[tokio::test]
+async fn external_changes_to_an_edited_field_require_another_review_without_writing() {
+    let external = r#"[{"HostConfig":{"NanoCpus":3000000000,"Memory":536870912},"State":{"Status":"running"}}]"#;
+    let mut extra = vec![inspect_response(external)];
+    extra.extend(docker_refresh());
+    let (mut app, runtime, cli) = docker_app_with(DOCKER_INITIAL, extra).await;
+    edit_cpu(&mut app, &runtime, "2").await;
+    press(&mut app, "ctrl+a");
+    let requests = press(&mut app, "enter");
+    drive(&mut app, &runtime, requests).await;
+    let screen = render_to_text(app.state(), 160, 32);
+    assert!(screen.contains("changed externally"), "{screen}");
+    assert!(screen.contains("3 → 2"), "{screen}");
+    press(&mut app, "ctrl+a");
+    assert!(render_to_text(app.state(), 160, 32).contains("CPU limit (CPUs): 3 → 2"));
+    cli.assert_exhausted();
+}
+
+#[tokio::test]
+async fn successful_apply_reconciles_equivalent_cpu_input_and_unedited_external_memory() {
+    let fresh = r#"[{"HostConfig":{"NanoCpus":1500000000,"Memory":805306368},"State":{"Status":"running"}}]"#;
+    let updated = r#"[{"HostConfig":{"NanoCpus":2000000000,"Memory":805306368},"State":{"Status":"running"}}]"#;
+    let mut extra = vec![
+        inspect_response(fresh),
+        (
+            ProcessSpec::new(
+                "docker",
+                &["container", "update", "--cpus", "2.0", "a1b2c3d4e5f6"],
+            ),
+            success("updated"),
+        ),
+        inspect_response(updated),
+    ];
+    extra.extend(docker_refresh());
+    let (mut app, runtime, cli) = docker_app_with(DOCKER_INITIAL, extra).await;
+    edit_cpu(&mut app, &runtime, "2.0").await;
+    press(&mut app, "ctrl+a");
+    let requests = press(&mut app, "enter");
+    drive(&mut app, &runtime, requests).await;
+    let screen = render_to_text(app.state(), 160, 32);
+    assert!(
+        !screen.contains('→'),
+        "equivalent values and untouched fields must be clean:\n{screen}"
+    );
+    assert!(
+        screen.contains("Memory limit (bytes): 805306368"),
+        "{screen}"
+    );
+    cli.assert_exhausted();
+}

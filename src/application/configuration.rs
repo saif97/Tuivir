@@ -32,6 +32,26 @@ pub enum FieldConstraint {
     Bytes { minimum: u64, unlimited: bool },
 }
 impl ConfigurationField {
+    pub fn matches(&self, value: &str) -> bool {
+        if self.value == value {
+            return true;
+        }
+        match self.constraint {
+            FieldConstraint::Decimal => self
+                .value
+                .parse::<f64>()
+                .ok()
+                .zip(value.parse::<f64>().ok())
+                .is_some_and(|(a, b)| a == b),
+            FieldConstraint::Bytes { .. } => self
+                .value
+                .parse::<u64>()
+                .ok()
+                .zip(value.parse::<u64>().ok())
+                .is_some_and(|(a, b)| a == b),
+        }
+    }
+
     pub fn validate(&self, value: &str) -> Result<(), String> {
         let valid = match self.constraint {
             FieldConstraint::Decimal => value
@@ -63,13 +83,40 @@ impl ConfigurationField {
     }
 }
 impl ConfigurationDraft {
+    pub fn reconcile(&mut self, actual: ResourceConfiguration) {
+        self.proposed = actual
+            .fields
+            .iter()
+            .map(|field| {
+                let prior = self.actual.as_ref().and_then(|old| {
+                    old.fields
+                        .iter()
+                        .position(|old| old.id == field.id)
+                        .map(|index| (&old.fields[index], index))
+                });
+                let Some((old, index)) = prior else {
+                    return field.value.clone();
+                };
+                let Some(attempted) = self.proposed.get(index) else {
+                    return field.value.clone();
+                };
+                if old.matches(attempted) || field.matches(attempted) {
+                    field.value.clone()
+                } else {
+                    attempted.clone()
+                }
+            })
+            .collect();
+        self.actual = Some(actual);
+    }
+
     pub fn validation_error(&self) -> Option<String> {
         let actual = self.actual.as_ref()?;
         actual
             .fields
             .iter()
             .zip(&self.proposed)
-            .filter(|(field, value)| field.value != **value)
+            .filter(|(field, value)| !field.matches(value))
             .find_map(|(field, value)| field.validate(value).err())
     }
 }
