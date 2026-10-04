@@ -235,7 +235,8 @@ async fn the_instances_panel_declares_incuss_native_detail_views() {
         [
             ("info", "Info"),
             ("config", "Config"),
-            ("console-log", "Console Log")
+            ("console-log", "Console Log"),
+            ("configuration", "Configuration")
         ]
     );
 }

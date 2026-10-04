@@ -662,7 +662,7 @@ async fn a_silent_command_failure_names_the_provider_command_and_sandbox() {
 /// declares only the one view it can actually answer rather than borrowing
 /// Docker's names for diagnostics it does not have.
 #[tokio::test]
-async fn the_sandboxes_panel_declares_only_the_info_view() {
+async fn the_sandboxes_panel_declares_info_and_read_only_configuration() {
     let cli = FixtureCli::new([(
         ProcessSpec::new("sbx", &["ls", "--json"]),
         success(include_str!("fixtures/docker-sandbox/sandboxes.json")),
@@ -680,7 +680,7 @@ async fn the_sandboxes_panel_declares_only_the_info_view() {
             .iter()
             .map(|view| (view.id.0.as_str(), view.title.as_str()))
             .collect::<Vec<_>>(),
-        [("info", "Info")]
+        [("info", "Info"), ("configuration", "Configuration")]
     );
 }
 
