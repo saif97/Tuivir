@@ -81,17 +81,41 @@ impl ProviderWorkspace for DockerWorkspace {
         Box::pin(async move {
             let mut args = vec!["container".to_owned(), "update".to_owned()];
             for change in changes {
-                let flag = match change.field.id.as_str() {
-                    "cpu" => "--cpus",
-                    "memory" => "--memory",
+                match change.field.id.as_str() {
+                    "cpu" => {
+                        let crate::application::FieldConstraint::Decimal {
+                            units_per_value, ..
+                        } = change.field.constraint
+                        else {
+                            return Err(WorkspaceError::new("Unsupported Docker CPU field"));
+                        };
+                        if units_per_value == 1_000_000_000 {
+                            args.extend(["--cpus".into(), change.proposed.clone()]);
+                        } else {
+                            let cpus = change
+                                .proposed
+                                .parse::<f64>()
+                                .map_err(|_| WorkspaceError::new("Invalid Docker CPU limit"))?;
+                            let quota = if cpus == 0.0 {
+                                -1
+                            } else {
+                                (cpus * units_per_value as f64).round() as i64
+                            };
+                            args.extend([
+                                "--cpu-period".into(),
+                                units_per_value.to_string(),
+                                "--cpu-quota".into(),
+                                quota.to_string(),
+                            ]);
+                        }
+                    }
+                    "memory" => args.extend(["--memory".into(), change.proposed.clone()]),
                     _ => {
                         return Err(WorkspaceError::new(
                             "Unsupported Docker configuration field",
                         ));
                     }
-                };
-                args.push(flag.to_owned());
-                args.push(change.proposed.clone());
+                }
             }
             args.push(target.resource_id().0.clone());
             cli.run(ProcessSpec::new(
@@ -146,16 +170,36 @@ impl ProviderWorkspace for DockerWorkspace {
             use crate::application::{
                 ConfigurationField, ConfigurationUpdate, FieldConstraint, ResourceConfiguration,
             };
+            let nano_cpus = host["NanoCpus"].as_u64().unwrap_or(0);
+            let quota = host["CpuQuota"].as_i64().unwrap_or(0);
+            let period = host["CpuPeriod"].as_u64().unwrap_or(0);
+            let (cpus, units_per_value, minimum_units) =
+                if nano_cpus == 0 && (quota != 0 || period != 0) {
+                    let period = if period == 0 { 100_000 } else { period };
+                    (
+                        if quota > 0 {
+                            quota as f64 / period as f64
+                        } else {
+                            0.0
+                        },
+                        period,
+                        1000,
+                    )
+                } else {
+                    (nano_cpus as f64 / 1_000_000_000.0, 1_000_000_000, 1)
+                };
             Ok(ResourceConfiguration {
                 stop_preserves_resource: true,
                 fields: vec![
                     ConfigurationField {
                         id: "cpu".into(),
-                        constraint: FieldConstraint::Decimal,
+                        constraint: FieldConstraint::Decimal {
+                            units_per_value,
+                            minimum_units,
+                        },
                         update: ConfigurationUpdate::Live,
                         label: "CPU limit (CPUs)".into(),
-                        value: (host["NanoCpus"].as_u64().unwrap_or(0) as f64 / 1_000_000_000.0)
-                            .to_string(),
+                        value: cpus.to_string(),
                     },
                     ConfigurationField {
                         id: "memory".into(),

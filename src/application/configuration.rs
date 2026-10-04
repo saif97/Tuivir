@@ -38,7 +38,10 @@ pub enum FieldConstraint {
     Quantity {
         percent: bool,
     },
-    Decimal,
+    Decimal {
+        units_per_value: u64,
+        minimum_units: u64,
+    },
     Bytes {
         minimum: u64,
         unlimited: bool,
@@ -60,7 +63,7 @@ impl ConfigurationField {
             FieldConstraint::Quantity { .. } => quantity_bytes(&self.value)
                 .zip(quantity_bytes(value))
                 .is_some_and(|(a, b)| a == b),
-            FieldConstraint::Decimal => self
+            FieldConstraint::Decimal { .. } => self
                 .value
                 .parse::<f64>()
                 .ok()
@@ -87,9 +90,15 @@ impl ConfigurationField {
                             .and_then(|n| n.parse::<u8>().ok())
                             .is_some_and(|n| n > 0 && n <= 100))
             }
-            FieldConstraint::Decimal => value
-                .parse::<f64>()
-                .is_ok_and(|n| n.is_finite() && n >= 0.0 && n <= u64::MAX as f64 / 1_000_000_000.0),
+            FieldConstraint::Decimal {
+                units_per_value,
+                minimum_units,
+            } => value.parse::<f64>().is_ok_and(|n| {
+                n.is_finite()
+                    && n >= 0.0
+                    && (n == 0.0 || n * units_per_value as f64 >= minimum_units as f64)
+                    && n < i64::MAX as f64 / units_per_value as f64
+            }),
             FieldConstraint::Bytes {
                 minimum,
                 unlimited,
@@ -119,7 +128,7 @@ impl ConfigurationField {
                         ""
                     }
                 ),
-                FieldConstraint::Decimal => {
+                FieldConstraint::Decimal { .. } => {
                     "CPU limit must be a finite number of CPUs, 0 or greater (0 is unlimited)."
                         .into()
                 }

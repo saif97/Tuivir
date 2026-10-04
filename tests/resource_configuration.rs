@@ -849,3 +849,40 @@ async fn huge_page_vm_memory_changes_disclose_downtime_even_with_hotplug_support
     drive(&mut app, &runtime, requests).await;
     cli.assert_exhausted();
 }
+
+#[tokio::test]
+async fn existing_docker_cpu_quota_limits_are_loaded_and_updated_in_their_native_mode() {
+    let initial = r#"[{"HostConfig":{"NanoCpus":0,"CpuQuota":50000,"CpuPeriod":100000,"Memory":536870912},"State":{"Status":"running"}}]"#;
+    let updated = r#"[{"HostConfig":{"NanoCpus":0,"CpuQuota":100000,"CpuPeriod":100000,"Memory":536870912},"State":{"Status":"running"}}]"#;
+    let mut extra = vec![
+        inspect_response(initial),
+        (
+            ProcessSpec::new(
+                "docker",
+                &[
+                    "container",
+                    "update",
+                    "--cpu-period",
+                    "100000",
+                    "--cpu-quota",
+                    "100000",
+                    "a1b2c3d4e5f6",
+                ],
+            ),
+            success("updated"),
+        ),
+        inspect_response(updated),
+    ];
+    extra.extend(docker_refresh());
+    let (mut app, runtime, cli) = docker_app_with(initial, extra).await;
+    let requests = app.invoke(Command::ActivateDetailView(4));
+    drive(&mut app, &runtime, requests).await;
+    let screen = render_to_text(app.state(), 180, 36);
+    assert!(screen.contains("CPU limit (CPUs): 0.5"), "{screen}");
+    edit_cpu(&mut app, &runtime, "1").await;
+    press(&mut app, "ctrl+a");
+    let requests = press(&mut app, "enter");
+    drive(&mut app, &runtime, requests).await;
+    assert!(render_to_text(app.state(), 180, 36).contains("CPU limit (CPUs): 1"));
+    cli.assert_exhausted();
+}
