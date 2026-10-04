@@ -830,25 +830,8 @@ impl App {
             }
             Command::Refresh => {
                 let mut requests = self.refresh_active_provider();
-                if self.state.configuration_selected() {
-                    let workspace = self.state.active_workspace().unwrap();
-                    let key = (
-                        workspace.id().clone(),
-                        workspace.selected_resource_target().unwrap(),
-                    );
-                    if let Some(draft) = self.state.configuration_drafts.get_mut(&key)
-                        && draft.request_id.is_none()
-                    {
-                        let request_id = ProviderRequestId::new(self.next_request_id);
-                        self.next_request_id += 1;
-                        draft.request_id = Some(request_id);
-                        draft.editing = false;
-                        requests.push(ProviderRequest::LoadResourceConfiguration {
-                            request_id,
-                            provider_id: key.0,
-                            target: key.1,
-                        });
-                    }
+                if let Some(request) = self.start_configuration_load(true) {
+                    requests.push(request);
                 }
                 requests
             }
@@ -1186,35 +1169,40 @@ impl App {
     /// load starts: a target that already matches asks for nothing, and a
     /// target that changed replaces the pending request, which is what makes
     /// the previous one's result unwelcome.
+    fn start_configuration_load(&mut self, reload: bool) -> Option<ProviderRequest> {
+        if !self.state.configuration_selected() {
+            return None;
+        }
+        let workspace = self.state.active_workspace()?;
+        let key = (
+            workspace.id().clone(),
+            workspace.selected_resource_target()?,
+        );
+        if !reload && self.state.configuration_drafts.contains_key(&key) {
+            return None;
+        }
+        let draft = self
+            .state
+            .configuration_drafts
+            .entry(key.clone())
+            .or_default();
+        if draft.request_id.is_some() {
+            return None;
+        }
+        let request_id = ProviderRequestId::new(self.next_request_id);
+        self.next_request_id += 1;
+        draft.request_id = Some(request_id);
+        draft.editing = false;
+        Some(ProviderRequest::LoadResourceConfiguration {
+            request_id,
+            provider_id: key.0,
+            target: key.1,
+        })
+    }
+
     fn sync_details(&mut self) -> Vec<ProviderRequest> {
         if self.state.configuration_selected() {
-            let workspace = self.state.active_workspace().unwrap();
-            let key = (
-                workspace.id().clone(),
-                workspace.selected_resource_target().unwrap(),
-            );
-            if self.state.configuration_drafts.contains_key(&key) {
-                return Vec::new();
-            }
-            let request_id = ProviderRequestId::new(self.next_request_id);
-            self.next_request_id += 1;
-            self.state.configuration_drafts.insert(
-                key.clone(),
-                ConfigurationDraft {
-                    actual: None,
-                    error: None,
-                    proposed: Vec::new(),
-                    selected_field: 0,
-                    editing: false,
-                    applying: false,
-                    request_id: Some(request_id),
-                },
-            );
-            return vec![ProviderRequest::LoadResourceConfiguration {
-                request_id,
-                provider_id: key.0,
-                target: key.1,
-            }];
+            return self.start_configuration_load(false).into_iter().collect();
         }
         let request_id = ProviderRequestId::new(self.next_request_id);
         let Some(provider) = self.state.active_workspace_mut() else {

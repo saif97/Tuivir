@@ -18,7 +18,7 @@ pub struct ResourceConfiguration {
     pub stop_preserves_resource: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ConfigurationDraft {
     pub actual: Option<ResourceConfiguration>,
     pub error: Option<String>,
