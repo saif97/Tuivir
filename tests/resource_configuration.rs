@@ -409,3 +409,72 @@ async fn incus_configuration_displays_effective_limits_with_provider_units() {
     assert!(screen.contains("selected instance"), "{screen}");
     cli.assert_exhausted();
 }
+
+fn incus_read(
+    body: &str,
+) -> (
+    ProcessSpec,
+    Result<
+        tuivir::infrastructure::process::ProcessOutput,
+        tuivir::infrastructure::process::ProcessError,
+    >,
+) {
+    (
+        ProcessSpec::new("incus", &["list", "api", "--format=json"]),
+        success(body),
+    )
+}
+fn incus_refresh() -> Vec<(
+    ProcessSpec,
+    Result<
+        tuivir::infrastructure::process::ProcessOutput,
+        tuivir::infrastructure::process::ProcessError,
+    >,
+)> {
+    vec![
+        (
+            ProcessSpec::new("incus", &["list", "--format=json"]),
+            success(include_str!("fixtures/incus/instances.json")),
+        ),
+        (
+            ProcessSpec::new("incus", &["storage", "list", "--format=json"]),
+            success("[]"),
+        ),
+    ]
+}
+#[tokio::test]
+async fn incus_partial_success_cleans_only_the_confirmed_field_and_keeps_the_error() {
+    let initial = r#"[{"name":"api","type":"container","status":"Running","expanded_config":{"limits.cpu":"2","limits.memory":"512MiB"}}]"#;
+    let partial = r#"[{"name":"api","type":"container","status":"Running","expanded_config":{"limits.cpu":"4","limits.memory":"512MiB"}}]"#;
+    let mut extra = vec![
+        incus_read(initial),
+        (
+            ProcessSpec::new("incus", &["config", "set", "api", "limits.cpu=4"]),
+            success(""),
+        ),
+        (
+            ProcessSpec::new("incus", &["config", "set", "api", "limits.memory=1GiB"]),
+            common::failure("memory limit rejected"),
+        ),
+        incus_read(partial),
+    ];
+    extra.extend(incus_refresh());
+    let (mut app, runtime, cli) = incus_app(initial, extra).await;
+    edit_cpu(&mut app, &runtime, "4").await;
+    press(&mut app, "down");
+    press(&mut app, "enter");
+    press(&mut app, "ctrl+u");
+    for c in "1GiB".chars() {
+        press(&mut app, &c.to_string());
+    }
+    press(&mut app, "enter");
+    press(&mut app, "ctrl+a");
+    let requests = press(&mut app, "enter");
+    drive(&mut app, &runtime, requests).await;
+    let screen = render_to_text(app.state(), 160, 32);
+    assert!(screen.contains("CPU count or IDs: 4"), "{screen}");
+    assert!(!screen.contains("2 → 4"), "{screen}");
+    assert!(screen.contains("512MiB → 1GiB"), "{screen}");
+    assert!(screen.contains("memory limit rejected"), "{screen}");
+    cli.assert_exhausted();
+}

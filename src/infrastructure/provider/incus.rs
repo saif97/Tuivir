@@ -153,6 +153,36 @@ async fn custom_volume_resources(
 }
 
 impl ProviderWorkspace for IncusWorkspace {
+    fn write_configuration<'a>(
+        &'a self,
+        cli: &'a dyn CliRunner,
+        target: &'a ResourceTarget,
+        _actual: &'a crate::application::ResourceConfiguration,
+        changes: &'a [crate::application::ConfigurationChange],
+    ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>> {
+        Box::pin(async move {
+            for change in changes {
+                if !["limits.cpu", "limits.memory"].contains(&change.field.id.as_str()) {
+                    return Err(WorkspaceError::new("Unsupported Incus configuration field"));
+                }
+                let assignment = format!("{}={}", change.field.id, change.proposed);
+                cli.run(ProcessSpec::new(
+                    "incus",
+                    &["config", "set", &target.resource_id().0, &assignment],
+                ))
+                .await
+                .map_err(|error| {
+                    WorkspaceError::new(provider_cli_error(
+                        PROVIDER_NAME,
+                        &error,
+                        "Incus could not update instance configuration",
+                    ))
+                })?;
+            }
+            Ok(())
+        })
+    }
+
     fn load_configuration<'a>(
         &'a self,
         cli: &'a dyn CliRunner,
