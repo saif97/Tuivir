@@ -466,11 +466,6 @@ impl App {
                     draft.request_id = None;
                     match result {
                         Ok(actual) => {
-                            draft.proposed = actual
-                                .fields
-                                .iter()
-                                .map(|field| field.value.clone())
-                                .collect();
                             draft.reconcile(actual);
                             draft.error = None;
                         }
@@ -802,7 +797,30 @@ impl App {
                 self.toggle_help();
                 Vec::new()
             }
-            Command::Refresh => self.refresh_active_provider(),
+            Command::Refresh => {
+                let mut requests = self.refresh_active_provider();
+                if self.state.configuration_selected() {
+                    let workspace = self.state.active_workspace().unwrap();
+                    let key = (
+                        workspace.id().clone(),
+                        workspace.selected_resource_target().unwrap(),
+                    );
+                    if let Some(draft) = self.state.configuration_drafts.get_mut(&key)
+                        && draft.request_id.is_none()
+                    {
+                        let request_id = ProviderRequestId::new(self.next_request_id);
+                        self.next_request_id += 1;
+                        draft.request_id = Some(request_id);
+                        draft.editing = false;
+                        requests.push(ProviderRequest::LoadResourceConfiguration {
+                            request_id,
+                            provider_id: key.0,
+                            target: key.1,
+                        });
+                    }
+                }
+                requests
+            }
             Command::MovePaneBoundaryLeft => self.resize_pane_boundary(PaneBoundary::moved_left),
             Command::MovePaneBoundaryRight => self.resize_pane_boundary(PaneBoundary::moved_right),
             Command::GrabPaneBoundary(column) => {

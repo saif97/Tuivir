@@ -628,3 +628,21 @@ async fn a_stopped_incus_vm_stays_stopped_after_configuration_changes() {
     cli.assert_exhausted();
 }
 
+#[tokio::test]
+async fn refresh_retries_a_failed_configuration_load() {
+    let mut extra = vec![inspect_response(DOCKER_INITIAL)];
+    extra.extend(docker_refresh());
+    let (mut app, runtime, cli) = docker_app_with("not json", extra).await;
+    let requests = app.invoke(Command::ActivateDetailView(4));
+    drive(&mut app, &runtime, requests).await;
+    assert!(render_to_text(app.state(), 160, 32).contains("Malformed Docker configuration"));
+    let requests = press(&mut app, "ctrl+r");
+    drive(&mut app, &runtime, requests).await;
+    let screen = render_to_text(app.state(), 160, 32);
+    assert!(screen.contains("CPU limit (CPUs): 1.5"), "{screen}");
+    assert!(
+        !screen.contains("Malformed Docker configuration"),
+        "{screen}"
+    );
+    cli.assert_exhausted();
+}
