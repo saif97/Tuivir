@@ -37,6 +37,12 @@ pub struct FixtureCli {
 }
 
 impl FixtureCli {
+    /// Verifies that a successful request performed all required CLI work.
+    pub fn assert_exhausted(&self) {
+        let queue = self.queue();
+        assert!(queue.is_empty(), "unexecuted CLI responses: {queue:?}");
+    }
+
     pub fn new(
         responses: impl IntoIterator<Item = (ProcessSpec, Result<ProcessOutput, ProcessError>)>,
     ) -> Self {
