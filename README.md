@@ -140,11 +140,21 @@ tuivir
 The interface shows the available commands and their key bindings in the
 footer. Run `tuivir --help` for command-line options.
 
+### Tart
+
+Tuivir supports [Tart](https://github.com/openai/tart) on macOS. Install Tart
+separately and put `tart` on `PATH`; Tuivir discovers it automatically. Its
+workspace shows local **VMs** and cached OCI **Images**, with VM configuration
+details, Start, Stop, Resume, Delete, and guest-agent shells.
+
+See [Tart support](docs/providers/tart.md) for requirements, lifecycle behavior,
+and a manual verification checklist.
+
 ## Provider roadmap
 - [x] Docker
 - [x] Incus
 - [x] Docker Sandbox
-- [ ] Tart
+- [x] Tart
 - [ ] Apple `container`
 - [ ] Podman
 
