@@ -221,6 +221,10 @@ impl ProviderWorkspace for TartWorkspace {
             }
             let native_command = match command {
                 ResourceCommand::Start | ResourceCommand::Resume => {
+                    // `tart run` hosts the VM until it shuts down and has no
+                    // native detach option; `--no-graphics` only hides the UI.
+                    // Launch it in an independent session so this Command can
+                    // finish and the VM can keep running after Tuivir exits.
                     return run_command(
                         cli,
                         ProcessSpec::background("tart", &["run", "--no-graphics", "--", name]),

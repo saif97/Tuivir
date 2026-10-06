@@ -19,6 +19,8 @@ impl ProcessSpec {
 
     /// Launches a Provider process that owns its Resource's lifetime. It gets
     /// its own session and no terminal input, so it can outlive Tuivir.
+    /// Waiting for such a process to exit would leave Start or Resume pending
+    /// until the Resource shuts down.
     /// Immediate failures are captured during a one-second startup window;
     /// later output goes to a private log in Tuivir's state directory.
     pub fn background(program: &str, args: &[&str]) -> Self {
