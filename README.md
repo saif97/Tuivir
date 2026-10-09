@@ -144,7 +144,7 @@ footer. Run `tuivir --help` for command-line options.
 - [x] Docker
 - [x] Incus
 - [x] Docker Sandbox
-- [ ] Tart
+- [x] Tart
 - [ ] Apple `container`
 - [ ] Podman
 

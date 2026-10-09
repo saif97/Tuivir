@@ -3,10 +3,12 @@ use std::{future::Future, pin::Pin};
 mod docker;
 mod docker_sandbox;
 mod incus;
+mod tart;
 
 pub use docker::DockerWorkspace;
 pub use docker_sandbox::DockerSandboxWorkspace;
 pub use incus::IncusWorkspace;
+pub use tart::TartWorkspace;
 
 use crate::application::{
     DetailView, Resource, ResourceCommand, ResourceDetails, ResourcePanel, WorkspaceError,

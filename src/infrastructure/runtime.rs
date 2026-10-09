@@ -7,7 +7,7 @@ use crate::{
     infrastructure::process::CliRunner,
     infrastructure::provider::{
         DockerSandboxWorkspace, DockerWorkspace, IncusWorkspace, ProviderDiscovery,
-        ProviderWorkspace,
+        ProviderWorkspace, TartWorkspace,
     },
 };
 
@@ -55,6 +55,7 @@ impl ProviderRuntime {
                 Arc::new(DockerWorkspace) as Arc<dyn ProviderWorkspace>,
                 Arc::new(IncusWorkspace) as Arc<dyn ProviderWorkspace>,
                 Arc::new(DockerSandboxWorkspace) as Arc<dyn ProviderWorkspace>,
+                Arc::new(TartWorkspace) as Arc<dyn ProviderWorkspace>,
             ],
             cli,
         )
