@@ -71,6 +71,154 @@ struct VolumeRow {
 }
 
 impl ProviderWorkspace for DockerWorkspace {
+    fn write_configuration<'a>(
+        &'a self,
+        cli: &'a dyn CliRunner,
+        target: &'a ResourceTarget,
+        _actual: &'a crate::application::ResourceConfiguration,
+        changes: &'a [crate::application::ConfigurationChange],
+    ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>> {
+        Box::pin(async move {
+            let mut args = vec!["container".to_owned(), "update".to_owned()];
+            for change in changes {
+                match change.field.id.as_str() {
+                    "cpu" => {
+                        let crate::application::FieldConstraint::Decimal {
+                            units_per_value, ..
+                        } = change.field.constraint
+                        else {
+                            return Err(WorkspaceError::new("Unsupported Docker CPU field"));
+                        };
+                        if units_per_value == 1_000_000_000 {
+                            args.extend(["--cpus".into(), change.proposed.clone()]);
+                        } else {
+                            let cpus = change
+                                .proposed
+                                .parse::<f64>()
+                                .map_err(|_| WorkspaceError::new("Invalid Docker CPU limit"))?;
+                            let quota = if cpus == 0.0 {
+                                -1
+                            } else {
+                                (cpus * units_per_value as f64).round() as i64
+                            };
+                            args.extend([
+                                "--cpu-period".into(),
+                                units_per_value.to_string(),
+                                "--cpu-quota".into(),
+                                quota.to_string(),
+                            ]);
+                        }
+                    }
+                    "memory" => args.extend(["--memory".into(), change.proposed.clone()]),
+                    _ => {
+                        return Err(WorkspaceError::new(
+                            "Unsupported Docker configuration field",
+                        ));
+                    }
+                }
+            }
+            args.push(target.resource_id().0.clone());
+            cli.run(ProcessSpec::new(
+                "docker",
+                &args.iter().map(String::as_str).collect::<Vec<_>>(),
+            ))
+            .await
+            .map_err(|error| {
+                WorkspaceError::new(provider_cli_error(
+                    PROVIDER_NAME,
+                    &error,
+                    "Docker could not update container configuration",
+                ))
+            })?;
+            Ok(())
+        })
+    }
+
+    fn load_configuration<'a>(
+        &'a self,
+        cli: &'a dyn CliRunner,
+        target: &'a ResourceTarget,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<crate::application::ResourceConfiguration, WorkspaceError>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            let output = cli
+                .run(ProcessSpec::new(
+                    "docker",
+                    &["container", "inspect", &target.resource_id().0],
+                ))
+                .await
+                .map_err(|error| {
+                    WorkspaceError::new(provider_cli_error(
+                        PROVIDER_NAME,
+                        &error,
+                        "Could not load configuration",
+                    ))
+                })?;
+            let rows: Vec<serde_json::Value> =
+                serde_json::from_str(&output.stdout).map_err(|error| {
+                    WorkspaceError::new(format!("Malformed Docker configuration: {error}"))
+                })?;
+            let row = rows
+                .first()
+                .ok_or_else(|| WorkspaceError::new("Docker returned no container"))?;
+            let host = &row["HostConfig"];
+            use crate::application::{
+                ConfigurationField, ConfigurationUpdate, FieldConstraint, ResourceConfiguration,
+            };
+            let nano_cpus = host["NanoCpus"].as_u64().unwrap_or(0);
+            let quota = host["CpuQuota"].as_i64().unwrap_or(0);
+            let period = host["CpuPeriod"].as_u64().unwrap_or(0);
+            let (cpus, units_per_value, minimum_units) =
+                if nano_cpus == 0 && (quota != 0 || period != 0) {
+                    let period = if period == 0 { 100_000 } else { period };
+                    (
+                        if quota > 0 {
+                            quota as f64 / period as f64
+                        } else {
+                            0.0
+                        },
+                        period,
+                        1000,
+                    )
+                } else {
+                    (nano_cpus as f64 / 1_000_000_000.0, 1_000_000_000, 1)
+                };
+            Ok(ResourceConfiguration {
+                stop_preserves_resource: true,
+                fields: vec![
+                    ConfigurationField {
+                        id: "cpu".into(),
+                        constraint: FieldConstraint::Decimal {
+                            units_per_value,
+                            minimum_units,
+                        },
+                        update: ConfigurationUpdate::Live,
+                        label: "CPU limit (CPUs)".into(),
+                        value: cpus.to_string(),
+                    },
+                    ConfigurationField {
+                        id: "memory".into(),
+                        update: ConfigurationUpdate::Live,
+                        constraint: FieldConstraint::Bytes {
+                            minimum: 6 * 1024 * 1024,
+                            unlimited: true,
+                            maximum: host["MemorySwap"].as_u64().filter(|n| *n > 0),
+                        },
+                        label: "Memory limit (bytes)".into(),
+                        value: host["Memory"].as_u64().unwrap_or(0).to_string(),
+                    },
+                ],
+                state: docker_resource_state(row["State"]["Status"].as_str().unwrap_or("unknown")),
+                notice: "Apply changes explicitly; no restart required.".into(),
+            })
+        })
+    }
+
     fn id(&self) -> ProviderId {
         ProviderId::new(PROVIDER_ID)
     }
@@ -412,6 +560,7 @@ fn container_detail_views() -> Vec<DetailView> {
         DetailView::new(LOGS_VIEW_ID, "Logs"),
         DetailView::new(STATS_VIEW_ID, "Stats"),
         DetailView::new(INSPECT_VIEW_ID, "Inspect"),
+        DetailView::configuration(),
     ]
 }
 

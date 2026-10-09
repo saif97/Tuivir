@@ -145,6 +145,7 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
     );
     render_details_panel(
         provider.name(),
+        state,
         workspace_view,
         state.visible_resource_shell_session(),
         &state.running_commands,
@@ -227,6 +228,21 @@ fn render_confirmation(state: &AppState, frame: &mut Frame<'_>) {
     {
         frame.render_widget(Clear, area);
         let (title, lines) = match confirmation {
+            Confirmation::ResourceConfiguration(review) => {
+                let mut lines = vec![Line::from(format!(
+                    "Apply changes to {}?",
+                    review.resource_name
+                ))];
+                lines.extend(review.changes.iter().map(|change| {
+                    Line::from(format!(
+                        "{}: {} → {}",
+                        change.field.label, change.field.value, change.proposed
+                    ))
+                }));
+                lines.push(Line::from(review.downtime()));
+                lines.push(Line::from(review.actual.notice.as_str()));
+                (" Confirm configuration ", lines)
+            }
             Confirmation::ResourceCommand(confirmation) => {
                 let mut lines = vec![Line::from(format!(
                     "Delete {} resource {} ({})?",
@@ -272,6 +288,30 @@ fn render_confirmation(state: &AppState, frame: &mut Frame<'_>) {
 /// so the status identifies its target even while another Provider Workspace
 /// is active.
 fn render_command_bar(state: &AppState, frame: &mut Frame<'_>, area: Rect) {
+    let applying = state
+        .configuration_drafts
+        .iter()
+        .filter(|(_, draft)| draft.applying)
+        .map(|((provider_id, target), _)| {
+            let workspace = state
+                .providers
+                .iter()
+                .find(|workspace| workspace.id() == provider_id);
+            let provider = workspace.map_or("Provider", |workspace| workspace.name());
+            let name = workspace
+                .and_then(|workspace| workspace.resource(target))
+                .map(|resource| resource.name.clone())
+                .unwrap_or_else(|| target.to_string());
+            format!("Applying configuration to {provider} / {name}…")
+        })
+        .collect::<Vec<_>>();
+    if !applying.is_empty() {
+        frame.render_widget(
+            Paragraph::new(applying.join("; ")).style(themed_style(ThemeRole::Warning)),
+            area,
+        );
+        return;
+    }
     let mut spans = state
         .command_bar
         .iter()
@@ -616,6 +656,7 @@ pub(super) fn pane_block(title: String, focused: bool, chrome: PaneChrome) -> Bl
 #[allow(clippy::too_many_arguments)] // Rendering receives the already-measured host frame.
 fn render_details_panel(
     provider_name: &str,
+    state: &AppState,
     view: Option<&WorkspaceView<'_>>,
     resource_shell_session: Option<&ResourceShellSession>,
     running_commands: &[crate::application::RunningResourceCommand],
@@ -690,6 +731,57 @@ fn render_details_panel(
             ))
             .alignment(Alignment::Center)
             .style(themed_style(ThemeRole::Warning).add_modifier(Modifier::BOLD)),
+            rows[1],
+        );
+    } else if state.configuration_selected() {
+        let mut lines = Vec::new();
+        if let Some(draft) = state.selected_configuration() {
+            if let Some(actual) = &draft.actual {
+                lines.extend(actual.fields.iter().enumerate().map(|(index, field)| {
+                    let proposed = draft.proposed.get(index).unwrap_or(&field.value);
+                    let marker = if index == draft.selected_field {
+                        "> "
+                    } else {
+                        "  "
+                    };
+                    let value = if proposed != &field.value {
+                        format!("{} → {}", field.value, proposed)
+                    } else {
+                        field.value.clone()
+                    };
+                    Line::from(format!(
+                        "{marker}{}: {value}{}",
+                        field.label,
+                        if field.editable() { "" } else { " (read-only)" }
+                    ))
+                }));
+                lines.push(Line::from(format!("Resource State: {:?}", actual.state)));
+                lines.push(Line::from(actual.notice.as_str()));
+                if draft.editing {
+                    lines.push(Line::from("Editing draft; changes remain unapplied."));
+                }
+                let hints = if draft.editing {
+                    &state.hints.configuration_input
+                } else {
+                    &state.hints.configuration_form
+                };
+                lines.extend(
+                    hints
+                        .iter()
+                        .map(|hint| Line::from(format!("{}  {}", hint.key, hint.description))),
+                );
+            } else {
+                lines.push(Line::from("Loading Configuration…"));
+            }
+            if let Some(error) = draft.validation_error() {
+                lines.push(Line::from(error));
+            }
+            if let Some(error) = &draft.error {
+                lines.push(Line::from(error.as_str()));
+            }
+        }
+        frame.render_widget(
+            Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: false }),
             rows[1],
         );
     } else if view.is_some_and(|view| view.shell_selected) {

@@ -327,7 +327,12 @@ async fn the_containers_panel_declares_dockers_native_detail_views() {
             .iter()
             .map(|view| (view.id.0.as_str(), view.title.as_str()))
             .collect::<Vec<_>>(),
-        [("logs", "Logs"), ("stats", "Stats"), ("inspect", "Inspect")]
+        [
+            ("logs", "Logs"),
+            ("stats", "Stats"),
+            ("inspect", "Inspect"),
+            ("configuration", "Configuration")
+        ]
     );
 }
 
