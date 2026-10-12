@@ -1,0 +1,3 @@
+# Leave Apple Container service startup explicit
+
+Apple Container separates its installed CLI from the per-user service that operates its Resources. Tuivir will keep an installed Provider visible when that service is unavailable, show actionable recovery instructions, and recover through Workspace refresh after the user starts the service with `container system start`. Discovery and refresh will not start the service automatically: inspecting Providers should not implicitly start host services, and the first Apple Container Workspace operates existing Resources rather than owning service administration.
