@@ -148,3 +148,32 @@ async fn images_keep_reference_identity_without_a_lifecycle_state() {
     assert!(image.fields.contains(&("Platforms", "linux/arm64".into())));
     cli.assert_exhausted();
 }
+
+#[tokio::test]
+async fn network_protection_uses_builtin_metadata_instead_of_the_name() {
+    use tuivir::application::ResourceCommand;
+    let cli = listings(
+        "[]",
+        "[]",
+        include_str!("fixtures/apple-container/networks.json"),
+        "[]",
+    );
+    let snapshot = AppleContainerWorkspace.refresh(&cli).await.unwrap();
+    let networks = &snapshot.panels[2].resources;
+    assert_eq!(networks.len(), 2);
+    assert_eq!(networks[0].name, "system-renamed");
+    assert!(networks[0].available_commands.is_empty());
+    assert_eq!(networks[1].id.0, "default");
+    assert_eq!(networks[1].available_commands, &[ResourceCommand::Delete]);
+    for network in networks {
+        assert_eq!(network.state, None);
+        assert_eq!(network.status, None);
+        assert!(
+            network
+                .fields
+                .contains(&("IPv4 Subnet", "192.168.64.0/24".into()))
+        );
+        assert!(network.fields.contains(&("Mode", "nat".into())));
+    }
+    cli.assert_exhausted();
+}

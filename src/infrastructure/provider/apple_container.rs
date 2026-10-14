@@ -116,6 +116,59 @@ fn image_resource(row: ImageRow) -> Resource {
     }
 }
 
+#[derive(Deserialize)]
+struct NetworkRow {
+    configuration: NetworkConfiguration,
+    status: NetworkStatus,
+}
+
+#[derive(Deserialize)]
+struct NetworkConfiguration {
+    name: String,
+    mode: String,
+    labels: std::collections::HashMap<String, String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NetworkStatus {
+    ipv4_subnet: String,
+    ipv4_gateway: String,
+    ipv6_subnet: Option<String>,
+}
+
+fn network_resource(row: NetworkRow) -> Resource {
+    let builtin = row
+        .configuration
+        .labels
+        .get("com.apple.container.resource.role")
+        .is_some_and(|role| role == "builtin");
+    let mut fields = vec![
+        ("Mode", row.configuration.mode),
+        ("IPv4 Subnet", row.status.ipv4_subnet),
+        ("IPv4 Gateway", row.status.ipv4_gateway),
+        ("Built-in", builtin.to_string()),
+    ];
+    if let Some(subnet) = row.status.ipv6_subnet {
+        fields.push(("IPv6 Subnet", subnet));
+    }
+    Resource {
+        id: ResourceId::new(&row.configuration.name),
+        name: row.configuration.name,
+        secondary_text: None,
+        status: None,
+        state: None,
+        fields,
+        snapshot_details: vec![],
+        available_commands: if builtin {
+            &[]
+        } else {
+            &[ResourceCommand::Delete]
+        },
+        shell: None,
+    }
+}
+
 fn container_commands(state: ResourceState) -> &'static [ResourceCommand] {
     match state {
         ResourceState::Running => &[
@@ -260,6 +313,10 @@ impl ProviderWorkspace for AppleContainerWorkspace {
                     let rows: Vec<ImageRow> =
                         serde_json::from_str(&output.stdout).map_err(malformed)?;
                     rows.into_iter().map(image_resource).collect()
+                } else if id == "networks" {
+                    let rows: Vec<NetworkRow> =
+                        serde_json::from_str(&output.stdout).map_err(malformed)?;
+                    rows.into_iter().map(network_resource).collect()
                 } else {
                     let _: Vec<serde_json::Value> =
                         serde_json::from_str(&output.stdout).map_err(malformed)?;
