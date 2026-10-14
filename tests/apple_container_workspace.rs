@@ -272,3 +272,30 @@ async fn builtin_runtime_discovers_apple_container_and_renders_all_empty_panels(
     }
     cli.assert_exhausted();
 }
+
+#[tokio::test]
+async fn lifecycle_start_and_stop_use_reported_state_and_literal_identifiers() {
+    use tuivir::{application::ResourceCommand, domain::ResourceState};
+    let name = "--odd name;$(touch nope)";
+    let target = common::resource_target("containers", name);
+    let cli = FixtureCli::new([
+        (
+            ProcessSpec::new("container", &["start", "--", name]),
+            success(""),
+        ),
+        (
+            ProcessSpec::new("container", &["stop", "--", name]),
+            success(""),
+        ),
+    ]);
+    for (command, state) in [
+        (ResourceCommand::Start, ResourceState::Stopped),
+        (ResourceCommand::Stop, ResourceState::Running),
+    ] {
+        AppleContainerWorkspace
+            .execute_command(&cli, &target, command, Some(state))
+            .await
+            .unwrap();
+    }
+    cli.assert_exhausted();
+}

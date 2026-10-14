@@ -1,5 +1,6 @@
 use std::{future::Future, pin::Pin};
 
+use super::require_resource_state;
 use serde::Deserialize;
 
 use super::{
@@ -372,12 +373,42 @@ impl ProviderWorkspace for AppleContainerWorkspace {
 
     fn execute_command<'a>(
         &'a self,
-        _cli: &'a dyn CliRunner,
-        _target: &'a ResourceTarget,
-        _command: ResourceCommand,
-        _state: Option<ResourceState>,
+        cli: &'a dyn CliRunner,
+        target: &'a ResourceTarget,
+        command: ResourceCommand,
+        state: Option<ResourceState>,
     ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>> {
-        Box::pin(async { Err(WorkspaceError::new("Apple Container Command unavailable")) })
+        Box::pin(async move {
+            let name = target.resource_id().0.as_str();
+            if target.panel_id().0 != "containers" {
+                return Err(WorkspaceError::new(format!(
+                    "Apple Container has no {command} Command for Resource Panel {}",
+                    target.panel_id()
+                )));
+            }
+            let state = require_resource_state(
+                state,
+                PROVIDER_NAME,
+                "Container",
+                command,
+                target.resource_id(),
+            )?;
+            if !container_commands(state).contains(&command) {
+                return Err(WorkspaceError::new(format!(
+                    "Apple Container cannot {command} Container {name} in Resource State {state:?}"
+                )));
+            }
+            let verb = match command {
+                ResourceCommand::Start => "start",
+                ResourceCommand::Stop => "stop",
+                _ => {
+                    return Err(WorkspaceError::new(format!(
+                        "Apple Container cannot {command} Container {name}"
+                    )));
+                }
+            };
+            run_command(cli, &[verb, "--", name], command, name).await
+        })
     }
 
     fn load_details<'a>(
@@ -388,4 +419,22 @@ impl ProviderWorkspace for AppleContainerWorkspace {
     ) -> Pin<Box<dyn Future<Output = Result<ResourceDetails, WorkspaceError>> + Send + 'a>> {
         Box::pin(async { Err(WorkspaceError::new("Apple Container Details unavailable")) })
     }
+}
+
+async fn run_command(
+    cli: &dyn CliRunner,
+    args: &[&str],
+    command: ResourceCommand,
+    name: &str,
+) -> Result<(), WorkspaceError> {
+    cli.run(ProcessSpec::new("container", args))
+        .await
+        .map_err(|error| {
+            WorkspaceError::new(provider_cli_error(
+                PROVIDER_NAME,
+                &error,
+                &format!("Apple Container could not {command} Resource {name}"),
+            ))
+        })?;
+    Ok(())
 }
