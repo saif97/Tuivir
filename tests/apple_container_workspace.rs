@@ -751,3 +751,51 @@ async fn listing_failures_preserve_native_diagnostics_and_reject_bad_shapes() {
         cli.assert_exhausted();
     }
 }
+
+#[tokio::test]
+async fn refresh_recovers_after_external_service_start_without_restarting_tuivir() {
+    use std::sync::Arc;
+    use tuivir::{
+        application::{App, Command},
+        infrastructure::runtime::ProviderRuntime,
+        presentation::render_to_text,
+    };
+    let cli = Arc::new(FixtureCli::new([
+        (
+            ProcessSpec::new("container", VERSION),
+            success(include_str!("fixtures/apple-container/version.json")),
+        ),
+        (
+            ProcessSpec::new("container", CONTAINERS),
+            common::failure("XPC connection error: service stopped"),
+        ),
+        (ProcessSpec::new("container", CONTAINERS), success("[]")),
+        (ProcessSpec::new("container", IMAGES), success("[]")),
+        (ProcessSpec::new("container", NETWORKS), success("[]")),
+        (ProcessSpec::new("container", VOLUMES), success("[]")),
+    ]));
+    let runtime = ProviderRuntime::new(vec![Arc::new(AppleContainerWorkspace)], cli.clone());
+    let mut app = App::new();
+    let discovery = runtime.discover().await.pop().unwrap();
+    let request = common::refresh_request(app.update(discovery.into_event()));
+    let (events, mut completions) = tokio::sync::mpsc::unbounded_channel();
+    runtime.dispatch(request, events.clone());
+    app.update(completions.recv().await.unwrap());
+    let screen = render_to_text(app.state(), 180, 40);
+    assert!(screen.contains("Apple Container"), "{screen}");
+    assert!(
+        screen.contains("XPC connection error: service stopped"),
+        "{screen}"
+    );
+    assert!(screen.contains("container system start"), "{screen}");
+    runtime.dispatch(
+        common::refresh_request(app.invoke(Command::Refresh)),
+        events,
+    );
+    app.update(completions.recv().await.unwrap());
+    let screen = render_to_text(app.state(), 180, 40);
+    assert!(screen.contains("Containers"), "{screen}");
+    assert!(screen.contains("Volumes"), "{screen}");
+    assert!(!screen.contains("XPC connection error"), "{screen}");
+    cli.assert_exhausted();
+}
