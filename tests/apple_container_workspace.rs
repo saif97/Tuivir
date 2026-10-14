@@ -932,3 +932,106 @@ async fn confirmed_delete_uses_shared_progress_completion_and_refresh() {
     assert!(!render_to_text(app.state(), 180, 40).contains("Running delete for web"));
     cli.assert_exhausted();
 }
+
+struct DelayedStatsCli {
+    fixture: FixtureCli,
+    started: std::sync::Arc<tokio::sync::Notify>,
+    release: std::sync::Arc<tokio::sync::Notify>,
+}
+
+impl tuivir::infrastructure::process::CliRunner for DelayedStatsCli {
+    fn run<'a>(
+        &'a self,
+        process: ProcessSpec,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = Result<tuivir::infrastructure::process::ProcessOutput, ProcessError>,
+                > + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            if process.args.first().is_some_and(|arg| arg == "stats") {
+                self.started.notify_one();
+                self.release.notified().await;
+            }
+            self.fixture.run(process).await
+        })
+    }
+}
+
+#[tokio::test]
+async fn slow_stats_load_only_the_visible_tab_without_blocking_navigation() {
+    use std::sync::Arc;
+    use tuivir::{
+        application::{App, Command, ProviderRequest},
+        infrastructure::runtime::ProviderRuntime,
+        presentation::render_to_text,
+    };
+    let snapshot = AppleContainerWorkspace
+        .refresh(&listings(
+            include_str!("fixtures/apple-container/containers.json"),
+            "[]",
+            "[]",
+            "[]",
+        ))
+        .await
+        .unwrap();
+    let discovery = AppleContainerWorkspace
+        .discover(&FixtureCli::new([(
+            ProcessSpec::new("container", VERSION),
+            success(include_str!("fixtures/apple-container/version.json")),
+        )]))
+        .await
+        .unwrap();
+    let mut app = App::new();
+    assert!(common::ready_workspace(&mut app, discovery, snapshot).is_empty());
+    for expected in ["logs", "boot-logs"] {
+        let requests = app.invoke(Command::NextDetailView);
+        assert_eq!(requests.len(), 1);
+        assert!(
+            matches!(&requests[0], ProviderRequest::LoadResourceDetails {view_id, ..} if view_id.0 == expected)
+        );
+    }
+    let request = common::detail_request(app.invoke(Command::NextDetailView));
+    assert!(
+        matches!(&request, ProviderRequest::LoadResourceDetails {view_id, ..} if view_id.0 == "stats")
+    );
+    let started = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    let cli = Arc::new(DelayedStatsCli {
+        fixture: FixtureCli::new([(
+            ProcessSpec::new(
+                "container",
+                &["stats", "--no-stream", "--format", "json", "--", "web"],
+            ),
+            success(include_str!("fixtures/apple-container/stats.json")),
+        )]),
+        started: started.clone(),
+        release: release.clone(),
+    });
+    let runtime = ProviderRuntime::new(vec![Arc::new(AppleContainerWorkspace)], cli.clone());
+    let (events, mut completions) = tokio::sync::mpsc::unbounded_channel();
+    runtime.dispatch(request, events);
+    tokio::time::timeout(std::time::Duration::from_secs(1), started.notified())
+        .await
+        .unwrap();
+    assert!(app.invoke(Command::SelectNext).is_empty());
+    let screen = render_to_text(app.state(), 180, 40);
+    assert!(screen.contains("idle"), "{screen}");
+    assert!(!screen.contains("Loading Stats"), "{screen}");
+    release.notify_one();
+    app.update(
+        tokio::time::timeout(std::time::Duration::from_secs(1), completions.recv())
+            .await
+            .unwrap()
+            .unwrap(),
+    );
+    assert!(!render_to_text(app.state(), 180, 40).contains("cpuUsageUsec"));
+    let remembered = common::detail_request(app.invoke(Command::SelectPrevious));
+    assert!(
+        matches!(remembered, ProviderRequest::LoadResourceDetails {view_id, ..} if view_id.0 == "stats")
+    );
+    cli.fixture.assert_exhausted();
+}
