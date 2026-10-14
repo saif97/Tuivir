@@ -1,5 +1,6 @@
 use std::{future::Future, pin::Pin};
 
+use super::DetailView;
 use super::require_resource_state;
 use serde::Deserialize;
 
@@ -363,7 +364,7 @@ impl ProviderWorkspace for AppleContainerWorkspace {
                 panels.push(ResourcePanel {
                     id: ResourcePanelId::new(id),
                     title: title.into(),
-                    detail_views: vec![],
+                    detail_views: vec![DetailView::new("inspect", "Inspect")],
                     resources,
                 });
             }
@@ -486,11 +487,41 @@ impl ProviderWorkspace for AppleContainerWorkspace {
 
     fn load_details<'a>(
         &'a self,
-        _cli: &'a dyn CliRunner,
-        _target: &'a ResourceTarget,
-        _view_id: &'a DetailViewId,
+        cli: &'a dyn CliRunner,
+        target: &'a ResourceTarget,
+        view_id: &'a DetailViewId,
     ) -> Pin<Box<dyn Future<Output = Result<ResourceDetails, WorkspaceError>> + Send + 'a>> {
-        Box::pin(async { Err(WorkspaceError::new("Apple Container Details unavailable")) })
+        Box::pin(async move {
+            let name = target.resource_id().0.as_str();
+            let mut args = match (target.panel_id().0.as_str(), view_id.0.as_str()) {
+                ("containers", "inspect") => vec!["inspect"],
+                ("images", "inspect") => vec!["image", "inspect"],
+                ("networks", "inspect") => vec!["network", "inspect"],
+                ("volumes", "inspect") => vec!["volume", "inspect"],
+                _ => {
+                    return Err(WorkspaceError::new(format!(
+                        "Apple Container has no {view_id} view for Resource Panel {}",
+                        target.panel_id()
+                    )));
+                }
+            };
+            args.extend(["--", name]);
+            let output = cli
+                .run(ProcessSpec::new("container", &args))
+                .await
+                .map_err(|error| {
+                    WorkspaceError::new(provider_cli_error(
+                        PROVIDER_NAME,
+                        &error,
+                        &format!("Apple Container could not load {view_id} for Resource {name}"),
+                    ))
+                })?;
+            let value: Vec<serde_json::Value> =
+                serde_json::from_str(&output.stdout).map_err(malformed)?;
+            Ok(ResourceDetails::from_output(
+                &serde_json::to_string_pretty(&value).expect("JSON values serialize"),
+            ))
+        })
     }
 }
 

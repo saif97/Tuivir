@@ -468,3 +468,59 @@ async fn image_delete_requires_verified_absence_of_the_requested_reference() {
     );
     refused.assert_exhausted();
 }
+
+#[tokio::test]
+async fn every_resource_kind_offers_its_own_native_inspection() {
+    use tuivir::domain::DetailViewId;
+    let cli = listings(
+        include_str!("fixtures/apple-container/containers.json"),
+        include_str!("fixtures/apple-container/images.json"),
+        include_str!("fixtures/apple-container/networks.json"),
+        include_str!("fixtures/apple-container/volumes.json"),
+    );
+    let snapshot = AppleContainerWorkspace.refresh(&cli).await.unwrap();
+    for (panel, prefix, fixture) in [
+        (
+            "containers",
+            vec!["inspect"],
+            include_str!("fixtures/apple-container/containers.json"),
+        ),
+        (
+            "images",
+            vec!["image", "inspect"],
+            include_str!("fixtures/apple-container/images.json"),
+        ),
+        (
+            "networks",
+            vec!["network", "inspect"],
+            include_str!("fixtures/apple-container/networks.json"),
+        ),
+        (
+            "volumes",
+            vec!["volume", "inspect"],
+            include_str!("fixtures/apple-container/volumes.json"),
+        ),
+    ] {
+        let resource_panel = snapshot.panels.iter().find(|p| p.id.0 == panel).unwrap();
+        assert!(
+            resource_panel
+                .detail_views
+                .iter()
+                .any(|v| v.id.0 == "inspect" && v.title == "Inspect")
+        );
+        let name = "--literal name";
+        let target = common::resource_target(panel, name);
+        let mut args = prefix;
+        args.extend(["--", name]);
+        let cli = FixtureCli::new([(ProcessSpec::new("container", &args), success(fixture))]);
+        let details = AppleContainerWorkspace
+            .load_details(&cli, &target, &DetailViewId::new("inspect"))
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&details.lines.join("\n")).unwrap(),
+            serde_json::from_str::<serde_json::Value>(fixture).unwrap()
+        );
+        cli.assert_exhausted();
+    }
+}
