@@ -4,8 +4,8 @@ use serde::Deserialize;
 
 use super::{
     DetailViewId, Provider, ProviderDiscovery, ProviderId, ProviderVersion, ProviderWorkspace,
-    ResourceCommand, ResourceDetails, ResourceState, ResourceTarget, WorkspaceError,
-    WorkspaceSnapshot, provider_cli_error,
+    ResourceCommand, ResourceDetails, ResourcePanel, ResourcePanelId, ResourceState,
+    ResourceTarget, WorkspaceError, WorkspaceSnapshot, provider_cli_error,
 };
 use crate::infrastructure::process::{CliRunner, ProcessError, ProcessSpec};
 
@@ -76,9 +76,56 @@ impl ProviderWorkspace for AppleContainerWorkspace {
 
     fn refresh<'a>(
         &'a self,
-        _cli: &'a dyn CliRunner,
+        cli: &'a dyn CliRunner,
     ) -> Pin<Box<dyn Future<Output = Result<WorkspaceSnapshot, WorkspaceError>> + Send + 'a>> {
-        Box::pin(async { Err(WorkspaceError::new("Apple Container listing unavailable")) })
+        Box::pin(async move {
+            let mut panels = Vec::new();
+            for (id, title, args) in [
+                (
+                    "containers",
+                    "Containers",
+                    vec!["list", "--all", "--format", "json"],
+                ),
+                (
+                    "images",
+                    "Images",
+                    vec!["image", "list", "--format", "json"],
+                ),
+                (
+                    "networks",
+                    "Networks",
+                    vec!["network", "list", "--format", "json"],
+                ),
+                (
+                    "volumes",
+                    "Volumes",
+                    vec!["volume", "list", "--format", "json"],
+                ),
+            ] {
+                let output = cli
+                    .run(ProcessSpec::new("container", &args))
+                    .await
+                    .map_err(|error| {
+                        WorkspaceError::with_help(
+                            provider_cli_error(
+                                PROVIDER_NAME,
+                                &error,
+                                &format!("Apple Container could not list {title}"),
+                            ),
+                            RECOVERY,
+                        )
+                    })?;
+                let _: Vec<serde_json::Value> =
+                    serde_json::from_str(&output.stdout).map_err(malformed)?;
+                panels.push(ResourcePanel {
+                    id: ResourcePanelId::new(id),
+                    title: title.into(),
+                    detail_views: vec![],
+                    resources: vec![],
+                });
+            }
+            Ok(WorkspaceSnapshot { panels })
+        })
     }
 
     fn execute_command<'a>(
