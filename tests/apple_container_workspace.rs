@@ -799,3 +799,74 @@ async fn refresh_recovers_after_external_service_start_without_restarting_tuivir
     assert!(!screen.contains("XPC connection error"), "{screen}");
     cli.assert_exhausted();
 }
+
+#[tokio::test]
+async fn unsupported_lifecycle_commands_never_query_or_change_resources() {
+    use tuivir::{application::ResourceCommand, domain::ResourceState};
+    let cli = FixtureCli::new([]);
+    let target = common::resource_target("containers", "web");
+    for command in [
+        ResourceCommand::Start,
+        ResourceCommand::Stop,
+        ResourceCommand::Restart,
+        ResourceCommand::Resume,
+        ResourceCommand::Delete,
+    ] {
+        assert!(
+            AppleContainerWorkspace
+                .execute_command(&cli, &target, command, None)
+                .await
+                .unwrap_err()
+                .message
+                .contains("last reported Resource State")
+        );
+    }
+    for (command, state) in [
+        (ResourceCommand::Start, ResourceState::Running),
+        (ResourceCommand::Stop, ResourceState::Stopped),
+        (ResourceCommand::Restart, ResourceState::Stopped),
+        (ResourceCommand::Start, ResourceState::Unknown),
+        (ResourceCommand::Stop, ResourceState::Transitioning),
+        (ResourceCommand::Resume, ResourceState::Paused),
+    ] {
+        assert!(
+            AppleContainerWorkspace
+                .execute_command(&cli, &target, command, Some(state))
+                .await
+                .is_err()
+        );
+    }
+    for panel in ["images", "networks", "volumes", "interfaces"] {
+        assert!(
+            AppleContainerWorkspace
+                .execute_command(
+                    &cli,
+                    &common::resource_target(panel, "web"),
+                    ResourceCommand::Start,
+                    None
+                )
+                .await
+                .is_err()
+        );
+    }
+    for (panel, view) in [
+        ("containers", "shell"),
+        ("containers", "unknown"),
+        ("images", "logs"),
+        ("networks", "stats"),
+        ("volumes", "boot-logs"),
+        ("interfaces", "inspect"),
+    ] {
+        assert!(
+            AppleContainerWorkspace
+                .load_details(
+                    &cli,
+                    &common::resource_target(panel, "web"),
+                    &tuivir::domain::DetailViewId::new(view)
+                )
+                .await
+                .is_err()
+        );
+    }
+    cli.assert_exhausted();
+}
