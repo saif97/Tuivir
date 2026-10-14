@@ -576,3 +576,53 @@ async fn process_and_boot_logs_are_separate_bounded_non_following_views() {
         unavailable.assert_exhausted();
     }
 }
+
+#[tokio::test]
+async fn finite_stats_preserve_native_metrics_and_explain_empty_samples() {
+    use tuivir::domain::DetailViewId;
+    let snapshot = AppleContainerWorkspace
+        .refresh(&listings("[]", "[]", "[]", "[]"))
+        .await
+        .unwrap();
+    assert_eq!(
+        snapshot.panels[0]
+            .detail_views
+            .iter()
+            .map(|v| v.title.as_str())
+            .collect::<Vec<_>>(),
+        ["Logs", "Boot Logs", "Stats", "Inspect"]
+    );
+    let target = common::resource_target("containers", "web");
+    let spec = ProcessSpec::new(
+        "container",
+        &["stats", "--no-stream", "--format", "json", "--", "web"],
+    );
+    let fixture = include_str!("fixtures/apple-container/stats.json");
+    let cli = FixtureCli::new([(spec.clone(), success(fixture))]);
+    let details = AppleContainerWorkspace
+        .load_details(&cli, &target, &DetailViewId::new("stats"))
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&details.lines.join("\n")).unwrap(),
+        serde_json::from_str::<serde_json::Value>(fixture).unwrap()
+    );
+    cli.assert_exhausted();
+    let empty = FixtureCli::new([(spec.clone(), success("[]"))]);
+    let details = AppleContainerWorkspace
+        .load_details(&empty, &target, &DetailViewId::new("stats"))
+        .await
+        .unwrap();
+    assert_eq!(details.lines, ["Statistics unavailable for Container web."]);
+    empty.assert_exhausted();
+    let failed = FixtureCli::new([(spec, common::failure("stats failed: no such container"))]);
+    assert!(
+        AppleContainerWorkspace
+            .load_details(&failed, &target, &DetailViewId::new("stats"))
+            .await
+            .unwrap_err()
+            .message
+            .contains("stats failed: no such container")
+    );
+    failed.assert_exhausted();
+}

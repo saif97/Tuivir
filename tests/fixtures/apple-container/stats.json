@@ -1,0 +1,13 @@
+[
+  {
+    "id": "web",
+    "memoryUsageBytes": 33554432,
+    "memoryLimitBytes": 1073741824,
+    "cpuUsageUsec": 123456,
+    "networkRxBytes": 4096,
+    "networkTxBytes": 2048,
+    "blockReadBytes": 8192,
+    "blockWriteBytes": 1024,
+    "numProcesses": 3
+  }
+]

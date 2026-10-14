@@ -368,6 +368,7 @@ impl ProviderWorkspace for AppleContainerWorkspace {
                         vec![
                             DetailView::new("logs", "Logs"),
                             DetailView::new("boot-logs", "Boot Logs"),
+                            DetailView::new("stats", "Stats"),
                             DetailView::new("inspect", "Inspect"),
                         ]
                     } else {
@@ -503,6 +504,7 @@ impl ProviderWorkspace for AppleContainerWorkspace {
             let name = target.resource_id().0.as_str();
             let mut args = match (target.panel_id().0.as_str(), view_id.0.as_str()) {
                 ("containers", "logs") => vec!["logs", "-n", "200"],
+                ("containers", "stats") => vec!["stats", "--no-stream", "--format", "json"],
                 ("containers", "boot-logs") => vec!["logs", "--boot", "-n", "200"],
                 ("containers", "inspect") => vec!["inspect"],
                 ("images", "inspect") => vec!["image", "inspect"],
@@ -535,6 +537,11 @@ impl ProviderWorkspace for AppleContainerWorkspace {
             }
             let value: Vec<serde_json::Value> =
                 serde_json::from_str(&output.stdout).map_err(malformed)?;
+            if view_id.0 == "stats" && value.is_empty() {
+                return Ok(ResourceDetails::from_lines([format!(
+                    "Statistics unavailable for Container {name}."
+                )]));
+            }
             Ok(ResourceDetails::from_output(
                 &serde_json::to_string_pretty(&value).expect("JSON values serialize"),
             ))
