@@ -380,6 +380,16 @@ impl ProviderWorkspace for AppleContainerWorkspace {
     ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
             let name = target.resource_id().0.as_str();
+            if command == ResourceCommand::Delete {
+                let kind = match target.panel_id().0.as_str() {
+                    "networks" => Some("network"),
+                    "volumes" => Some("volume"),
+                    _ => None,
+                };
+                if let Some(kind) = kind {
+                    return run_command(cli, &[kind, "delete", "--", name], command, name).await;
+                }
+            }
             if target.panel_id().0 != "containers" {
                 return Err(WorkspaceError::new(format!(
                     "Apple Container has no {command} Command for Resource Panel {}",

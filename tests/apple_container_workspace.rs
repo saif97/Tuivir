@@ -378,3 +378,26 @@ async fn container_delete_uses_force_only_outside_positively_stopped_state() {
         cli.assert_exhausted();
     }
 }
+
+#[tokio::test]
+async fn network_and_volume_delete_preserve_dependency_refusals() {
+    use tuivir::application::ResourceCommand;
+    for (panel, kind) in [("networks", "network"), ("volumes", "volume")] {
+        let name = "--literal name";
+        let target = common::resource_target(panel, name);
+        let deletion = ProcessSpec::new("container", &[kind, "delete", "--", name]);
+        let cli = FixtureCli::new([(deletion.clone(), success(""))]);
+        AppleContainerWorkspace
+            .execute_command(&cli, &target, ResourceCommand::Delete, None)
+            .await
+            .unwrap();
+        cli.assert_exhausted();
+        let refused = FixtureCli::new([(deletion, common::failure("Resource in use by web"))]);
+        let error = AppleContainerWorkspace
+            .execute_command(&refused, &target, ResourceCommand::Delete, None)
+            .await
+            .unwrap_err();
+        assert!(error.message.contains("Resource in use by web"));
+        refused.assert_exhausted();
+    }
+}
