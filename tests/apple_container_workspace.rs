@@ -347,3 +347,34 @@ async fn restart_stops_then_starts_and_reports_either_failure() {
     assert!(error.message.contains("Restart Start"));
     start_failure.assert_exhausted();
 }
+
+#[tokio::test]
+async fn container_delete_uses_force_only_outside_positively_stopped_state() {
+    use tuivir::{application::ResourceCommand, domain::ResourceState};
+    let name = "--unusual name";
+    let target = common::resource_target("containers", name);
+    for (state, args) in [
+        (ResourceState::Stopped, vec!["delete", "--", name]),
+        (
+            ResourceState::Running,
+            vec!["delete", "--force", "--", name],
+        ),
+        (
+            ResourceState::Transitioning,
+            vec!["delete", "--force", "--", name],
+        ),
+        (
+            ResourceState::Unknown,
+            vec!["delete", "--force", "--", name],
+        ),
+        (ResourceState::Paused, vec!["delete", "--force", "--", name]),
+        (ResourceState::Broken, vec!["delete", "--force", "--", name]),
+    ] {
+        let cli = FixtureCli::new([(ProcessSpec::new("container", &args), success(""))]);
+        AppleContainerWorkspace
+            .execute_command(&cli, &target, ResourceCommand::Delete, Some(state))
+            .await
+            .unwrap();
+        cli.assert_exhausted();
+    }
+}

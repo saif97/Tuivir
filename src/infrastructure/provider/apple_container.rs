@@ -399,6 +399,14 @@ impl ProviderWorkspace for AppleContainerWorkspace {
                 )));
             }
             let verb = match command {
+                ResourceCommand::Delete => {
+                    let args = if state == ResourceState::Stopped {
+                        vec!["delete", "--", name]
+                    } else {
+                        vec!["delete", "--force", "--", name]
+                    };
+                    return run_command(cli, &args, command, name).await;
+                }
                 ResourceCommand::Restart => {
                     run_command(cli, &["stop", "--", name], ResourceCommand::Stop, name)
                         .await
