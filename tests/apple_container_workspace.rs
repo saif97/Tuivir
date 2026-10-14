@@ -198,3 +198,77 @@ async fn volumes_are_independently_managed_stateless_resources() {
     assert!(volume.fields.contains(&("Size", "1024 MiB".into())));
     cli.assert_exhausted();
 }
+
+#[tokio::test]
+async fn builtin_runtime_discovers_apple_container_and_renders_all_empty_panels() {
+    use std::sync::Arc;
+    use tuivir::{
+        application::App, infrastructure::runtime::ProviderRuntime, presentation::render_to_text,
+    };
+    let cli = FixtureCli::new([
+        (
+            ProcessSpec::new("docker", &["context", "show"]),
+            Err(ProcessError::ExecutableNotFound),
+        ),
+        (
+            ProcessSpec::new("incus", &["remote", "get-default"]),
+            Err(ProcessError::ExecutableNotFound),
+        ),
+        (
+            ProcessSpec::new("incus", &["project", "get-current"]),
+            Err(ProcessError::ExecutableNotFound),
+        ),
+        (
+            ProcessSpec::new("sbx", &["version"]),
+            Err(ProcessError::ExecutableNotFound),
+        ),
+        (
+            ProcessSpec::new("tart", &["--version"]),
+            Err(ProcessError::ExecutableNotFound),
+        ),
+        (
+            ProcessSpec::new("container", VERSION),
+            success(include_str!("fixtures/apple-container/version.json")),
+        ),
+        (ProcessSpec::new("container", CONTAINERS), success("[]")),
+        (ProcessSpec::new("container", IMAGES), success("[]")),
+        (ProcessSpec::new("container", NETWORKS), success("[]")),
+        (ProcessSpec::new("container", VOLUMES), success("[]")),
+    ]);
+    let cli = Arc::new(cli);
+    let runtime = ProviderRuntime::with_builtin_providers(cli.clone());
+    let discoveries = runtime.discover().await;
+    assert_eq!(discoveries.len(), 1);
+    let mut app = App::new();
+    let request =
+        common::refresh_request(app.update(discoveries.into_iter().next().unwrap().into_event()));
+    let (events, mut completions) = tokio::sync::mpsc::unbounded_channel();
+    runtime.dispatch(request, events);
+    app.update(
+        tokio::time::timeout(std::time::Duration::from_secs(1), completions.recv())
+            .await
+            .unwrap()
+            .unwrap(),
+    );
+    let screen = render_to_text(app.state(), 120, 36);
+    for title in [
+        "Apple Container",
+        "Containers",
+        "Images",
+        "Networks",
+        "Volumes",
+    ] {
+        assert!(screen.contains(title), "{screen}");
+    }
+    for index in 0..4 {
+        app.invoke(tuivir::application::Command::FocusResourcePanel(index));
+        assert_eq!(
+            app.state()
+                .active_workspace()
+                .unwrap()
+                .focused_resource_panel_index(),
+            Some(index)
+        );
+    }
+    cli.assert_exhausted();
+}

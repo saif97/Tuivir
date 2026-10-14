@@ -464,6 +464,10 @@ async fn reachable_docker_sandbox_without_sandboxes_renders_a_distinct_empty_sta
 async fn runtime_with_builtin_providers_discovers_installed_docker_sandbox() {
     let cli = FixtureCli::new([
         (
+            ProcessSpec::new("container", &["system", "version", "--format", "json"]),
+            Err(ProcessError::ExecutableNotFound),
+        ),
+        (
             ProcessSpec::new("tart", &["--version"]),
             Err(ProcessError::ExecutableNotFound),
         ),
