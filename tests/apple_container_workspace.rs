@@ -299,3 +299,51 @@ async fn lifecycle_start_and_stop_use_reported_state_and_literal_identifiers() {
     }
     cli.assert_exhausted();
 }
+
+#[tokio::test]
+async fn restart_stops_then_starts_and_reports_either_failure() {
+    use tuivir::{application::ResourceCommand, domain::ResourceState};
+    let target = common::resource_target("containers", "web");
+    let stop = ProcessSpec::new("container", &["stop", "--", "web"]);
+    let start = ProcessSpec::new("container", &["start", "--", "web"]);
+    let cli = FixtureCli::new([(stop.clone(), success("")), (start.clone(), success(""))]);
+    AppleContainerWorkspace
+        .execute_command(
+            &cli,
+            &target,
+            ResourceCommand::Restart,
+            Some(ResourceState::Running),
+        )
+        .await
+        .unwrap();
+    cli.assert_exhausted();
+    let stop_failure = FixtureCli::new([(stop.clone(), common::failure("cannot stop VM"))]);
+    let error = AppleContainerWorkspace
+        .execute_command(
+            &stop_failure,
+            &target,
+            ResourceCommand::Restart,
+            Some(ResourceState::Running),
+        )
+        .await
+        .unwrap_err();
+    assert!(error.message.contains("cannot stop VM"));
+    assert!(error.message.contains("Restart Stop"));
+    stop_failure.assert_exhausted();
+    let start_failure = FixtureCli::new([
+        (stop, success("")),
+        (start, common::failure("cannot start VM")),
+    ]);
+    let error = AppleContainerWorkspace
+        .execute_command(
+            &start_failure,
+            &target,
+            ResourceCommand::Restart,
+            Some(ResourceState::Running),
+        )
+        .await
+        .unwrap_err();
+    assert!(error.message.contains("cannot start VM"));
+    assert!(error.message.contains("Restart Start"));
+    start_failure.assert_exhausted();
+}

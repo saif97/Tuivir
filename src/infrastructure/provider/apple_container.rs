@@ -399,6 +399,24 @@ impl ProviderWorkspace for AppleContainerWorkspace {
                 )));
             }
             let verb = match command {
+                ResourceCommand::Restart => {
+                    run_command(cli, &["stop", "--", name], ResourceCommand::Stop, name)
+                        .await
+                        .map_err(|error| {
+                            WorkspaceError::new(format!(
+                                "Apple Container Restart Stop failed: {}",
+                                error.message
+                            ))
+                        })?;
+                    return run_command(cli, &["start", "--", name], ResourceCommand::Start, name)
+                        .await
+                        .map_err(|error| {
+                            WorkspaceError::new(format!(
+                                "Apple Container Restart Start failed: {}",
+                                error.message
+                            ))
+                        });
+                }
                 ResourceCommand::Start => "start",
                 ResourceCommand::Stop => "stop",
                 _ => {
