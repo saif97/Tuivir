@@ -524,3 +524,55 @@ async fn every_resource_kind_offers_its_own_native_inspection() {
         cli.assert_exhausted();
     }
 }
+
+#[tokio::test]
+async fn process_and_boot_logs_are_separate_bounded_non_following_views() {
+    use tuivir::{domain::DetailViewId, infrastructure::process::ProcessOutput};
+    let snapshot = AppleContainerWorkspace
+        .refresh(&listings("[]", "[]", "[]", "[]"))
+        .await
+        .unwrap();
+    let views = &snapshot.panels[0].detail_views;
+    for (view, title, args, stdout) in [
+        (
+            "logs",
+            "Logs",
+            vec!["logs", "-n", "200", "--", "web"],
+            "process output\n",
+        ),
+        (
+            "boot-logs",
+            "Boot Logs",
+            vec!["logs", "--boot", "-n", "200", "--", "web"],
+            "VM boot output\n",
+        ),
+    ] {
+        assert!(views.iter().any(|v| v.id.0 == view && v.title == title));
+        let target = common::resource_target("containers", "web");
+        let spec = ProcessSpec::new("container", &args);
+        let cli = FixtureCli::new([(
+            spec.clone(),
+            Ok(ProcessOutput {
+                stdout: stdout.into(),
+                stderr: "process stderr\n".into(),
+            }),
+        )]);
+        let details = AppleContainerWorkspace
+            .load_details(&cli, &target, &DetailViewId::new(view))
+            .await
+            .unwrap();
+        assert_eq!(details.lines, vec![stdout.trim(), "process stderr"]);
+        cli.assert_exhausted();
+        let unavailable =
+            FixtureCli::new([(spec, common::failure("log file not found: never started"))]);
+        assert!(
+            AppleContainerWorkspace
+                .load_details(&unavailable, &target, &DetailViewId::new(view))
+                .await
+                .unwrap_err()
+                .message
+                .contains("never started")
+        );
+        unavailable.assert_exhausted();
+    }
+}

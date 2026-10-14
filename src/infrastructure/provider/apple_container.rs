@@ -364,7 +364,15 @@ impl ProviderWorkspace for AppleContainerWorkspace {
                 panels.push(ResourcePanel {
                     id: ResourcePanelId::new(id),
                     title: title.into(),
-                    detail_views: vec![DetailView::new("inspect", "Inspect")],
+                    detail_views: if id == "containers" {
+                        vec![
+                            DetailView::new("logs", "Logs"),
+                            DetailView::new("boot-logs", "Boot Logs"),
+                            DetailView::new("inspect", "Inspect"),
+                        ]
+                    } else {
+                        vec![DetailView::new("inspect", "Inspect")]
+                    },
                     resources,
                 });
             }
@@ -494,6 +502,8 @@ impl ProviderWorkspace for AppleContainerWorkspace {
         Box::pin(async move {
             let name = target.resource_id().0.as_str();
             let mut args = match (target.panel_id().0.as_str(), view_id.0.as_str()) {
+                ("containers", "logs") => vec!["logs", "-n", "200"],
+                ("containers", "boot-logs") => vec!["logs", "--boot", "-n", "200"],
                 ("containers", "inspect") => vec!["inspect"],
                 ("images", "inspect") => vec!["image", "inspect"],
                 ("networks", "inspect") => vec!["network", "inspect"],
@@ -516,6 +526,13 @@ impl ProviderWorkspace for AppleContainerWorkspace {
                         &format!("Apple Container could not load {view_id} for Resource {name}"),
                     ))
                 })?;
+            if view_id.0 == "logs" || view_id.0 == "boot-logs" {
+                let mut details = ResourceDetails::from_output(&output.stdout);
+                details
+                    .lines
+                    .extend(ResourceDetails::from_output(&output.stderr).lines);
+                return Ok(details);
+            }
             let value: Vec<serde_json::Value> =
                 serde_json::from_str(&output.stdout).map_err(malformed)?;
             Ok(ResourceDetails::from_output(
