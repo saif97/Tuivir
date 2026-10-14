@@ -551,6 +551,29 @@ impl ProviderWorkspace for AppleContainerWorkspace {
             }
             let value: Vec<serde_json::Value> =
                 serde_json::from_str(&output.stdout).map_err(malformed)?;
+            if view_id.0 == "inspect" {
+                // Validate the native model, but display the whole JSON so
+                // Provider fields Tuivir doesn't summarize remain inspectable.
+                match target.panel_id().0.as_str() {
+                    "containers" => {
+                        let _: Vec<ContainerRow> =
+                            serde_json::from_str(&output.stdout).map_err(malformed)?;
+                    }
+                    "images" => {
+                        let _: Vec<ImageRow> =
+                            serde_json::from_str(&output.stdout).map_err(malformed)?;
+                    }
+                    "networks" => {
+                        let _: Vec<NetworkRow> =
+                            serde_json::from_str(&output.stdout).map_err(malformed)?;
+                    }
+                    "volumes" => {
+                        let _: Vec<VolumeRow> =
+                            serde_json::from_str(&output.stdout).map_err(malformed)?;
+                    }
+                    _ => unreachable!("only native Inspect panels reach validation"),
+                }
+            }
             if view_id.0 == "stats" && value.is_empty() {
                 return Ok(ResourceDetails::from_lines([format!(
                     "Statistics unavailable for Container {name}."

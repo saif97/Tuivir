@@ -650,3 +650,28 @@ async fn only_running_containers_offer_an_interactive_bin_sh_session() {
     }
     cli.assert_exhausted();
 }
+
+#[tokio::test]
+async fn malformed_native_details_are_errors_instead_of_valid_empty_diagnostics() {
+    use tuivir::domain::DetailViewId;
+    for (panel, args) in [
+        ("containers", vec!["inspect", "--", "web"]),
+        ("images", vec!["image", "inspect", "--", "web"]),
+        ("networks", vec!["network", "inspect", "--", "web"]),
+        ("volumes", vec!["volume", "inspect", "--", "web"]),
+    ] {
+        for output in ["not JSON", "{}", "[42]", "[{}]"] {
+            let cli = FixtureCli::new([(ProcessSpec::new("container", &args), success(output))]);
+            let error = AppleContainerWorkspace
+                .load_details(
+                    &cli,
+                    &common::resource_target(panel, "web"),
+                    &DetailViewId::new("inspect"),
+                )
+                .await
+                .unwrap_err();
+            assert!(error.message.contains("malformed or incompatible data"));
+            cli.assert_exhausted();
+        }
+    }
+}
