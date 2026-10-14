@@ -675,3 +675,79 @@ async fn malformed_native_details_are_errors_instead_of_valid_empty_diagnostics(
         }
     }
 }
+
+#[tokio::test]
+async fn installed_provider_diagnostics_remain_actionable_without_a_version_gate() {
+    for response in [
+        common::failure("unsupported macOS"),
+        success("not JSON"),
+        success("[]"),
+        success(r#"[{"appName":"container","version":""}]"#),
+    ] {
+        let cli = FixtureCli::new([(ProcessSpec::new("container", VERSION), response)]);
+        let discovery = AppleContainerWorkspace
+            .discover(&cli)
+            .await
+            .expect("installed CLI remains visible");
+        assert_eq!(
+            discovery.provider().id(),
+            &ProviderId::new("apple-container")
+        );
+        let error = &discovery.error().unwrap().message;
+        assert!(error.contains("container system version --format json"));
+        assert!(error.contains("Apple Silicon with macOS 26"));
+        cli.assert_exhausted();
+    }
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("container", VERSION),
+        success(
+            r#"[{"appName":"container-apiserver","version":"1.5.0"},{"appName":"container","version":"9.0.0"}]"#,
+        ),
+    )]);
+    let discovery = AppleContainerWorkspace.discover(&cli).await.unwrap();
+    assert_eq!(
+        discovery.provider().version(),
+        Some(&ProviderVersion::new("9.0.0"))
+    );
+    assert!(discovery.error().is_none());
+    cli.assert_exhausted();
+}
+
+#[tokio::test]
+async fn listing_failures_preserve_native_diagnostics_and_reject_bad_shapes() {
+    for (args, payload) in [
+        (CONTAINERS, "[{}]"),
+        (IMAGES, "[{}]"),
+        (NETWORKS, "[{}]"),
+        (VOLUMES, "[{}]"),
+    ] {
+        let mut responses = Vec::new();
+        for listing in [CONTAINERS, IMAGES, NETWORKS, VOLUMES] {
+            responses.push((
+                ProcessSpec::new("container", listing),
+                success(if listing == args { payload } else { "[]" }),
+            ));
+            if listing == args {
+                break;
+            }
+        }
+        let cli = FixtureCli::new(responses);
+        let error = AppleContainerWorkspace.refresh(&cli).await.unwrap_err();
+        assert!(error.message.contains("malformed or incompatible data"));
+        cli.assert_exhausted();
+    }
+    for response in [
+        common::failure("XPC connection error: service stopped"),
+        common::failure_on_stdout("permission denied"),
+        common::silent_failure(1),
+        success("not JSON"),
+        success("{}"),
+        Err(ProcessError::SpawnFailed("host refused execution".into())),
+    ] {
+        let cli = FixtureCli::new([(ProcessSpec::new("container", CONTAINERS), response)]);
+        let error = AppleContainerWorkspace.refresh(&cli).await.unwrap_err();
+        assert!(error.message.contains("container system start"));
+        assert!(error.message.contains("refresh the Workspace"));
+        cli.assert_exhausted();
+    }
+}
