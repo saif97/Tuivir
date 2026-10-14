@@ -218,12 +218,15 @@ enum NativeRows {
 }
 
 impl NativeRows {
-    fn parse(panel_id: &str, value: &serde_json::Value) -> Result<Self, WorkspaceError> {
+    fn parse<'de>(
+        panel_id: &str,
+        deserializer: impl serde::Deserializer<'de>,
+    ) -> Result<Self, WorkspaceError> {
         let rows = match panel_id {
-            "containers" => Vec::<ContainerRow>::deserialize(value).map(Self::Containers),
-            "images" => Vec::<ImageRow>::deserialize(value).map(Self::Images),
-            "networks" => Vec::<NetworkRow>::deserialize(value).map(Self::Networks),
-            "volumes" => Vec::<VolumeRow>::deserialize(value).map(Self::Volumes),
+            "containers" => Vec::<ContainerRow>::deserialize(deserializer).map(Self::Containers),
+            "images" => Vec::<ImageRow>::deserialize(deserializer).map(Self::Images),
+            "networks" => Vec::<NetworkRow>::deserialize(deserializer).map(Self::Networks),
+            "volumes" => Vec::<VolumeRow>::deserialize(deserializer).map(Self::Volumes),
             _ => {
                 return Err(WorkspaceError::new(format!(
                     "Apple Container has no Resource Panel {panel_id}"
@@ -581,7 +584,8 @@ impl ProviderWorkspace for AppleContainerWorkspace {
             }
             // Inspect is the only remaining view. Validate its native model
             // from the parsed tree while retaining all unsummarized fields.
-            let value = serde_json::from_str(&output.stdout).map_err(malformed)?;
+            let value: serde_json::Value =
+                serde_json::from_str(&output.stdout).map_err(malformed)?;
             NativeRows::parse(&target.panel_id().0, &value)?;
             Ok(ResourceDetails::from_output(
                 &serde_json::to_string_pretty(&value).expect("JSON values serialize"),
@@ -627,8 +631,11 @@ async fn load_panel(
                 RECOVERY,
             )
         })?;
-    let value = serde_json::from_str(&output.stdout).map_err(malformed)?;
-    let resources = NativeRows::parse(id, &value)?.into_resources();
+    // Listings need only summary fields. Inspect can use the same schema
+    // selection with its borrowed JSON tree, without retaining one here.
+    let mut deserializer = serde_json::Deserializer::from_str(&output.stdout);
+    let resources = NativeRows::parse(id, &mut deserializer)?.into_resources();
+    deserializer.end().map_err(malformed)?;
     Ok(ResourcePanel {
         id: ResourcePanelId::new(id),
         title: title.into(),
