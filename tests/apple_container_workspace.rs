@@ -870,3 +870,65 @@ async fn unsupported_lifecycle_commands_never_query_or_change_resources() {
     }
     cli.assert_exhausted();
 }
+
+#[tokio::test]
+async fn confirmed_delete_uses_shared_progress_completion_and_refresh() {
+    use std::sync::Arc;
+    use tuivir::{
+        application::{App, Command, ResourceCommand},
+        infrastructure::runtime::ProviderRuntime,
+        presentation::render_to_text,
+    };
+    let setup = listings(
+        include_str!("fixtures/apple-container/containers.json"),
+        include_str!("fixtures/apple-container/images.json"),
+        include_str!("fixtures/apple-container/networks.json"),
+        include_str!("fixtures/apple-container/volumes.json"),
+    );
+    let snapshot = AppleContainerWorkspace.refresh(&setup).await.unwrap();
+    let discovery = AppleContainerWorkspace
+        .discover(&FixtureCli::new([(
+            ProcessSpec::new("container", VERSION),
+            success(include_str!("fixtures/apple-container/version.json")),
+        )]))
+        .await
+        .unwrap();
+    let mut app = App::new();
+    assert!(common::ready_workspace(&mut app, discovery, snapshot).is_empty());
+    for panel in 0..4 {
+        app.invoke(Command::FocusResourcePanel(panel));
+        if panel == 2 {
+            app.invoke(Command::SelectNext);
+        }
+        assert!(
+            app.invoke(Command::Resource(ResourceCommand::Delete))
+                .is_empty()
+        );
+        let screen = render_to_text(app.state(), 180, 40);
+        assert!(screen.contains("Confirm deletion"), "{screen}");
+        assert!(app.invoke(Command::Cancel).is_empty());
+        assert!(!render_to_text(app.state(), 180, 40).contains("Confirm deletion"));
+    }
+    app.invoke(Command::FocusResourcePanel(2));
+    app.invoke(Command::SelectPrevious);
+    assert!(
+        app.invoke(Command::Resource(ResourceCommand::Delete))
+            .is_empty()
+    );
+    assert!(!render_to_text(app.state(), 180, 40).contains("Confirm deletion"));
+    app.invoke(Command::FocusResourcePanel(0));
+    app.invoke(Command::Resource(ResourceCommand::Delete));
+    let request = common::command_request(app.invoke(Command::Confirm));
+    assert!(render_to_text(app.state(), 180, 40).contains("Running delete for web"));
+    let cli = Arc::new(FixtureCli::new([(
+        ProcessSpec::new("container", &["delete", "--force", "--", "web"]),
+        success(""),
+    )]));
+    let runtime = ProviderRuntime::new(vec![Arc::new(AppleContainerWorkspace)], cli.clone());
+    let (events, mut completions) = tokio::sync::mpsc::unbounded_channel();
+    runtime.dispatch(request, events);
+    let requests = app.update(completions.recv().await.unwrap());
+    let _ = common::refresh_request(requests);
+    assert!(!render_to_text(app.state(), 180, 40).contains("Running delete for web"));
+    cli.assert_exhausted();
+}
