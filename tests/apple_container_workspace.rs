@@ -626,3 +626,27 @@ async fn finite_stats_preserve_native_metrics_and_explain_empty_samples() {
     );
     failed.assert_exhausted();
 }
+
+#[tokio::test]
+async fn only_running_containers_offer_an_interactive_bin_sh_session() {
+    use tuivir::application::ResourceShellProcess;
+    let cli = listings(
+        include_str!("fixtures/apple-container/containers.json"),
+        "[]",
+        "[]",
+        "[]",
+    );
+    let snapshot = AppleContainerWorkspace.refresh(&cli).await.unwrap();
+    let resources = &snapshot.panels[0].resources;
+    assert_eq!(
+        resources[0].shell,
+        Some(ResourceShellProcess::new(
+            "container",
+            &["exec", "--interactive", "--tty", "--", "web", "/bin/sh"]
+        ))
+    );
+    for resource in &resources[1..] {
+        assert_eq!(resource.shell, None);
+    }
+    cli.assert_exhausted();
+}

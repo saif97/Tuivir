@@ -9,6 +9,7 @@ use super::{
     Resource, ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourcePanelId,
     ResourceState, ResourceTarget, WorkspaceError, WorkspaceSnapshot, provider_cli_error,
 };
+use crate::application::ResourceShellProcess;
 use crate::infrastructure::process::{CliRunner, ProcessError, ProcessSpec};
 
 pub struct AppleContainerWorkspace;
@@ -227,6 +228,19 @@ fn container_resource(row: ContainerRow) -> Resource {
         "stopping" => ResourceState::Transitioning,
         _ => ResourceState::Unknown,
     };
+    let shell = (state == ResourceState::Running).then(|| {
+        ResourceShellProcess::new(
+            "container",
+            &[
+                "exec",
+                "--interactive",
+                "--tty",
+                "--",
+                &row.configuration.id,
+                "/bin/sh",
+            ],
+        )
+    });
     Resource {
         id: ResourceId::new(&row.configuration.id),
         name: row.configuration.id,
@@ -246,7 +260,7 @@ fn container_resource(row: ContainerRow) -> Resource {
         ],
         snapshot_details: vec![],
         available_commands: container_commands(state),
-        shell: None,
+        shell,
     }
 }
 
