@@ -51,6 +51,71 @@ struct ContainerStatus {
     state: String,
 }
 
+#[derive(Deserialize)]
+struct ImageRow {
+    configuration: ImageConfiguration,
+    variants: Vec<ImageVariant>,
+}
+
+#[derive(Deserialize)]
+struct ImageConfiguration {
+    name: String,
+    descriptor: ImageDescriptor,
+}
+
+#[derive(Deserialize)]
+struct ImageDescriptor {
+    digest: String,
+}
+
+#[derive(Deserialize)]
+struct ImageVariant {
+    size: u64,
+    platform: ImagePlatform,
+}
+
+#[derive(Deserialize)]
+struct ImagePlatform {
+    os: String,
+    architecture: String,
+    variant: Option<String>,
+}
+
+fn image_resource(row: ImageRow) -> Resource {
+    let platforms = row
+        .variants
+        .iter()
+        .map(|variant| {
+            let platform = &variant.platform;
+            let mut name = format!("{}/{}", platform.os, platform.architecture);
+            if let Some(variant) = &platform.variant {
+                name.push('/');
+                name.push_str(variant);
+            }
+            name
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let size: u64 = row.variants.iter().map(|variant| variant.size).sum();
+    Resource {
+        // A digest can have several references; Delete and Inspect operate on
+        // the requested reference, so each must retain its own identity.
+        id: ResourceId::new(&row.configuration.name),
+        name: row.configuration.name,
+        secondary_text: Some(row.configuration.descriptor.digest.clone()),
+        status: None,
+        state: None,
+        fields: vec![
+            ("Digest", row.configuration.descriptor.digest),
+            ("Size", format!("{} MiB", size / (1024 * 1024))),
+            ("Platforms", platforms),
+        ],
+        snapshot_details: vec![],
+        available_commands: &[ResourceCommand::Delete],
+        shell: None,
+    }
+}
+
 fn container_commands(state: ResourceState) -> &'static [ResourceCommand] {
     match state {
         ResourceState::Running => &[
@@ -191,6 +256,10 @@ impl ProviderWorkspace for AppleContainerWorkspace {
                     let rows: Vec<ContainerRow> =
                         serde_json::from_str(&output.stdout).map_err(malformed)?;
                     rows.into_iter().map(container_resource).collect()
+                } else if id == "images" {
+                    let rows: Vec<ImageRow> =
+                        serde_json::from_str(&output.stdout).map_err(malformed)?;
+                    rows.into_iter().map(image_resource).collect()
                 } else {
                     let _: Vec<serde_json::Value> =
                         serde_json::from_str(&output.stdout).map_err(malformed)?;

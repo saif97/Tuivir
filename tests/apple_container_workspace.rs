@@ -127,3 +127,24 @@ async fn native_container_states_control_available_lifecycle_commands() {
     assert_eq!(resources[3].status.as_deref(), Some("future-state"));
     cli.assert_exhausted();
 }
+
+#[tokio::test]
+async fn images_keep_reference_identity_without_a_lifecycle_state() {
+    use tuivir::application::ResourceCommand;
+    let cli = listings(
+        "[]",
+        include_str!("fixtures/apple-container/images.json"),
+        "[]",
+        "[]",
+    );
+    let snapshot = AppleContainerWorkspace.refresh(&cli).await.unwrap();
+    let image = &snapshot.panels[1].resources[0];
+    assert_eq!(image.id.0, "docker.io/library/alpine:3.23");
+    assert_eq!(image.name, "docker.io/library/alpine:3.23");
+    assert_eq!(image.state, None);
+    assert_eq!(image.status, None);
+    assert_eq!(image.available_commands, &[ResourceCommand::Delete]);
+    assert!(image.fields.contains(&("Size", "8 MiB".into())));
+    assert!(image.fields.contains(&("Platforms", "linux/arm64".into())));
+    cli.assert_exhausted();
+}
