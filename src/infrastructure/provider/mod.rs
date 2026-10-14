@@ -1,10 +1,12 @@
 use std::{future::Future, pin::Pin};
 
+mod apple_container;
 mod docker;
 mod docker_sandbox;
 mod incus;
 mod tart;
 
+pub use apple_container::AppleContainerWorkspace;
 pub use docker::DockerWorkspace;
 pub use docker_sandbox::DockerSandboxWorkspace;
 pub use incus::IncusWorkspace;
