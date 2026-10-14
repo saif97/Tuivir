@@ -169,6 +169,43 @@ fn network_resource(row: NetworkRow) -> Resource {
     }
 }
 
+#[derive(Deserialize)]
+struct VolumeRow {
+    configuration: VolumeConfiguration,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct VolumeConfiguration {
+    name: String,
+    driver: String,
+    format: String,
+    source: String,
+    size_in_bytes: Option<u64>,
+}
+
+fn volume_resource(row: VolumeRow) -> Resource {
+    let mut fields = vec![
+        ("Driver", row.configuration.driver),
+        ("Format", row.configuration.format),
+        ("Source", row.configuration.source),
+    ];
+    if let Some(size) = row.configuration.size_in_bytes {
+        fields.push(("Size", format!("{} MiB", size / (1024 * 1024))));
+    }
+    Resource {
+        id: ResourceId::new(&row.configuration.name),
+        name: row.configuration.name,
+        secondary_text: None,
+        status: None,
+        state: None,
+        fields,
+        snapshot_details: vec![],
+        available_commands: &[ResourceCommand::Delete],
+        shell: None,
+    }
+}
+
 fn container_commands(state: ResourceState) -> &'static [ResourceCommand] {
     match state {
         ResourceState::Running => &[
@@ -318,9 +355,9 @@ impl ProviderWorkspace for AppleContainerWorkspace {
                         serde_json::from_str(&output.stdout).map_err(malformed)?;
                     rows.into_iter().map(network_resource).collect()
                 } else {
-                    let _: Vec<serde_json::Value> =
+                    let rows: Vec<VolumeRow> =
                         serde_json::from_str(&output.stdout).map_err(malformed)?;
-                    vec![]
+                    rows.into_iter().map(volume_resource).collect()
                 };
                 panels.push(ResourcePanel {
                     id: ResourcePanelId::new(id),

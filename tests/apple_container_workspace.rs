@@ -177,3 +177,24 @@ async fn network_protection_uses_builtin_metadata_instead_of_the_name() {
     }
     cli.assert_exhausted();
 }
+
+#[tokio::test]
+async fn volumes_are_independently_managed_stateless_resources() {
+    use tuivir::application::ResourceCommand;
+    let cli = listings(
+        "[]",
+        "[]",
+        "[]",
+        include_str!("fixtures/apple-container/volumes.json"),
+    );
+    let snapshot = AppleContainerWorkspace.refresh(&cli).await.unwrap();
+    let volume = &snapshot.panels[3].resources[0];
+    assert_eq!(volume.id.0, "data");
+    assert_eq!(volume.state, None);
+    assert_eq!(volume.status, None);
+    assert_eq!(volume.available_commands, &[ResourceCommand::Delete]);
+    assert!(volume.fields.contains(&("Driver", "local".into())));
+    assert!(volume.fields.contains(&("Format", "ext4".into())));
+    assert!(volume.fields.contains(&("Size", "1024 MiB".into())));
+    cli.assert_exhausted();
+}
