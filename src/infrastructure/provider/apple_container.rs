@@ -1,13 +1,12 @@
 use std::{future::Future, pin::Pin};
 
-use super::DetailView;
-use super::require_resource_state;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    DetailViewId, Provider, ProviderDiscovery, ProviderId, ProviderVersion, ProviderWorkspace,
-    Resource, ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourcePanelId,
-    ResourceState, ResourceTarget, WorkspaceError, WorkspaceSnapshot, provider_cli_error,
+    DetailView, DetailViewId, Provider, ProviderDiscovery, ProviderId, ProviderVersion,
+    ProviderWorkspace, Resource, ResourceCommand, ResourceDetails, ResourceId, ResourcePanel,
+    ResourcePanelId, ResourceState, ResourceTarget, WorkspaceError, WorkspaceSnapshot,
+    provider_cli_error, require_resource_state,
 };
 use crate::application::ResourceShellProcess;
 use crate::infrastructure::process::{CliRunner, ProcessError, ProcessSpec};
@@ -211,6 +210,39 @@ struct VolumeConfiguration {
     size_in_bytes: Option<u64>,
 }
 
+enum NativeRows {
+    Containers(Vec<ContainerRow>),
+    Images(Vec<ImageRow>),
+    Networks(Vec<NetworkRow>),
+    Volumes(Vec<VolumeRow>),
+}
+
+impl NativeRows {
+    fn parse(panel_id: &str, value: &serde_json::Value) -> Result<Self, WorkspaceError> {
+        let rows = match panel_id {
+            "containers" => Vec::<ContainerRow>::deserialize(value).map(Self::Containers),
+            "images" => Vec::<ImageRow>::deserialize(value).map(Self::Images),
+            "networks" => Vec::<NetworkRow>::deserialize(value).map(Self::Networks),
+            "volumes" => Vec::<VolumeRow>::deserialize(value).map(Self::Volumes),
+            _ => {
+                return Err(WorkspaceError::new(format!(
+                    "Apple Container has no Resource Panel {panel_id}"
+                )));
+            }
+        };
+        rows.map_err(malformed)
+    }
+
+    fn into_resources(self) -> Vec<Resource> {
+        match self {
+            Self::Containers(rows) => rows.into_iter().map(container_resource).collect(),
+            Self::Images(rows) => rows.into_iter().map(image_resource).collect(),
+            Self::Networks(rows) => rows.into_iter().map(network_resource).collect(),
+            Self::Volumes(rows) => rows.into_iter().map(volume_resource).collect(),
+        }
+    }
+}
+
 fn volume_resource(row: VolumeRow) -> Resource {
     let mut fields = vec![
         ("Driver", row.configuration.driver),
@@ -382,23 +414,8 @@ impl ProviderWorkspace for AppleContainerWorkspace {
                             RECOVERY,
                         )
                     })?;
-                let resources = if id == "containers" {
-                    let rows: Vec<ContainerRow> =
-                        serde_json::from_str(&output.stdout).map_err(malformed)?;
-                    rows.into_iter().map(container_resource).collect()
-                } else if id == "images" {
-                    let rows: Vec<ImageRow> =
-                        serde_json::from_str(&output.stdout).map_err(malformed)?;
-                    rows.into_iter().map(image_resource).collect()
-                } else if id == "networks" {
-                    let rows: Vec<NetworkRow> =
-                        serde_json::from_str(&output.stdout).map_err(malformed)?;
-                    rows.into_iter().map(network_resource).collect()
-                } else {
-                    let rows: Vec<VolumeRow> =
-                        serde_json::from_str(&output.stdout).map_err(malformed)?;
-                    rows.into_iter().map(volume_resource).collect()
-                };
+                let value = serde_json::from_str(&output.stdout).map_err(malformed)?;
+                let resources = NativeRows::parse(id, &value)?.into_resources();
                 panels.push(ResourcePanel {
                     id: ResourcePanelId::new(id),
                     title: title.into(),
@@ -585,31 +602,10 @@ impl ProviderWorkspace for AppleContainerWorkspace {
                     &serde_json::to_string_pretty(&rows).expect("Stats rows serialize"),
                 ));
             }
-            let value: Vec<serde_json::Value> =
-                serde_json::from_str(&output.stdout).map_err(malformed)?;
-            if view_id.0 == "inspect" {
-                // Validate the native model, but display the whole JSON so
-                // Provider fields Tuivir doesn't summarize remain inspectable.
-                match target.panel_id().0.as_str() {
-                    "containers" => {
-                        let _: Vec<ContainerRow> =
-                            serde_json::from_str(&output.stdout).map_err(malformed)?;
-                    }
-                    "images" => {
-                        let _: Vec<ImageRow> =
-                            serde_json::from_str(&output.stdout).map_err(malformed)?;
-                    }
-                    "networks" => {
-                        let _: Vec<NetworkRow> =
-                            serde_json::from_str(&output.stdout).map_err(malformed)?;
-                    }
-                    "volumes" => {
-                        let _: Vec<VolumeRow> =
-                            serde_json::from_str(&output.stdout).map_err(malformed)?;
-                    }
-                    _ => unreachable!("only native Inspect panels reach validation"),
-                }
-            }
+            // Inspect is the only remaining view. Validate its native model
+            // from the parsed tree while retaining all unsummarized fields.
+            let value = serde_json::from_str(&output.stdout).map_err(malformed)?;
+            NativeRows::parse(&target.panel_id().0, &value)?;
             Ok(ResourceDetails::from_output(
                 &serde_json::to_string_pretty(&value).expect("JSON values serialize"),
             ))
