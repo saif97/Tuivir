@@ -727,7 +727,7 @@ async fn listing_failures_preserve_native_diagnostics_and_reject_bad_shapes() {
                 ProcessSpec::new("container", listing),
                 success(if listing == args { payload } else { "[]" }),
             ));
-            if listing == args {
+            if args == CONTAINERS {
                 break;
             }
         }

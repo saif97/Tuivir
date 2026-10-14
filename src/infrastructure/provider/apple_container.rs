@@ -378,61 +378,38 @@ impl ProviderWorkspace for AppleContainerWorkspace {
         cli: &'a dyn CliRunner,
     ) -> Pin<Box<dyn Future<Output = Result<WorkspaceSnapshot, WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
-            let mut panels = Vec::new();
-            for (id, title, args) in [
-                (
-                    "containers",
-                    "Containers",
-                    vec!["list", "--all", "--format", "json"],
-                ),
-                (
+            // Containers establish availability first. The remaining native
+            // listings are independent, so their CLI work can overlap.
+            let containers = load_panel(
+                cli,
+                "containers",
+                "Containers",
+                &["list", "--all", "--format", "json"],
+            )
+            .await?;
+            let (images, networks, volumes) = tokio::join!(
+                load_panel(
+                    cli,
                     "images",
                     "Images",
-                    vec!["image", "list", "--format", "json"],
+                    &["image", "list", "--format", "json"]
                 ),
-                (
+                load_panel(
+                    cli,
                     "networks",
                     "Networks",
-                    vec!["network", "list", "--format", "json"],
+                    &["network", "list", "--format", "json"]
                 ),
-                (
+                load_panel(
+                    cli,
                     "volumes",
                     "Volumes",
-                    vec!["volume", "list", "--format", "json"],
+                    &["volume", "list", "--format", "json"]
                 ),
-            ] {
-                let output = cli
-                    .run(ProcessSpec::new("container", &args))
-                    .await
-                    .map_err(|error| {
-                        WorkspaceError::with_help(
-                            provider_cli_error(
-                                PROVIDER_NAME,
-                                &error,
-                                &format!("Apple Container could not list {title}"),
-                            ),
-                            RECOVERY,
-                        )
-                    })?;
-                let value = serde_json::from_str(&output.stdout).map_err(malformed)?;
-                let resources = NativeRows::parse(id, &value)?.into_resources();
-                panels.push(ResourcePanel {
-                    id: ResourcePanelId::new(id),
-                    title: title.into(),
-                    detail_views: if id == "containers" {
-                        vec![
-                            DetailView::new("logs", "Logs"),
-                            DetailView::new("boot-logs", "Boot Logs"),
-                            DetailView::new("stats", "Stats"),
-                            DetailView::new("inspect", "Inspect"),
-                        ]
-                    } else {
-                        vec![DetailView::new("inspect", "Inspect")]
-                    },
-                    resources,
-                });
-            }
-            Ok(WorkspaceSnapshot { panels })
+            );
+            Ok(WorkspaceSnapshot {
+                panels: vec![containers, images?, networks?, volumes?],
+            })
         })
     }
 
@@ -629,4 +606,42 @@ async fn run_command(
             ))
         })?;
     Ok(())
+}
+
+async fn load_panel(
+    cli: &dyn CliRunner,
+    id: &str,
+    title: &str,
+    args: &[&str],
+) -> Result<ResourcePanel, WorkspaceError> {
+    let output = cli
+        .run(ProcessSpec::new("container", args))
+        .await
+        .map_err(|error| {
+            WorkspaceError::with_help(
+                provider_cli_error(
+                    PROVIDER_NAME,
+                    &error,
+                    &format!("Apple Container could not list {title}"),
+                ),
+                RECOVERY,
+            )
+        })?;
+    let value = serde_json::from_str(&output.stdout).map_err(malformed)?;
+    let resources = NativeRows::parse(id, &value)?.into_resources();
+    Ok(ResourcePanel {
+        id: ResourcePanelId::new(id),
+        title: title.into(),
+        detail_views: if id == "containers" {
+            vec![
+                DetailView::new("logs", "Logs"),
+                DetailView::new("boot-logs", "Boot Logs"),
+                DetailView::new("stats", "Stats"),
+                DetailView::new("inspect", "Inspect"),
+            ]
+        } else {
+            vec![DetailView::new("inspect", "Inspect")]
+        },
+        resources,
+    })
 }
