@@ -4,8 +4,8 @@ use serde::Deserialize;
 
 use super::{
     DetailViewId, Provider, ProviderDiscovery, ProviderId, ProviderVersion, ProviderWorkspace,
-    ResourceCommand, ResourceDetails, ResourcePanel, ResourcePanelId, ResourceState,
-    ResourceTarget, WorkspaceError, WorkspaceSnapshot, provider_cli_error,
+    Resource, ResourceCommand, ResourceDetails, ResourceId, ResourcePanel, ResourcePanelId,
+    ResourceState, ResourceTarget, WorkspaceError, WorkspaceSnapshot, provider_cli_error,
 };
 use crate::infrastructure::process::{CliRunner, ProcessError, ProcessSpec};
 
@@ -19,6 +19,78 @@ const RECOVERY: &str = "Run `container system start` outside Tuivir, then refres
 struct VersionRow {
     app_name: String,
     version: String,
+}
+
+#[derive(Deserialize)]
+struct ContainerRow {
+    configuration: ContainerConfiguration,
+    status: ContainerStatus,
+}
+
+#[derive(Deserialize)]
+struct ContainerConfiguration {
+    id: String,
+    image: ContainerImage,
+    resources: ContainerResources,
+}
+
+#[derive(Deserialize)]
+struct ContainerImage {
+    reference: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ContainerResources {
+    cpus: u64,
+    memory_in_bytes: u64,
+}
+
+#[derive(Deserialize)]
+struct ContainerStatus {
+    state: String,
+}
+
+fn container_commands(state: ResourceState) -> &'static [ResourceCommand] {
+    match state {
+        ResourceState::Running => &[
+            ResourceCommand::Stop,
+            ResourceCommand::Restart,
+            ResourceCommand::Delete,
+        ],
+        ResourceState::Stopped => &[ResourceCommand::Start, ResourceCommand::Delete],
+        _ => &[ResourceCommand::Delete],
+    }
+}
+
+fn container_resource(row: ContainerRow) -> Resource {
+    let state = match row.status.state.as_str() {
+        "running" => ResourceState::Running,
+        "stopped" => ResourceState::Stopped,
+        "stopping" => ResourceState::Transitioning,
+        _ => ResourceState::Unknown,
+    };
+    Resource {
+        id: ResourceId::new(&row.configuration.id),
+        name: row.configuration.id,
+        secondary_text: Some(row.configuration.image.reference.clone()),
+        status: Some(row.status.state),
+        state: Some(state),
+        fields: vec![
+            ("Image", row.configuration.image.reference),
+            ("CPUs", row.configuration.resources.cpus.to_string()),
+            (
+                "Memory",
+                format!(
+                    "{} MiB",
+                    row.configuration.resources.memory_in_bytes / (1024 * 1024)
+                ),
+            ),
+        ],
+        snapshot_details: vec![],
+        available_commands: container_commands(state),
+        shell: None,
+    }
 }
 
 fn malformed(error: impl std::fmt::Display) -> WorkspaceError {
@@ -115,13 +187,20 @@ impl ProviderWorkspace for AppleContainerWorkspace {
                             RECOVERY,
                         )
                     })?;
-                let _: Vec<serde_json::Value> =
-                    serde_json::from_str(&output.stdout).map_err(malformed)?;
+                let resources = if id == "containers" {
+                    let rows: Vec<ContainerRow> =
+                        serde_json::from_str(&output.stdout).map_err(malformed)?;
+                    rows.into_iter().map(container_resource).collect()
+                } else {
+                    let _: Vec<serde_json::Value> =
+                        serde_json::from_str(&output.stdout).map_err(malformed)?;
+                    vec![]
+                };
                 panels.push(ResourcePanel {
                     id: ResourcePanelId::new(id),
                     title: title.into(),
                     detail_views: vec![],
-                    resources: vec![],
+                    resources,
                 });
             }
             Ok(WorkspaceSnapshot { panels })

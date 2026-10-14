@@ -73,3 +73,57 @@ async fn empty_native_panels_remain_visible_in_provider_order() {
     );
     cli.assert_exhausted();
 }
+
+#[tokio::test]
+async fn native_container_states_control_available_lifecycle_commands() {
+    use tuivir::{application::ResourceCommand, domain::ResourceState};
+    let cli = listings(
+        include_str!("fixtures/apple-container/containers.json"),
+        "[]",
+        "[]",
+        "[]",
+    );
+    let snapshot = AppleContainerWorkspace.refresh(&cli).await.unwrap();
+    let resources = &snapshot.panels[0].resources;
+    assert_eq!(resources.len(), 4);
+    for (name, state, commands) in [
+        (
+            "web",
+            ResourceState::Running,
+            &[
+                ResourceCommand::Stop,
+                ResourceCommand::Restart,
+                ResourceCommand::Delete,
+            ][..],
+        ),
+        (
+            "idle",
+            ResourceState::Stopped,
+            &[ResourceCommand::Start, ResourceCommand::Delete][..],
+        ),
+        (
+            "shutting-down",
+            ResourceState::Transitioning,
+            &[ResourceCommand::Delete][..],
+        ),
+        (
+            "future",
+            ResourceState::Unknown,
+            &[ResourceCommand::Delete][..],
+        ),
+    ] {
+        let resource = resources.iter().find(|r| r.id.0 == name).unwrap();
+        assert_eq!(resource.name, name);
+        assert_eq!(resource.state, Some(state));
+        assert_eq!(resource.available_commands, commands);
+        assert!(
+            resource
+                .fields
+                .contains(&("Image", "docker.io/library/alpine:3.23".into()))
+        );
+        assert!(resource.fields.contains(&("CPUs", "2".into())));
+        assert!(resource.fields.contains(&("Memory", "1024 MiB".into())));
+    }
+    assert_eq!(resources[3].status.as_deref(), Some("future-state"));
+    cli.assert_exhausted();
+}
