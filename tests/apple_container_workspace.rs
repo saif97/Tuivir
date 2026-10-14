@@ -401,3 +401,70 @@ async fn network_and_volume_delete_preserve_dependency_refusals() {
         refused.assert_exhausted();
     }
 }
+
+#[tokio::test]
+async fn image_delete_requires_verified_absence_of_the_requested_reference() {
+    use tuivir::application::ResourceCommand;
+    let name = "docker.io/library/alpine:3.23";
+    let target = common::resource_target("images", name);
+    let delete = ProcessSpec::new("container", &["image", "delete", "--", name]);
+    let inspect = ProcessSpec::new("container", &["image", "inspect", "--", name]);
+    let absent = FixtureCli::new([
+        (delete.clone(), success("")),
+        (
+            inspect.clone(),
+            common::failure("Error: image not found: docker.io/library/alpine:3.23\n"),
+        ),
+    ]);
+    AppleContainerWorkspace
+        .execute_command(&absent, &target, ResourceCommand::Delete, None)
+        .await
+        .unwrap();
+    absent.assert_exhausted();
+    for output in ["[]", include_str!("fixtures/apple-container/images.json")] {
+        let retained = FixtureCli::new([
+            (delete.clone(), success("")),
+            (inspect.clone(), success(output)),
+        ]);
+        let error = AppleContainerWorkspace
+            .execute_command(&retained, &target, ResourceCommand::Delete, None)
+            .await
+            .unwrap_err();
+        assert!(error.message.contains("retained"));
+        assert!(error.message.contains(name));
+        retained.assert_exhausted();
+    }
+    for verification in [
+        common::failure("XPC connection error"),
+        common::failure("Error: image not found: another:latest"),
+        common::failure(
+            "Error: image not found: docker.io/library/alpine:3.23 (cause: permission denied)",
+        ),
+        success("not JSON"),
+    ] {
+        let cli = FixtureCli::new([
+            (delete.clone(), success("")),
+            (inspect.clone(), verification),
+        ]);
+        let error = AppleContainerWorkspace
+            .execute_command(&cli, &target, ResourceCommand::Delete, None)
+            .await
+            .unwrap_err();
+        assert!(
+            error.message.contains("could not be verified"),
+            "{}",
+            error.message
+        );
+        cli.assert_exhausted();
+    }
+    let refused = FixtureCli::new([(delete, common::failure("image in use"))]);
+    assert!(
+        AppleContainerWorkspace
+            .execute_command(&refused, &target, ResourceCommand::Delete, None)
+            .await
+            .unwrap_err()
+            .message
+            .contains("image in use")
+    );
+    refused.assert_exhausted();
+}

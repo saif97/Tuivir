@@ -380,6 +380,43 @@ impl ProviderWorkspace for AppleContainerWorkspace {
     ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>> {
         Box::pin(async move {
             let name = target.resource_id().0.as_str();
+            if target.panel_id().0 == "images" && command == ResourceCommand::Delete {
+                run_command(cli, &["image", "delete", "--", name], command, name).await?;
+                // Both native list and inspect filter infrastructure images.
+                // Inspect resolves the reference first: a successful empty
+                // array means retention, never absence. Only the exact native
+                // missing-reference diagnostic can prove deletion.
+                return match cli
+                    .run(ProcessSpec::new(
+                        "container",
+                        &["image", "inspect", "--", name],
+                    ))
+                    .await
+                {
+                    Err(ProcessError::Exited(failure))
+                        if failure.exit_code == Some(1)
+                            && failure.stdout.trim().is_empty()
+                            && failure.stderr.trim()
+                                == format!("Error: image not found: {name}") =>
+                    {
+                        Ok(())
+                    }
+                    Err(error) => Err(WorkspaceError::new(format!(
+                        "Apple Container image deletion could not be verified for {name}: {}",
+                        provider_cli_error(PROVIDER_NAME, &error, "inspection failed")
+                    ))),
+                    Ok(output) => {
+                        match serde_json::from_str::<Vec<serde_json::Value>>(&output.stdout) {
+                            Ok(_) => Err(WorkspaceError::new(format!(
+                                "Apple Container retained image reference {name}; configured infrastructure images cannot be deleted"
+                            ))),
+                            Err(error) => Err(WorkspaceError::new(format!(
+                                "Apple Container image deletion could not be verified for {name}: malformed inspection data: {error}"
+                            ))),
+                        }
+                    }
+                };
+            }
             if command == ResourceCommand::Delete {
                 let kind = match target.panel_id().0.as_str() {
                     "networks" => Some("network"),
