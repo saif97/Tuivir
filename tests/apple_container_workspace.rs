@@ -1035,3 +1035,46 @@ async fn slow_stats_load_only_the_visible_tab_without_blocking_navigation() {
     );
     cli.fixture.assert_exhausted();
 }
+
+#[tokio::test]
+async fn incompatible_stats_samples_report_actionable_diagnostics() {
+    use tuivir::domain::DetailViewId;
+    let spec = ProcessSpec::new(
+        "container",
+        &["stats", "--no-stream", "--format", "json", "--", "web"],
+    );
+    for output in [
+        "[null]",
+        "[{}]",
+        r#"[{"id":"web","memoryUsageBytes":"broken"}]"#,
+        r#"[{"id":"web","numProcesses":-1}]"#,
+    ] {
+        let cli = FixtureCli::new([(spec.clone(), success(output))]);
+        let error = AppleContainerWorkspace
+            .load_details(
+                &cli,
+                &common::resource_target("containers", "web"),
+                &DetailViewId::new("stats"),
+            )
+            .await
+            .unwrap_err();
+        assert!(error.message.contains("malformed or incompatible data"));
+        assert!(error.message.contains("CLI 1.5.0"));
+        cli.assert_exhausted();
+    }
+    let cli = FixtureCli::new([(
+        spec,
+        success(r#"[{"id":"web","memoryUsageBytes":null,"futureMetric":"available"}]"#),
+    )]);
+    let details = AppleContainerWorkspace
+        .load_details(
+            &cli,
+            &common::resource_target("containers", "web"),
+            &DetailViewId::new("stats"),
+        )
+        .await
+        .unwrap();
+    assert!(details.lines.join("\n").contains("futureMetric"));
+    assert!(!details.lines.join("\n").contains(": 0"));
+    cli.assert_exhausted();
+}

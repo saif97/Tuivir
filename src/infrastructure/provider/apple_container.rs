@@ -2,7 +2,7 @@ use std::{future::Future, pin::Pin};
 
 use super::DetailView;
 use super::require_resource_state;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::{
     DetailViewId, Provider, ProviderDiscovery, ProviderId, ProviderVersion, ProviderWorkspace,
@@ -52,6 +52,30 @@ struct ContainerResources {
 #[derive(Deserialize)]
 struct ContainerStatus {
     state: String,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StatsRow {
+    id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    memory_usage_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    memory_limit_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cpu_usage_usec: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    network_rx_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    network_tx_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    block_read_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    block_write_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    num_processes: Option<u64>,
+    #[serde(flatten)]
+    additional_fields: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -549,6 +573,18 @@ impl ProviderWorkspace for AppleContainerWorkspace {
                     .extend(ResourceDetails::from_output(&output.stderr).lines);
                 return Ok(details);
             }
+            if view_id.0 == "stats" {
+                let rows: Vec<StatsRow> =
+                    serde_json::from_str(&output.stdout).map_err(malformed)?;
+                if rows.is_empty() {
+                    return Ok(ResourceDetails::from_lines([format!(
+                        "Statistics unavailable for Container {name}."
+                    )]));
+                }
+                return Ok(ResourceDetails::from_output(
+                    &serde_json::to_string_pretty(&rows).expect("Stats rows serialize"),
+                ));
+            }
             let value: Vec<serde_json::Value> =
                 serde_json::from_str(&output.stdout).map_err(malformed)?;
             if view_id.0 == "inspect" {
@@ -573,11 +609,6 @@ impl ProviderWorkspace for AppleContainerWorkspace {
                     }
                     _ => unreachable!("only native Inspect panels reach validation"),
                 }
-            }
-            if view_id.0 == "stats" && value.is_empty() {
-                return Ok(ResourceDetails::from_lines([format!(
-                    "Statistics unavailable for Container {name}."
-                )]));
             }
             Ok(ResourceDetails::from_output(
                 &serde_json::to_string_pretty(&value).expect("JSON values serialize"),
