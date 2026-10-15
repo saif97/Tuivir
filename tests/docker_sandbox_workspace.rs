@@ -688,7 +688,7 @@ async fn the_sandboxes_panel_declares_info_and_read_only_configuration() {
             .iter()
             .map(|view| (view.id.0.as_str(), view.title.as_str()))
             .collect::<Vec<_>>(),
-        [("info", "Info"), ("configuration", "Configuration")]
+        [("info", "Info"), ("configuration", "Settings")]
     );
 }
 

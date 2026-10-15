@@ -150,9 +150,15 @@ footer. Run `tuivir --help` for command-line options.
 ### Resource CPU and memory
 
 Select a Docker container, Incus instance, or local Tart VM, focus Details,
-and move to the Configuration tab with the left/right keys. Editable settings
-appear first; read-only settings appear separately and do not receive editing
-focus. The existing Config/Inspect tabs retain the complete native configuration.
+and move to the Settings tab with the left/right keys. Editable settings appear
+first. The same tab shows the remaining native configuration under read-only
+settings, including nested fields; CPU/memory controls are not repeated there.
+Settings replaces the separate Config/Inspect tab for these Resources and Apple
+Containers. Other Resource kinds keep their native inspection views.
+
+Page Up/Page Down, Ctrl+U/Ctrl+D, or the mouse wheel scroll long read-only content
+while editable controls remain visible. Read-only settings do not receive editing
+focus. Native field paths identify nested values; arrays retain their JSON values.
 
 Use up/down to select a field and Enter to edit. Backspace removes a character;
 Ctrl+U clears the input. Enter or Esc keeps the draft without applying it.
@@ -208,7 +214,7 @@ without Delete; dependency refusals are preserved. Image deletion verifies the
 requested reference rather than relying on exit status or filtered listings.
 
 Containers provide the latest 200 process Logs, separate VM Boot Logs, finite
-Stats, and Inspect. Images, Networks, and Volumes provide Inspect. Resource Shell
+Stats, and Settings. Images, Networks, and Volumes provide Inspect. Resource Shell
 Sessions use the existing navigation, input controls, and cleanup behavior.
 
 Automated fixture validation is separate from live Mac verification, which is

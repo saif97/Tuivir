@@ -1652,12 +1652,7 @@ impl App {
         }
     }
 
-    /// Moves the detail view's first visible line, keeping at least the last
-    /// line on screen.
-    ///
-    /// Rendering owns the layout, so the application cannot know how tall the
-    /// panel is; clamping to the last line is the strongest promise it can keep
-    /// without one, and it is enough that scrolling never runs into blank space.
+    /// Accepts the host's measured Settings content limit and clamps scrolling after resize.
     pub fn set_configuration_scroll_limit(&mut self, limit: u16) {
         if let Some(draft) = self.selected_configuration_mut() {
             draft.scroll_limit = limit;

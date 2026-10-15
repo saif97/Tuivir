@@ -330,8 +330,7 @@ async fn the_containers_panel_declares_dockers_native_detail_views() {
         [
             ("logs", "Logs"),
             ("stats", "Stats"),
-            ("inspect", "Inspect"),
-            ("configuration", "Configuration")
+            ("configuration", "Settings")
         ]
     );
 }
