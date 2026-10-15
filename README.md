@@ -150,21 +150,30 @@ footer. Run `tuivir --help` for command-line options.
 ### Resource CPU and memory
 
 Select a Docker container, Incus instance, or local Tart VM, focus Details,
-and move to the Configuration tab with the left/right keys. Up/down selects a field; Enter
-edits it, Backspace removes a character, and Ctrl+U clears the input. Enter or
-Esc keeps the draft without writing. Ctrl+A opens a review of current and
-proposed values and any necessary downtime; confirm explicitly to Apply.
-Docker CPU limits accept decimal CPUs (0 is unlimited), and Docker memory
-limits accept whole bytes (0 is unlimited; nonzero limits must be at least
-6 MiB and fit the existing memory+swap limit). Incus accepts CPU counts or CPU
-IDs/ranges and memory sizes such as `512MiB` or `50%`. Supported servers also
-accept VM CPU topology syntax. Incus edits set instance overrides without
-changing shared profiles. Tart accepts a positive whole CPU count and memory
-in MiB; changes require stop/start for running VMs, while stopped VMs stay
-stopped. Tart checks guest-specific minimums when applying changes.
+and move to the Configuration tab with the left/right keys. Editable settings
+appear first; read-only settings appear separately and do not receive editing
+focus. The existing Config/Inspect tabs retain the complete native configuration.
+
+Use up/down to select a field and Enter to edit. Backspace removes a character;
+Ctrl+U clears the input. Enter or Esc keeps the draft without applying it.
+Ctrl+A opens **Review changes**, showing the selected Resource, old/new values,
+and any necessary downtime. Confirm Apply changes with Enter or y, or cancel
+with Esc or n. Hints follow customized Keybindings.
+
+Memory defaults to **GiB**: enter `0.5`, `1.5`, or `8`, for example. Tuivir
+converts to the Provider's native units. Tart changes must resolve to whole MiB;
+guest-specific minimums are checked by Tart. Docker memory can be `0` for
+unlimited; nonzero limits must be at least 6 MiB and fit the existing memory+swap
+limit. Incus also accepts whole percentages such as `50%`.
+
+Docker CPU limits accept decimal CPUs (`0` is unlimited). Tart accepts positive
+whole CPU counts. Incus accepts CPU counts or CPU IDs/ranges; supported servers
+also accept VM CPU topology syntax. Incus edits set instance overrides without
+changing shared profiles. Running Tart VMs stop/start for CPU/memory changes;
+stopped VMs stay stopped.
 
 Docker Sandbox limits are read-only where reported. Apple Container shows
-inspected CPU count and memory in bytes read-only: the CLI has no supported
+inspected CPU count and memory in GiB read-only: its CLI has no supported
 in-place CPU/memory resize operation for existing Containers. Configure those
 resources at creation outside Tuivir. Disk sizing is outside this feature.
 
