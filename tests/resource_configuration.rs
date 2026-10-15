@@ -1302,3 +1302,15 @@ async fn narrow_configuration_keeps_memory_values_and_editing_feedback_visible()
     assert!(screen.contains("1 unsaved change"), "{screen}");
     assert!(screen.contains("Editing"), "{screen}");
 }
+
+#[tokio::test]
+async fn short_configuration_keeps_selected_input_and_validation_visible() {
+    let (mut app, _, cli) = tart_app(TART_INITIAL, vec![]).await;
+    press(&mut app, "down");
+    edit_selected_field(&mut app, "0");
+    press(&mut app, "enter");
+    let screen = render_to_text(app.state(), 120, 12);
+    assert!(screen.contains("4096 → 0▏"), "{screen}");
+    assert!(screen.contains("must be a whole number"), "{screen}");
+    cli.assert_exhausted();
+}

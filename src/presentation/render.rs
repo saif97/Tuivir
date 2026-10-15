@@ -776,9 +776,14 @@ fn render_configuration(state: &AppState, focused: bool, frame: &mut Frame<'_>, 
         area.width.saturating_sub(2),
         area.height.saturating_sub(1),
     );
+    let field_height = if usize::from(area.height) < actual.fields.len() * 3 + 5 {
+        1
+    } else {
+        3
+    };
     let rows = Layout::vertical([
         Constraint::Length(1),
-        Constraint::Length(actual.fields.len().saturating_mul(3) as u16),
+        Constraint::Length((actual.fields.len() * field_height) as u16),
         Constraint::Length(1),
         Constraint::Min(0),
     ])
@@ -799,13 +804,17 @@ fn render_configuration(state: &AppState, focused: bool, frame: &mut Frame<'_>, 
             ThemeRole::Muted
         };
         let mut border = Block::default()
-            .borders(Borders::ALL)
+            .borders(if field_height == 1 {
+                Borders::NONE
+            } else {
+                Borders::ALL
+            })
             .border_style(themed_style(role));
         let field_area = Rect::new(
             rows[1].x,
-            rows[1].y.saturating_add(index as u16 * 3),
+            rows[1].y.saturating_add((index * field_height) as u16),
             rows[1].width,
-            3,
+            field_height as u16,
         )
         .intersection(rows[1]);
         let content = border.inner(field_area);
