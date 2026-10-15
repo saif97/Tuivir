@@ -105,17 +105,9 @@ pub enum FieldConstraint {
     CpuSelection {
         topology: bool,
     },
-    Quantity {
-        percent: bool,
-    },
     Decimal {
         units_per_value: u64,
         minimum_units: u64,
-    },
-    Bytes {
-        minimum: u64,
-        unlimited: bool,
-        maximum: Option<u64>,
     },
 }
 impl ConfigurationField {
@@ -142,7 +134,7 @@ impl ConfigurationField {
             return true;
         }
         match self.constraint {
-            FieldConstraint::Integer { .. } | FieldConstraint::Bytes { .. } => self
+            FieldConstraint::Integer { .. } => self
                 .value
                 .parse::<u64>()
                 .ok()
@@ -153,9 +145,6 @@ impl ConfigurationField {
                 .is_some_and(|(a, b)| a == b),
             FieldConstraint::ReadOnly => false,
             FieldConstraint::CpuSelection { .. } => false,
-            FieldConstraint::Quantity { .. } => quantity_bytes(&self.value)
-                .zip(quantity_bytes(value))
-                .is_some_and(|(a, b)| a == b),
             FieldConstraint::Decimal { .. } => self
                 .value
                 .parse::<f64>()
@@ -188,14 +177,6 @@ impl ConfigurationField {
             }
             FieldConstraint::ReadOnly => false,
             FieldConstraint::CpuSelection { topology } => valid_cpu_selection(value, topology),
-            FieldConstraint::Quantity { percent } => {
-                quantity_bytes(value).is_some_and(|n| n > 0)
-                    || (percent
-                        && value
-                            .strip_suffix('%')
-                            .and_then(|n| n.parse::<u8>().ok())
-                            .is_some_and(|n| n > 0 && n <= 100))
-            }
             FieldConstraint::Decimal {
                 units_per_value,
                 minimum_units,
@@ -204,13 +185,6 @@ impl ConfigurationField {
                     && n >= 0.0
                     && (n == 0.0 || n * units_per_value as f64 >= minimum_units as f64)
                     && n < i64::MAX as f64 / units_per_value as f64
-            }),
-            FieldConstraint::Bytes {
-                minimum,
-                unlimited,
-                maximum,
-            } => value.parse::<u64>().is_ok_and(|n| {
-                (unlimited && n == 0) || (n >= minimum && maximum.is_none_or(|max| n <= max))
             }),
         };
         if valid {
@@ -258,35 +232,10 @@ impl ConfigurationField {
                         ""
                     }
                 ),
-                FieldConstraint::Quantity { percent } => format!(
-                    "Memory must be positive bytes or a size such as 512MiB{}.",
-                    if percent {
-                        " or a whole percentage from 1–100%"
-                    } else {
-                        ""
-                    }
-                ),
                 FieldConstraint::Decimal { .. } => {
                     "CPU limit must be a finite number of CPUs, 0 or greater (0 is unlimited)."
                         .into()
                 }
-                FieldConstraint::Bytes {
-                    maximum: Some(maximum),
-                    ..
-                } if value.parse::<u64>().is_ok_and(|n| n > maximum) => format!(
-                    "Memory exceeds the existing memory+swap limit ({maximum} bytes). Adjust that limit outside Tuivir first."
-                ),
-                FieldConstraint::Bytes {
-                    minimum, unlimited, ..
-                } => format!(
-                    "{} must be whole bytes, at least {minimum}{}.",
-                    self.label,
-                    if unlimited {
-                        " (or 0 for unlimited)"
-                    } else {
-                        ""
-                    }
-                ),
             })
         }
     }

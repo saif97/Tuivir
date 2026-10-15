@@ -856,7 +856,7 @@ fn render_configuration(state: &AppState, focused: bool, frame: &mut Frame<'_>, 
     {
         let proposed = draft.proposed.get(index).unwrap_or(&field.value);
         let changed = !field.matches(proposed);
-        let selected = focused && field.editable() && index == draft.selected_field;
+        let selected = focused && index == draft.selected_field;
         let editing = selected && draft.editing;
         let role = if selected {
             ThemeRole::Primary
@@ -878,14 +878,7 @@ fn render_configuration(state: &AppState, focused: bool, frame: &mut Frame<'_>, 
         )
         .intersection(rows[2]);
         let content = border.inner(field_area);
-        let mut spans = vec![Span::styled(
-            format!("{}: ", field.label),
-            if field.editable() {
-                Style::default()
-            } else {
-                themed_style(ThemeRole::Muted)
-            },
-        )];
+        let mut spans = vec![Span::styled(format!("{}: ", field.label), Style::default())];
         if changed {
             spans.push(Span::styled(
                 format!("{} → ", field.value),
@@ -904,9 +897,6 @@ fn render_configuration(state: &AppState, focused: bool, frame: &mut Frame<'_>, 
         ));
         if editing {
             spans.push(Span::styled("▏", themed_style(ThemeRole::Primary)));
-        }
-        if !field.editable() {
-            spans.push(Span::styled(" (read-only)", themed_style(ThemeRole::Muted)));
         }
         let mut line = Line::from(spans);
         if line.width() > usize::from(content.width) {
