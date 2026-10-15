@@ -1110,6 +1110,11 @@ async fn apple_container_configuration_shows_read_only_values_and_explains_resiz
     press(&mut app, "esc");
     assert!(screen.contains("CPU count: 2"), "{screen}");
     assert!(screen.contains("Memory (GiB): 1"), "{screen}");
+    assert!(screen.contains("Read-only settings"), "{screen}");
+    assert!(
+        screen.contains("Image: docker.io/library/alpine:3.23"),
+        "{screen}"
+    );
     assert!(
         screen.contains("in-place CPU/memory resize is unsupported"),
         "{screen}"

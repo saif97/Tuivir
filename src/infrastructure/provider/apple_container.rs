@@ -375,6 +375,7 @@ impl ProviderWorkspace for AppleContainerWorkspace {
                 fields: vec![
                     ConfigurationField { id: "cpu".into(), label: "CPU count".into(), value: row.configuration.resources.cpus.to_string(), constraint: FieldConstraint::ReadOnly, update: ConfigurationUpdate::Live },
                     ConfigurationField { id: "memory".into(), label: "Memory (GiB)".into(), value: crate::application::MemoryGiB::from_bytes(row.configuration.resources.memory_in_bytes).to_string(), constraint: FieldConstraint::ReadOnly, update: ConfigurationUpdate::Live },
+                    ConfigurationField::read_only("image", "Image", row.configuration.image.reference),
                 ],
                 state: container_state(&row.status.state),
                 notice: "Apple Container: in-place CPU/memory resize is unsupported by the CLI; values are read-only. Set resources when creating a Container outside Tuivir.".into(),
