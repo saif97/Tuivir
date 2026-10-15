@@ -590,7 +590,7 @@ async fn finite_stats_preserve_native_metrics_and_explain_empty_samples() {
             .iter()
             .map(|v| v.title.as_str())
             .collect::<Vec<_>>(),
-        ["Logs", "Boot Logs", "Stats", "Inspect"]
+        ["Logs", "Boot Logs", "Stats", "Inspect", "Configuration"]
     );
     let target = common::resource_target("containers", "web");
     let spec = ProcessSpec::new(
