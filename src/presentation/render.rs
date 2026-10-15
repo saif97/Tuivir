@@ -812,30 +812,12 @@ fn render_configuration(state: &AppState, focused: bool, frame: &mut Frame<'_>, 
         );
         return;
     };
-    let area = Rect::new(
-        area.x.saturating_add(1),
-        area.y.saturating_add(1),
-        area.width.saturating_sub(2),
-        area.height.saturating_sub(1),
-    );
     let editable_count = actual
         .fields
         .iter()
         .filter(|field| field.editable())
         .count();
-    let field_height = if usize::from(area.height) < editable_count * 3 + 6 {
-        1
-    } else {
-        3
-    };
-    let rows = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Length(u16::from(editable_count > 0)),
-        Constraint::Length((editable_count * field_height) as u16),
-        Constraint::Length(1),
-        Constraint::Min(0),
-    ])
-    .split(area);
+    let (rows, field_height) = configuration_rows(editable_count, area);
     frame.render_widget(
         Paragraph::new(format!("Resource State: {:?}", actual.state))
             .style(resource_state_style(actual.state)),
@@ -946,6 +928,47 @@ fn render_configuration(state: &AppState, focused: bool, frame: &mut Frame<'_>, 
         })),
         rows[3],
     );
+    let messages = configuration_messages(draft, rows[4]);
+    let paragraph = Paragraph::new(messages).wrap(ratatui::widgets::Wrap { trim: true });
+    let limit = paragraph
+        .line_count(rows[4].width)
+        .saturating_sub(usize::from(rows[4].height));
+    frame.render_widget(
+        paragraph.scroll((draft.scroll.min(limit.min(u16::MAX as usize) as u16), 0)),
+        rows[4],
+    );
+}
+
+fn configuration_rows(editable_count: usize, area: Rect) -> ([Rect; 5], usize) {
+    let area = Rect::new(
+        area.x.saturating_add(1),
+        area.y.saturating_add(1),
+        area.width.saturating_sub(2),
+        area.height.saturating_sub(1),
+    );
+    let field_height = if usize::from(area.height) < editable_count * 3 + 6 {
+        1
+    } else {
+        3
+    };
+    let rows = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(u16::from(editable_count > 0)),
+        Constraint::Length((editable_count * field_height) as u16),
+        Constraint::Length(1),
+        Constraint::Min(0),
+    ])
+    .split(area);
+    ([rows[0], rows[1], rows[2], rows[3], rows[4]], field_height)
+}
+
+fn configuration_messages<'a>(
+    draft: &'a crate::application::ConfigurationDraft,
+    area: Rect,
+) -> Vec<Line<'a>> {
+    let Some(actual) = &draft.actual else {
+        return Vec::new();
+    };
     let mut messages = Vec::new();
     if let Some(error) = draft.validation_error() {
         messages.push(Line::styled(error, themed_style(ThemeRole::Error)));
@@ -960,11 +983,11 @@ fn render_configuration(state: &AppState, focused: bool, frame: &mut Frame<'_>, 
         .collect();
     if !read_only_fields.is_empty() {
         // Keep compact terminals useful; add breathing room when it fits.
-        if usize::from(rows[4].height) > messages.len() + read_only_fields.len() + 3 {
+        if usize::from(area.height) > messages.len() + read_only_fields.len() + 3 {
             messages.push(Line::default());
         }
         let title = " Read-only settings ";
-        let rule_width = usize::from(rows[4].width).saturating_sub(title.len() + 2);
+        let rule_width = usize::from(area.width).saturating_sub(title.len() + 2);
         messages.push(Line::from(vec![
             Span::styled("──", themed_style(ThemeRole::Muted)),
             Span::styled(
@@ -993,10 +1016,34 @@ fn render_configuration(state: &AppState, focused: bool, frame: &mut Frame<'_>, 
         actual.notice.as_str(),
         themed_style(ThemeRole::Muted),
     ));
-    frame.render_widget(
-        Paragraph::new(messages).wrap(ratatui::widgets::Wrap { trim: true }),
-        rows[4],
-    );
+    messages
+}
+
+/// Report the measured content limit to the application without putting terminal layout in it.
+pub fn configuration_scroll_limit(state: &AppState, layout: &ScreenLayout) -> u16 {
+    if !state.configuration_selected() {
+        return 0;
+    }
+    let Some(draft) = state.selected_configuration() else {
+        return 0;
+    };
+    let Some(actual) = &draft.actual else {
+        return 0;
+    };
+    let Some(panes) = &layout.panes else {
+        return 0;
+    };
+    let count = actual
+        .fields
+        .iter()
+        .filter(|field| field.editable())
+        .count();
+    let (rows, _) = configuration_rows(count, panes.detail_content);
+    Paragraph::new(configuration_messages(draft, rows[4]))
+        .wrap(ratatui::widgets::Wrap { trim: true })
+        .line_count(rows[4].width)
+        .saturating_sub(usize::from(rows[4].height))
+        .min(u16::MAX as usize) as u16
 }
 
 fn render_resource_shell_state(

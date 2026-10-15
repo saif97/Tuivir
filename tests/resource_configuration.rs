@@ -1612,3 +1612,36 @@ async fn docker_settings_preserves_nested_native_settings_and_hides_duplicate_in
         || field.label == "Config.Image"));
     cli.assert_exhausted();
 }
+
+#[tokio::test]
+async fn settings_scrolls_remaining_configuration_without_moving_editable_controls() {
+    let mut initial = serde_json::json!({"CPU":2,"Memory":4096,"State":"stopped"});
+    for index in 0..35 {
+        initial[format!("Extra{index:02}")] = serde_json::json!(format!("value-{index:02}"));
+    }
+    let (mut app, _, cli) = tart_app(&initial.to_string(), vec![]).await;
+    let screen = render_to_text(app.state(), 100, 20);
+    assert!(!screen.contains("value-34"), "{screen}");
+    let layout = tuivir::presentation::ScreenLayout::measure(
+        app.state(),
+        ratatui::layout::Rect::new(0, 0, 100, 20),
+    );
+    app.set_configuration_scroll_limit(tuivir::presentation::configuration_scroll_limit(
+        app.state(),
+        &layout,
+    ));
+    for _ in 0..8 {
+        press(&mut app, "pagedown");
+    }
+    let screen = render_to_text(app.state(), 100, 20);
+    assert!(screen.contains("value-34"), "{screen}");
+    assert!(screen.contains("CPU count: 2"), "{screen}");
+    assert!(screen.contains("Memory (GiB): 4"), "{screen}");
+    press(&mut app, "pageup");
+    let screen = render_to_text(app.state(), 100, 20);
+    assert!(
+        !screen.contains("value-34"),
+        "Scrolling up should respond immediately: {screen}"
+    );
+    cli.assert_exhausted();
+}

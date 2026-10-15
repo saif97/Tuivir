@@ -85,6 +85,8 @@ pub struct ConfigurationDraft {
     pub selected_field: usize,
     pub editing: bool,
     pub applying: bool,
+    pub scroll: u16,
+    pub(crate) scroll_limit: u16,
     pub(crate) request_id: Option<ProviderRequestId>,
 }
 

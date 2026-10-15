@@ -253,14 +253,14 @@ pub(super) const BUILTIN_COMMANDS: &[CommandDefinition] = &[
         id: "detail_scroll_down",
         description: "Scroll details down",
         command: Command::ScrollDetailsDown,
-        scopes: DETAILS,
+        scopes: DETAIL_TABS,
         default_keys: &["ctrl+d", "pagedown"],
     },
     CommandDefinition {
         id: "detail_scroll_up",
         description: "Scroll details up",
         command: Command::ScrollDetailsUp,
-        scopes: DETAILS,
+        scopes: DETAIL_TABS,
         default_keys: &["ctrl+u", "pageup"],
     },
     CommandDefinition {

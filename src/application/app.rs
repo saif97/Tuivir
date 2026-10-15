@@ -797,6 +797,7 @@ impl App {
                         if draft.request_id.is_some() {
                             return Vec::new();
                         }
+                        draft.scroll = 0;
                         match command {
                             Command::EditConfigurationField => {
                                 draft.editing = draft
@@ -1657,8 +1658,27 @@ impl App {
     /// Rendering owns the layout, so the application cannot know how tall the
     /// panel is; clamping to the last line is the strongest promise it can keep
     /// without one, and it is enough that scrolling never runs into blank space.
+    pub fn set_configuration_scroll_limit(&mut self, limit: u16) {
+        if let Some(draft) = self.selected_configuration_mut() {
+            draft.scroll_limit = limit;
+            draft.scroll = draft.scroll.min(limit);
+        }
+    }
+
+    fn selected_configuration_mut(&mut self) -> Option<&mut ConfigurationDraft> {
+        let workspace = self.state.active_workspace()?;
+        let target = workspace.selected_resource_target()?;
+        let key = (workspace.id().clone(), target);
+        self.state.configuration_drafts.get_mut(&key)
+    }
+
     fn scroll_details(&mut self, delta: isize) {
-        if let Some(provider) = self.state.active_workspace_mut() {
+        if self.state.configuration_selected() {
+            if let Some(draft) = self.selected_configuration_mut() {
+                draft.scroll = (usize::from(draft.scroll).saturating_add_signed(delta))
+                    .min(usize::from(draft.scroll_limit)) as u16;
+            }
+        } else if let Some(provider) = self.state.active_workspace_mut() {
             provider.scroll_details(delta);
         }
     }
