@@ -1,0 +1,166 @@
+[
+  {
+    "id": "web",
+    "configuration": {
+      "id": "web",
+      "image": {
+        "reference": "docker.io/library/alpine:3.23",
+        "descriptor": {
+          "mediaType": "application/vnd.oci.image.index.v1+json",
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size": 512
+        }
+      },
+      "creationDate": "2026-10-01T12:00:00Z",
+      "resources": {
+        "cpus": 2,
+        "memoryInBytes": 1073741824
+      },
+      "initProcess": {
+        "executable": "/bin/sh",
+        "arguments": [],
+        "environment": [],
+        "workingDirectory": "/",
+        "terminal": false,
+        "user": {
+          "id": {
+            "uid": 0,
+            "gid": 0
+          }
+        },
+        "supplementalGroups": [],
+        "rlimits": []
+      },
+      "mounts": [],
+      "networks": [],
+      "publishedPorts": []
+    },
+    "status": {
+      "state": "running",
+      "networks": []
+    }
+  },
+  {
+    "id": "idle",
+    "configuration": {
+      "id": "idle",
+      "image": {
+        "reference": "docker.io/library/alpine:3.23",
+        "descriptor": {
+          "mediaType": "application/vnd.oci.image.index.v1+json",
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size": 512
+        }
+      },
+      "creationDate": "2026-10-01T12:00:00Z",
+      "resources": {
+        "cpus": 2,
+        "memoryInBytes": 1073741824
+      },
+      "initProcess": {
+        "executable": "/bin/sh",
+        "arguments": [],
+        "environment": [],
+        "workingDirectory": "/",
+        "terminal": false,
+        "user": {
+          "id": {
+            "uid": 0,
+            "gid": 0
+          }
+        },
+        "supplementalGroups": [],
+        "rlimits": []
+      },
+      "mounts": [],
+      "networks": [],
+      "publishedPorts": []
+    },
+    "status": {
+      "state": "stopped",
+      "networks": []
+    }
+  },
+  {
+    "id": "shutting-down",
+    "configuration": {
+      "id": "shutting-down",
+      "image": {
+        "reference": "docker.io/library/alpine:3.23",
+        "descriptor": {
+          "mediaType": "application/vnd.oci.image.index.v1+json",
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size": 512
+        }
+      },
+      "creationDate": "2026-10-01T12:00:00Z",
+      "resources": {
+        "cpus": 2,
+        "memoryInBytes": 1073741824
+      },
+      "initProcess": {
+        "executable": "/bin/sh",
+        "arguments": [],
+        "environment": [],
+        "workingDirectory": "/",
+        "terminal": false,
+        "user": {
+          "id": {
+            "uid": 0,
+            "gid": 0
+          }
+        },
+        "supplementalGroups": [],
+        "rlimits": []
+      },
+      "mounts": [],
+      "networks": [],
+      "publishedPorts": []
+    },
+    "status": {
+      "state": "stopping",
+      "networks": []
+    }
+  },
+  {
+    "id": "future",
+    "configuration": {
+      "id": "future",
+      "image": {
+        "reference": "docker.io/library/alpine:3.23",
+        "descriptor": {
+          "mediaType": "application/vnd.oci.image.index.v1+json",
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "size": 512
+        }
+      },
+      "creationDate": "2026-10-01T12:00:00Z",
+      "resources": {
+        "cpus": 2,
+        "memoryInBytes": 1073741824
+      },
+      "initProcess": {
+        "executable": "/bin/sh",
+        "arguments": [],
+        "environment": [],
+        "workingDirectory": "/",
+        "terminal": false,
+        "user": {
+          "id": {
+            "uid": 0,
+            "gid": 0
+          }
+        },
+        "supplementalGroups": [],
+        "rlimits": []
+      },
+      "mounts": [],
+      "networks": [],
+      "publishedPorts": []
+    },
+    "status": {
+      "state": "future-state",
+      "networks": []
+    }
+  }
+]

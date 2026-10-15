@@ -1129,6 +1129,14 @@ async fn incus_that_disappears_during_discovery_stays_visible_with_an_error() {
 async fn runtime_with_builtin_providers_discovers_installed_incus() {
     let cli = FixtureCli::new([
         (
+            ProcessSpec::new("container", &["system", "version", "--format", "json"]),
+            Err(ProcessError::ExecutableNotFound),
+        ),
+        (
+            ProcessSpec::new("tart", &["--version"]),
+            Err(ProcessError::ExecutableNotFound),
+        ),
+        (
             ProcessSpec::new("docker", &["context", "show"]),
             Err(ProcessError::ExecutableNotFound),
         ),

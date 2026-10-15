@@ -205,6 +205,9 @@ impl CliRunner for ConcurrentDiscoveryCli {
             if command == ProcessSpec::new("docker", &["context", "show"])
                 || command == ProcessSpec::new("incus", &["remote", "get-default"])
                 || command == ProcessSpec::new("sbx", &["version"])
+                || command == ProcessSpec::new("tart", &["--version"])
+                || command
+                    == ProcessSpec::new("container", &["system", "version", "--format", "json"])
             {
                 self.first_probes.wait().await;
             }
@@ -214,6 +217,12 @@ impl CliRunner for ConcurrentDiscoveryCli {
                 || command == ProcessSpec::new("incus", &["project", "get-current"])
             {
                 "local\n"
+            } else if command == ProcessSpec::new("tart", &["--version"]) {
+                "2.31.0\n"
+            } else if command
+                == ProcessSpec::new("container", &["system", "version", "--format", "json"])
+            {
+                r#"[{"appName":"container","version":"1.5.0"}]"#
             } else if command == ProcessSpec::new("sbx", &["version"]) {
                 "sbx version: v0.37.0 build\n"
             } else if command == ProcessSpec::new("sbx", &["ls", "--json"]) {
@@ -491,7 +500,7 @@ async fn provider_is_omitted_when_docker_cli_is_absent() {
 
 #[tokio::test]
 async fn provider_discoveries_run_together_and_keep_registration_order() {
-    let first_probes = Arc::new(Barrier::new(4));
+    let first_probes = Arc::new(Barrier::new(6));
     let runtime = ProviderRuntime::with_builtin_providers(Arc::new(ConcurrentDiscoveryCli {
         first_probes: Arc::clone(&first_probes),
     }));
@@ -507,7 +516,13 @@ async fn provider_discoveries_run_together_and_keep_registration_order() {
             .iter()
             .map(|discovery| discovery.provider().id().0.as_str())
             .collect::<Vec<_>>(),
-        ["docker", "incus", "docker-sandbox"],
+        [
+            "docker",
+            "incus",
+            "docker-sandbox",
+            "tart",
+            "apple-container"
+        ],
     );
 }
 
