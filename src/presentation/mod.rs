@@ -1,3 +1,4 @@
+mod configuration_text;
 mod input;
 mod mouse_routing;
 mod render;

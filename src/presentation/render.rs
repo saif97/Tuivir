@@ -41,7 +41,7 @@ use super::screen_layout::{
 /// The default presentation palette names colours by their purpose so render
 /// sites never choose unrelated terminal colours for the same meaning.
 #[derive(Clone, Copy)]
-enum ThemeRole {
+pub(super) enum ThemeRole {
     Primary,
     Success,
     Muted,
@@ -74,7 +74,7 @@ fn theme_colour(role: ThemeRole) -> Color {
     }
 }
 
-fn themed_style(role: ThemeRole) -> Style {
+pub(super) fn themed_style(role: ThemeRole) -> Style {
     Style::default().fg(theme_colour(role))
 }
 
@@ -942,7 +942,7 @@ fn render_configuration(state: &AppState, focused: bool, frame: &mut Frame<'_>, 
         rows[3],
     );
     let messages = configuration_messages(draft, rows[4]);
-    let paragraph = Paragraph::new(messages).wrap(ratatui::widgets::Wrap { trim: true });
+    let paragraph = Paragraph::new(messages);
     frame.render_widget(paragraph.scroll((draft.scroll, 0)), rows[4]);
 }
 
@@ -973,65 +973,7 @@ fn configuration_messages<'a>(
     draft: &'a crate::application::ConfigurationDraft,
     area: Rect,
 ) -> Vec<Line<'a>> {
-    let Some(actual) = &draft.actual else {
-        return Vec::new();
-    };
-    let mut messages = Vec::new();
-    if let Some(error) = draft.validation_error() {
-        messages.push(Line::styled(error, themed_style(ThemeRole::Error)));
-    }
-    if let Some(error) = &draft.error {
-        messages.push(Line::styled(error.as_str(), themed_style(ThemeRole::Error)));
-    }
-    let read_only_fields: Vec<_> = actual
-        .fields
-        .iter()
-        .filter(|field| !field.editable())
-        .collect();
-    if !read_only_fields.is_empty() {
-        // Keep compact terminals useful; add breathing room when it fits.
-        if usize::from(area.height) > messages.len() + read_only_fields.len() + 3 {
-            messages.push(Line::default());
-        }
-        let title = " Read-only settings ";
-        let rule_width = usize::from(area.width).saturating_sub(title.len() + 2);
-        messages.push(Line::from(vec![
-            Span::styled("──", themed_style(ThemeRole::Muted)),
-            Span::styled(
-                title,
-                themed_style(ThemeRole::Primary).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled("─".repeat(rule_width), themed_style(ThemeRole::Muted)),
-        ]));
-        let label_width = read_only_fields
-            .iter()
-            .map(|field| Line::from(field.label.as_str()).width() + 1)
-            .max()
-            .unwrap_or(0)
-            .min(usize::from(area.width) / 2);
-        messages.extend(read_only_fields.iter().map(|field| {
-            Line::from(vec![
-                Span::styled(
-                    format!(
-                        "  {}:{}  ",
-                        field.label,
-                        " ".repeat(
-                            label_width
-                                .saturating_sub(Line::from(field.label.as_str()).width() + 1)
-                        )
-                    ),
-                    themed_style(ThemeRole::Muted),
-                ),
-                Span::raw(field.value.as_str()),
-            ])
-        }));
-        messages.push(Line::default());
-    }
-    messages.push(Line::styled(
-        actual.notice.as_str(),
-        themed_style(ThemeRole::Muted),
-    ));
-    messages
+    super::configuration_text::prepare(draft, area).lines
 }
 
 /// Report the measured content limit to the application without putting terminal layout in it.
@@ -1054,9 +996,8 @@ pub fn configuration_scroll_limit(state: &AppState, layout: &ScreenLayout) -> u1
         .filter(|field| field.editable())
         .count();
     let (rows, _) = configuration_rows(count, panes.detail_content);
-    Paragraph::new(configuration_messages(draft, rows[4]))
-        .wrap(ratatui::widgets::Wrap { trim: true })
-        .line_count(rows[4].width)
+    configuration_messages(draft, rows[4])
+        .len()
         .saturating_sub(usize::from(rows[4].height))
         .min(u16::MAX as usize) as u16
 }

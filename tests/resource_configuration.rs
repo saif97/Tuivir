@@ -1652,7 +1652,7 @@ async fn settings_scrolls_remaining_configuration_without_moving_editable_contro
         &layout,
     ));
     assert!(render_to_text(app.state(), 100, 20).contains("ctrl+u/ctrl+d scroll"));
-    for _ in 0..8 {
+    for _ in 0..32 {
         press(&mut app, "pagedown");
     }
     let screen = render_to_text(app.state(), 100, 20);
@@ -1699,5 +1699,39 @@ async fn tart_settings_keeps_native_nulls_and_unknown_fields() {
             "Missing {label}: {value}"
         );
     }
+    cli.assert_exhausted();
+}
+
+#[tokio::test]
+async fn wrapped_settings_values_keep_their_column_and_do_not_hide_long_labels() {
+    let initial = r#"{"CPU":2,"Memory":4096,"State":"stopped","Digest":"sha256:0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz","AnExtremelyLongNativeSettingName":{"NestedKey":"value"}}"#;
+    let (app, _, cli) = tart_app(initial, vec![]).await;
+    let screen = render_to_text(app.state(), 150, 40);
+    let lines: Vec<_> = screen.lines().collect();
+    let (first_row, column) = lines
+        .iter()
+        .enumerate()
+        .find_map(|(row, line)| {
+            line.find("sha256:")
+                .map(|column| (row, line[..column].chars().count()))
+        })
+        .unwrap();
+    let continuation = lines[first_row + 1];
+    assert!(
+        continuation
+            .chars()
+            .take(column)
+            .skip(column - 3)
+            .all(|c| c == ' '),
+        "Continuation should stay in the value column: {screen}"
+    );
+    assert!(
+        continuation
+            .chars()
+            .skip(column)
+            .any(|c| c.is_ascii_alphanumeric()),
+        "Wrapped value should continue in the same column: {screen}"
+    );
+    assert!(screen.contains("NestedKey"), "{screen}");
     cli.assert_exhausted();
 }
