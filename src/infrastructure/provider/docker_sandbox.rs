@@ -1,6 +1,6 @@
 use std::{future::Future, pin::Pin};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     application::{LifecycleCommandPolicy, ResourceShellProcess, lifecycle_commands},
@@ -30,7 +30,7 @@ struct SandboxListing {
     sandboxes: Vec<SandboxRow>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct SandboxRow {
     name: String,
     /// The UUID sbx assigns. It addresses no sbx command, so it is shown but
@@ -49,9 +49,11 @@ struct SandboxRow {
     /// stopped row omits the key entirely.
     #[serde(default)]
     ports: Vec<SandboxPort>,
+    #[serde(flatten)]
+    additional_fields: serde_json::Map<String, serde_json::Value>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct SandboxPort {
     host_ip: String,
     host_port: u16,
@@ -254,6 +256,8 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
             use crate::application::{
                 ConfigurationField, ConfigurationUpdate, FieldConstraint, ResourceConfiguration,
             };
+            let native = serde_json::to_value(&row)
+                .map_err(|error| WorkspaceError::new(error.to_string()))?;
             let reported = |value: Option<serde_json::Value>| {
                 value
                     .map(|value| {
@@ -264,11 +268,17 @@ impl ProviderWorkspace for DockerSandboxWorkspace {
                     })
                     .unwrap_or_else(|| "not reported".into())
             };
-            Ok(ResourceConfiguration {
+            let mut configuration = ResourceConfiguration {
                 stop_preserves_resource: false, fields: vec![
                 ConfigurationField { id: "cpu".into(), label: "CPU count".into(), value: reported(row.cpus), constraint: FieldConstraint::ReadOnly, update: ConfigurationUpdate::Live },
                 ConfigurationField { id: "memory".into(), label: "Memory (Provider units)".into(), value: reported(row.memory), constraint: FieldConstraint::ReadOnly, update: ConfigurationUpdate::Live },
-            ], state: sandbox_resource_state(&row.status), notice: "Docker Sandbox in-place CPU/memory resize is unsupported; values are read-only. Tuivir will not recreate the Resource.".into() })
+            ], state: sandbox_resource_state(&row.status), notice: "Docker Sandbox in-place CPU/memory resize is unsupported; values are read-only. Tuivir will not recreate the Resource.".into() };
+            super::configuration::append_native_fields(
+                &mut configuration.fields,
+                &native,
+                &["/name", "/status", "/cpus", "/memory"],
+            );
+            Ok(configuration)
         })
     }
 

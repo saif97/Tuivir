@@ -601,6 +601,8 @@ async fn sandbox_configuration_explains_read_only_limits_without_writes() {
         "{screen}"
     );
     assert!(text.contains("CPU count: not reported"), "{screen}");
+    assert!(text.contains("agent: claude"), "{screen}");
+    assert!(screen.contains("/home/vibebox/projects/tuivir"), "{screen}");
     assert!(press(&mut app, "enter").is_empty());
     assert!(press(&mut app, "ctrl+a").is_empty());
     assert!(app.state().confirmation.is_none());
