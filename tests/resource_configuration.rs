@@ -765,8 +765,8 @@ async fn configuration_form_keeps_contextual_help_and_detail_tab_navigation() {
     drive(&mut app, &runtime, requests).await;
     press(&mut app, "?");
     let screen = render_to_text(app.state(), 180, 36);
-    assert!(screen.contains("Apply Configuration Draft"), "{screen}");
-    assert!(screen.contains("Edit selected field"), "{screen}");
+    assert!(screen.contains("Review changes"), "{screen}");
+    assert!(screen.contains("Edit field"), "{screen}");
     press(&mut app, "esc");
     assert!(press(&mut app, "right").is_empty());
     assert!(render_to_text(app.state(), 180, 36).contains("[ Shell ]"));
@@ -1255,4 +1255,32 @@ async fn tart_rejects_invalid_counts_before_review_or_provider_writes() {
         assert!(screen.contains("must be a whole number"), "{screen}");
         cli.assert_exhausted();
     }
+}
+
+#[tokio::test]
+async fn configuration_form_distinguishes_unsaved_values_and_shows_compact_controls() {
+    let (mut app, _, cli) = tart_app(TART_INITIAL, vec![]).await;
+    edit_selected_field(&mut app, "4");
+    let screen = render_to_text(app.state(), 160, 28);
+    assert!(screen.contains("1 unsaved change"), "{screen}");
+    let controls = screen
+        .lines()
+        .find(|line| line.contains("ctrl+a") && line.contains("Review"));
+    assert!(
+        controls.is_some_and(|line| line.contains("enter") && line.contains("Edit")),
+        "{screen}"
+    );
+    assert!(!screen.contains("Apply Configuration Draft"), "{screen}");
+    assert!(screen.contains("┌"), "{screen}");
+    press(&mut app, "enter");
+    let screen = render_to_text(app.state(), 160, 28);
+    assert!(screen.contains("Editing"), "{screen}");
+    assert!(screen.contains("4▏"), "{screen}");
+    assert!(
+        screen
+            .lines()
+            .any(|line| line.contains("enter") && line.contains("Done") && line.contains("ctrl+u")),
+        "{screen}"
+    );
+    cli.assert_exhausted();
 }

@@ -734,56 +734,7 @@ fn render_details_panel(
             rows[1],
         );
     } else if state.configuration_selected() {
-        let mut lines = Vec::new();
-        if let Some(draft) = state.selected_configuration() {
-            if let Some(actual) = &draft.actual {
-                lines.extend(actual.fields.iter().enumerate().map(|(index, field)| {
-                    let proposed = draft.proposed.get(index).unwrap_or(&field.value);
-                    let marker = if index == draft.selected_field {
-                        "> "
-                    } else {
-                        "  "
-                    };
-                    let value = if proposed != &field.value {
-                        format!("{} → {}", field.value, proposed)
-                    } else {
-                        field.value.clone()
-                    };
-                    Line::from(format!(
-                        "{marker}{}: {value}{}",
-                        field.label,
-                        if field.editable() { "" } else { " (read-only)" }
-                    ))
-                }));
-                lines.push(Line::from(format!("Resource State: {:?}", actual.state)));
-                lines.push(Line::from(actual.notice.as_str()));
-                if draft.editing {
-                    lines.push(Line::from("Editing draft; changes remain unapplied."));
-                }
-                let hints = if draft.editing {
-                    &state.hints.configuration_input
-                } else {
-                    &state.hints.configuration_form
-                };
-                lines.extend(
-                    hints
-                        .iter()
-                        .map(|hint| Line::from(format!("{}  {}", hint.key, hint.description))),
-                );
-            } else {
-                lines.push(Line::from("Loading Configuration…"));
-            }
-            if let Some(error) = draft.validation_error() {
-                lines.push(Line::from(error));
-            }
-            if let Some(error) = &draft.error {
-                lines.push(Line::from(error.as_str()));
-            }
-        }
-        frame.render_widget(
-            Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: false }),
-            rows[1],
-        );
+        render_configuration(state, focused, frame, rows[1]);
     } else if view.is_some_and(|view| view.shell_selected) {
         render_resource_shell_state(resource_shell_session, frame, rows[1]);
     } else if let Some(details) = view.and_then(|view| view.details) {
@@ -806,6 +757,133 @@ fn render_details_panel(
         ));
     }
     frame.render_widget(Paragraph::new(Line::from(spans)), rows[0]);
+}
+
+fn render_configuration(state: &AppState, focused: bool, frame: &mut Frame<'_>, area: Rect) {
+    let Some(draft) = state.selected_configuration() else {
+        return;
+    };
+    let Some(actual) = &draft.actual else {
+        frame.render_widget(
+            Paragraph::new(draft.error.as_deref().unwrap_or("Loading Configuration…")),
+            area,
+        );
+        return;
+    };
+    let area = Rect::new(
+        area.x.saturating_add(1),
+        area.y.saturating_add(1),
+        area.width.saturating_sub(2),
+        area.height.saturating_sub(1),
+    );
+    let rows = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(actual.fields.len().saturating_mul(3) as u16),
+        Constraint::Length(1),
+        Constraint::Min(0),
+    ])
+    .split(area);
+    frame.render_widget(
+        Paragraph::new(format!("Resource State: {:?}", actual.state))
+            .style(resource_state_style(actual.state)),
+        rows[0],
+    );
+    for (index, field) in actual.fields.iter().enumerate() {
+        let proposed = draft.proposed.get(index).unwrap_or(&field.value);
+        let changed = !field.matches(proposed);
+        let selected = focused && index == draft.selected_field;
+        let editing = selected && draft.editing;
+        let role = if selected {
+            ThemeRole::Primary
+        } else {
+            ThemeRole::Muted
+        };
+        let mut border = Block::default()
+            .borders(Borders::ALL)
+            .border_style(themed_style(role));
+        if editing {
+            border = border.title(" Editing ");
+        }
+        let field_area = Rect::new(
+            rows[1].x,
+            rows[1].y.saturating_add(index as u16 * 3),
+            rows[1].width,
+            3,
+        )
+        .intersection(rows[1]);
+        let content = border.inner(field_area);
+        frame.render_widget(border, field_area);
+        let mut spans = vec![Span::styled(
+            format!("{}: ", field.label),
+            if field.editable() {
+                Style::default()
+            } else {
+                themed_style(ThemeRole::Muted)
+            },
+        )];
+        if changed {
+            spans.push(Span::styled(
+                format!("{} → ", field.value),
+                themed_style(ThemeRole::Muted),
+            ));
+        }
+        spans.push(Span::styled(
+            proposed,
+            if changed {
+                themed_style(ThemeRole::Warning).add_modifier(Modifier::BOLD)
+            } else if selected {
+                Style::default().add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            },
+        ));
+        if editing {
+            spans.push(Span::styled("▏", themed_style(ThemeRole::Primary)));
+        }
+        if !field.editable() {
+            spans.push(Span::styled(" (read-only)", themed_style(ThemeRole::Muted)));
+        }
+        frame.render_widget(Paragraph::new(Line::from(spans)), content);
+    }
+    let changed = actual
+        .fields
+        .iter()
+        .zip(&draft.proposed)
+        .filter(|(field, proposed)| !field.matches(proposed))
+        .count();
+    let status = if draft.applying {
+        "Applying changes…".into()
+    } else if changed == 0 {
+        "No unsaved changes".into()
+    } else {
+        format!(
+            "{changed} unsaved change{} · Review before applying",
+            if changed == 1 { "" } else { "s" }
+        )
+    };
+    frame.render_widget(
+        Paragraph::new(status).style(themed_style(if changed > 0 {
+            ThemeRole::Warning
+        } else {
+            ThemeRole::Muted
+        })),
+        rows[2],
+    );
+    let mut messages = Vec::new();
+    if let Some(error) = draft.validation_error() {
+        messages.push(Line::styled(error, themed_style(ThemeRole::Error)));
+    }
+    if let Some(error) = &draft.error {
+        messages.push(Line::styled(error.as_str(), themed_style(ThemeRole::Error)));
+    }
+    messages.push(Line::styled(
+        actual.notice.as_str(),
+        themed_style(ThemeRole::Muted),
+    ));
+    frame.render_widget(
+        Paragraph::new(messages).wrap(ratatui::widgets::Wrap { trim: true }),
+        rows[3],
+    );
 }
 
 fn render_resource_shell_state(
