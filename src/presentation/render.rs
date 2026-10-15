@@ -848,8 +848,9 @@ fn render_configuration(state: &AppState, focused: bool, frame: &mut Frame<'_>, 
         if !field.editable() {
             spans.push(Span::styled(" (read-only)", themed_style(ThemeRole::Muted)));
         }
-        if Line::from(spans.clone()).width() > usize::from(content.width) {
-            spans.remove(0);
+        let mut line = Line::from(spans);
+        if line.width() > usize::from(content.width) {
+            line.spans.remove(0);
             border = border.title(if editing {
                 format!(" Editing · {} ", field.label)
             } else {
@@ -858,7 +859,6 @@ fn render_configuration(state: &AppState, focused: bool, frame: &mut Frame<'_>, 
         } else if editing {
             border = border.title(" Editing ");
         }
-        let line = Line::from(spans);
         let scroll = line.width().saturating_sub(usize::from(content.width));
         frame.render_widget(border, field_area);
         frame.render_widget(
