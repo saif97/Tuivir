@@ -62,7 +62,7 @@ impl ConfigurationField {
             return true;
         }
         match self.constraint {
-            FieldConstraint::Integer { .. } => self
+            FieldConstraint::Integer { .. } | FieldConstraint::Bytes { .. } => self
                 .value
                 .parse::<u64>()
                 .ok()
@@ -78,12 +78,6 @@ impl ConfigurationField {
                 .parse::<f64>()
                 .ok()
                 .zip(value.parse::<f64>().ok())
-                .is_some_and(|(a, b)| a == b),
-            FieldConstraint::Bytes { .. } => self
-                .value
-                .parse::<u64>()
-                .ok()
-                .zip(value.parse::<u64>().ok())
                 .is_some_and(|(a, b)| a == b),
         }
     }
