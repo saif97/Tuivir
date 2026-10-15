@@ -280,6 +280,27 @@ impl ConfigurationDraft {
         });
     }
 
+    pub fn extend_selection(&mut self, field: usize, offset: usize) {
+        let Some(selection) = &mut self.selection else {
+            return;
+        };
+        let Some(value) = self
+            .actual
+            .as_ref()
+            .and_then(|actual| actual.fields.get(selection.field))
+        else {
+            return;
+        };
+        let cursor = match field.cmp(&selection.field) {
+            std::cmp::Ordering::Less => 0,
+            std::cmp::Ordering::Greater => value.value.len(),
+            std::cmp::Ordering::Equal => offset,
+        };
+        if value.value.is_char_boundary(cursor) {
+            selection.cursor = Some(cursor);
+        }
+    }
+
     pub fn selected_value_text(&self) -> Option<String> {
         let selection = self.selection.as_ref()?;
         let field = self.actual.as_ref()?.fields.get(selection.field)?;
