@@ -1,6 +1,61 @@
 use super::ProviderRequestId;
 use crate::domain::ResourceState;
 
+/// An exact memory size displayed and edited in GiB.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MemoryGiB(u64);
+
+impl MemoryGiB {
+    pub fn from_bytes(bytes: u64) -> Self {
+        Self(bytes)
+    }
+    pub fn bytes(self) -> u64 {
+        self.0
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        if value.chars().any(|c| c.is_ascii_alphabetic()) {
+            return quantity_bytes(value).map(Self);
+        }
+        let (whole, fraction) = value.split_once('.').unwrap_or((value, ""));
+        let whole = if whole.is_empty() && !fraction.is_empty() {
+            0
+        } else {
+            whole.parse::<u64>().ok()?
+        };
+        let fraction = fraction.trim_end_matches('0');
+        if !fraction.bytes().all(|c| c.is_ascii_digit()) || fraction.len() > 30 {
+            return None;
+        }
+        let fraction_bytes = if fraction.is_empty() {
+            0
+        } else {
+            let numerator = fraction.parse::<u128>().ok()?;
+            let divisor = 5u128.pow(fraction.len() as u32);
+            if numerator % divisor != 0 {
+                return None;
+            }
+            u64::try_from((numerator / divisor) << (30 - fraction.len())).ok()?
+        };
+        whole
+            .checked_mul(1 << 30)?
+            .checked_add(fraction_bytes)
+            .map(Self)
+    }
+}
+
+impl std::fmt::Display for MemoryGiB {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let whole = self.0 / (1 << 30);
+        let remainder = self.0 % (1 << 30);
+        if remainder == 0 {
+            return write!(formatter, "{whole}");
+        }
+        let fraction = format!("{:030}", u128::from(remainder) * 5u128.pow(30));
+        write!(formatter, "{whole}.{}", fraction.trim_end_matches('0'))
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConfigurationField {
     pub id: String,
@@ -32,6 +87,13 @@ pub struct ConfigurationDraft {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FieldConstraint {
     ReadOnly,
+    MemoryGiB {
+        minimum_bytes: u64,
+        maximum_bytes: Option<u64>,
+        step_bytes: u64,
+        unlimited: bool,
+        percent: bool,
+    },
     Integer {
         minimum: u64,
         maximum: u64,
@@ -68,6 +130,9 @@ impl ConfigurationField {
                 .ok()
                 .zip(value.parse::<u64>().ok())
                 .is_some_and(|(a, b)| a == b),
+            FieldConstraint::MemoryGiB { .. } => MemoryGiB::parse(&self.value)
+                .zip(MemoryGiB::parse(value))
+                .is_some_and(|(a, b)| a == b),
             FieldConstraint::ReadOnly => false,
             FieldConstraint::CpuSelection { .. } => false,
             FieldConstraint::Quantity { .. } => quantity_bytes(&self.value)
@@ -87,6 +152,22 @@ impl ConfigurationField {
             FieldConstraint::Integer { minimum, maximum } => value
                 .parse::<u64>()
                 .is_ok_and(|n| n >= minimum && n <= maximum),
+            FieldConstraint::MemoryGiB {
+                minimum_bytes,
+                maximum_bytes,
+                step_bytes,
+                unlimited,
+                percent,
+            } => {
+                (percent && valid_memory_percent(value))
+                    || MemoryGiB::parse(value).is_some_and(|size| {
+                        let bytes = size.bytes();
+                        (unlimited && bytes == 0)
+                            || (bytes >= minimum_bytes
+                                && maximum_bytes.is_none_or(|max| bytes <= max)
+                                && bytes % step_bytes == 0)
+                    })
+            }
             FieldConstraint::ReadOnly => false,
             FieldConstraint::CpuSelection { topology } => valid_cpu_selection(value, topology),
             FieldConstraint::Quantity { percent } => {
@@ -122,6 +203,34 @@ impl ConfigurationField {
                     "{} must be a whole number from {minimum} to {maximum}.",
                     self.label
                 ),
+                FieldConstraint::MemoryGiB {
+                    minimum_bytes,
+                    step_bytes,
+                    unlimited,
+                    percent,
+                    maximum_bytes,
+                } => {
+                    if let Some(maximum) = maximum_bytes
+                        && MemoryGiB::parse(value).is_some_and(|size| size.bytes() > maximum)
+                    {
+                        format!(
+                            "Memory exceeds the existing Provider limit ({} GiB). Adjust that limit outside Tuivir first.",
+                            MemoryGiB::from_bytes(maximum)
+                        )
+                    } else {
+                        format!(
+                            "Memory must be a size in GiB (for example 0.5 or 1.5), at least {} GiB, in increments of {} GiB{}{}.",
+                            MemoryGiB::from_bytes(minimum_bytes),
+                            MemoryGiB::from_bytes(step_bytes),
+                            if unlimited { " (0 is unlimited)" } else { "" },
+                            if percent {
+                                "; or a whole percentage from 1–100%"
+                            } else {
+                                ""
+                            }
+                        )
+                    }
+                }
                 FieldConstraint::ReadOnly => "This field is read-only.".into(),
                 FieldConstraint::CpuSelection { topology } => format!(
                     "CPU setting must be a positive count or CPU IDs (0-3,5){}.",
@@ -339,4 +448,11 @@ impl ConfigurationReview {
             "Live update; no restart required."
         }
     }
+}
+
+fn valid_memory_percent(value: &str) -> bool {
+    value
+        .strip_suffix('%')
+        .and_then(|n| n.parse::<u8>().ok())
+        .is_some_and(|n| n > 0 && n <= 100)
 }

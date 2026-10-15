@@ -999,11 +999,11 @@ async fn tart_app(
 }
 
 #[tokio::test]
-async fn tart_configuration_displays_cpu_count_and_memory_in_native_units() {
+async fn tart_configuration_displays_cpu_count_and_memory_in_gib() {
     let (app, _, cli) = tart_app(TART_INITIAL, vec![]).await;
     let screen = render_to_text(app.state(), 180, 36);
     assert!(screen.contains("CPU count: 2"), "{screen}");
-    assert!(screen.contains("Memory (MiB): 4096"), "{screen}");
+    assert!(screen.contains("Memory (GiB): 4"), "{screen}");
     cli.assert_exhausted();
 }
 
@@ -1048,17 +1048,17 @@ async fn tart_apply_reviews_downtime_then_updates_and_restarts_the_same_vm() {
     .await;
     edit_selected_field(&mut app, "4");
     press(&mut app, "down");
-    edit_selected_field(&mut app, "8192");
+    edit_selected_field(&mut app, "8");
     press(&mut app, "ctrl+a");
     let screen = render_to_text(app.state(), 180, 36);
     assert!(screen.contains("2 → 4"), "{screen}");
-    assert!(screen.contains("4096 → 8192"), "{screen}");
+    assert!(screen.contains("4 → 8"), "{screen}");
     assert!(screen.contains("Downtime: stop/start"), "{screen}");
     let requests = press(&mut app, "enter");
     drive(&mut app, &runtime, requests).await;
     let screen = render_to_text(app.state(), 180, 36);
     assert!(screen.contains("CPU count: 4"), "{screen}");
-    assert!(screen.contains("Memory (MiB): 8192"), "{screen}");
+    assert!(screen.contains("Memory (GiB): 8"), "{screen}");
     assert!(screen.contains("Resource State: Running"), "{screen}");
     assert!(!screen.contains('→'), "{screen}");
     cli.assert_exhausted();
@@ -1150,14 +1150,14 @@ async fn tart_stopped_vm_remains_stopped_after_memory_changes() {
     )
     .await;
     press(&mut app, "down");
-    edit_selected_field(&mut app, "8192");
+    edit_selected_field(&mut app, "8");
     press(&mut app, "ctrl+a");
     assert!(render_to_text(app.state(), 180, 36).contains("Resource remains stopped"));
     let requests = press(&mut app, "enter");
     drive(&mut app, &runtime, requests).await;
     let screen = render_to_text(app.state(), 180, 36);
     assert!(screen.contains("Resource State: Stopped"), "{screen}");
-    assert!(screen.contains("Memory (MiB): 8192"), "{screen}");
+    assert!(screen.contains("Memory (GiB): 8"), "{screen}");
     cli.assert_exhausted();
 }
 
@@ -1188,12 +1188,12 @@ async fn tart_rejected_native_minimum_preserves_draft_and_restarts_the_vm() {
     )
     .await;
     press(&mut app, "down");
-    edit_selected_field(&mut app, "1");
+    edit_selected_field(&mut app, "0.0009765625");
     press(&mut app, "ctrl+a");
     let requests = press(&mut app, "enter");
     drive(&mut app, &runtime, requests).await;
     let screen = render_to_text(app.state(), 180, 36);
-    assert!(screen.contains("4096 → 1"), "{screen}");
+    assert!(screen.contains("4 → 0.0009765625"), "{screen}");
     assert!(screen.contains("memory at minimum"), "{screen}");
     assert!(screen.contains("Resource State: Running"), "{screen}");
     cli.assert_exhausted();
@@ -1250,7 +1250,7 @@ async fn tart_rejects_invalid_counts_before_review_or_provider_writes() {
         (0, "65536"),
         (0, "0-3"),
         (1, "0"),
-        (1, "512MiB"),
+        (1, "0.1"),
         (1, "17592186044416"),
     ] {
         let (mut app, _, cli) = tart_app(TART_INITIAL, vec![]).await;
@@ -1261,7 +1261,14 @@ async fn tart_rejects_invalid_counts_before_review_or_provider_writes() {
         assert!(press(&mut app, "ctrl+a").is_empty());
         assert!(app.state().confirmation.is_none());
         let screen = render_to_text(app.state(), 180, 36);
-        assert!(screen.contains("must be a whole number"), "{screen}");
+        assert!(
+            screen.contains(if field == 0 {
+                "must be a whole number"
+            } else {
+                "Memory must be a size in GiB"
+            }),
+            "{screen}"
+        );
         cli.assert_exhausted();
     }
 }
@@ -1315,7 +1322,43 @@ async fn short_configuration_keeps_selected_input_and_validation_visible() {
     edit_selected_field(&mut app, "0");
     press(&mut app, "enter");
     let screen = render_to_text(app.state(), 120, 12);
-    assert!(screen.contains("4096 → 0▏"), "{screen}");
-    assert!(screen.contains("must be a whole number"), "{screen}");
+    assert!(screen.contains("4 → 0▏"), "{screen}");
+    assert!(screen.contains("Memory must be a size in GiB"), "{screen}");
+    cli.assert_exhausted();
+}
+
+#[tokio::test]
+async fn tart_fractional_gib_memory_is_reviewed_then_converted_to_native_mib() {
+    let updated = r#"{"CPU":2,"Memory":1536,"Running":false,"State":"stopped"}"#;
+    let initial = TART_INITIAL
+        .replace("true", "false")
+        .replace("running", "stopped");
+    let (mut app, runtime, cli) = tart_app(
+        &initial,
+        vec![
+            tart_read(&initial),
+            (
+                ProcessSpec::new("tart", &["set", "--memory", "1536", "--", "mac"]),
+                success(""),
+            ),
+            tart_read(updated),
+            (
+                ProcessSpec::new("tart", &["list", "--format", "json"]),
+                success(&TART_LIST.replace("running", "stopped")),
+            ),
+        ],
+    )
+    .await;
+    assert!(render_to_text(app.state(), 160, 28).contains("Memory (GiB): 4"));
+    press(&mut app, "down");
+    edit_selected_field(&mut app, "1.5");
+    press(&mut app, "ctrl+a");
+    let screen = render_to_text(app.state(), 160, 28);
+    assert!(screen.contains("Memory (GiB): 4 → 1.5"), "{screen}");
+    let requests = press(&mut app, "enter");
+    drive(&mut app, &runtime, requests).await;
+    let screen = render_to_text(app.state(), 160, 28);
+    assert!(screen.contains("Memory (GiB): 1.5"), "{screen}");
+    assert!(!screen.contains('→'), "{screen}");
     cli.assert_exhausted();
 }
