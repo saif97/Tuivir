@@ -1,5 +1,7 @@
 //! Wrap Settings values without mixing their source text with visual padding.
 
+use std::ops::Range;
+
 use ratatui::{
     layout::Rect,
     style::Modifier,
@@ -13,10 +15,21 @@ use crate::application::ConfigurationDraft;
 
 pub(super) struct ConfigurationText {
     pub lines: Vec<Line<'static>>,
+    pub values: Vec<ValueRun>,
+}
+
+pub(super) struct ValueRun {
+    pub line: usize,
+    pub column: u16,
+    pub field: usize,
+    /// A source byte boundary for every terminal cell, including the end boundary.
+    pub offsets: Vec<usize>,
 }
 
 struct Chunk {
+    range: Range<usize>,
     text: String,
+    offsets: Vec<usize>,
 }
 
 fn visible(grapheme: &str) -> String {
@@ -57,27 +70,92 @@ fn wrap(text: &str, width: usize) -> Vec<Chunk> {
                 .filter(|boundary| *boundary > start)
                 .unwrap_or(end);
         }
+        let byte_start = graphemes[start].0;
+        let byte_end = graphemes.get(end).map_or(text.len(), |(byte, _)| *byte);
         let mut display = String::new();
-        for &(_, grapheme) in &graphemes[start..end] {
+        let mut offsets = vec![byte_start];
+        for (index, &(byte, grapheme)) in graphemes[start..end].iter().enumerate() {
             let mut glyph = visible(grapheme);
             if glyph.width() > width {
                 glyph = "�".into();
             }
+            let next = graphemes
+                .get(start + index + 1)
+                .map_or(text.len(), |(byte, _)| *byte);
+            offsets.extend(std::iter::repeat_n(next, glyph.width()));
             display.push_str(&glyph);
+            debug_assert!(byte <= next);
         }
-        chunks.push(Chunk { text: display });
+        chunks.push(Chunk {
+            range: byte_start..byte_end,
+            text: display,
+            offsets,
+        });
         start = if newline { end + 1 } else { end };
     }
     if text.is_empty() || text.ends_with('\n') {
         chunks.push(Chunk {
+            range: text.len()..text.len(),
             text: String::new(),
+            offsets: vec![text.len()],
         });
     }
     chunks
 }
 
+fn value_spans(
+    draft: &ConfigurationDraft,
+    field: usize,
+    value: &str,
+    chunk: &Chunk,
+    width: usize,
+) -> Vec<Span<'static>> {
+    let Some(selection) = draft
+        .selection
+        .as_ref()
+        .filter(|selection| selection.field == field)
+    else {
+        return vec![Span::raw(chunk.text.clone())];
+    };
+    let range = selection.range(value.len());
+    let start = range.start.max(chunk.range.start).min(chunk.range.end);
+    let end = range.end.min(chunk.range.end).max(start);
+    [
+        (chunk.range.start..start, false),
+        (start..end, true),
+        (end..chunk.range.end, false),
+    ]
+    .into_iter()
+    .filter(|(range, _)| !range.is_empty())
+    .map(|(range, selected)| {
+        let text = value[range]
+            .graphemes(true)
+            .map(|grapheme| {
+                let text = visible(grapheme);
+                if text.width() > width {
+                    "�".to_owned()
+                } else {
+                    text
+                }
+            })
+            .collect::<String>();
+        Span::styled(
+            text,
+            if selected {
+                super::render::selection_style()
+            } else {
+                ratatui::style::Style::default()
+            },
+        )
+    })
+    .collect()
+}
+
 pub(super) fn prepare(draft: &ConfigurationDraft, area: Rect) -> ConfigurationText {
-    let mut result = ConfigurationText { lines: Vec::new() };
+    let mut result = ConfigurationText {
+        lines: Vec::new(),
+        values: Vec::new(),
+    };
     let width = usize::from(area.width);
     let Some(actual) = &draft.actual else {
         return result;
@@ -126,7 +204,7 @@ pub(super) fn prepare(draft: &ConfigurationDraft, area: Rect) -> ConfigurationTe
             label_width + 2
         };
         let value_width = width.saturating_sub(value_column).max(1);
-        for (_, field) in fields {
+        for (index, field) in fields {
             let label = format!("{}:", field.label);
             let labels = wrap(&label, if stacked { width } else { label_width.max(1) });
             if stacked {
@@ -153,7 +231,13 @@ pub(super) fn prepare(draft: &ConfigurationDraft, area: Rect) -> ConfigurationTe
                     Span::raw(" ".repeat(value_column.saturating_sub(label.width()))),
                 ];
                 if let Some(chunk) = values.get(row) {
-                    spans.push(Span::raw(chunk.text.clone()));
+                    spans.extend(value_spans(draft, index, &field.value, chunk, value_width));
+                    result.values.push(ValueRun {
+                        line: result.lines.len(),
+                        column: value_column as u16,
+                        field: index,
+                        offsets: chunk.offsets.clone(),
+                    });
                 }
                 result.lines.push(Line::from(spans));
             }
@@ -169,4 +253,62 @@ pub(super) fn prepare(draft: &ConfigurationDraft, area: Rect) -> ConfigurationTe
             .map(|chunk| Line::styled(chunk.text, themed_style(ThemeRole::Muted))),
     );
     result
+}
+
+/// The same wrapped source geometry drives drawing and mouse selection.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConfigurationTextLayout {
+    pub area: Rect,
+    pub lines: Vec<Line<'static>>,
+    pub values: Vec<ConfigurationValueRegion>,
+    pub scroll: u16,
+    pub scroll_limit: u16,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConfigurationValueRegion {
+    pub area: Rect,
+    pub field: usize,
+    pub offsets: Vec<usize>,
+}
+
+impl ConfigurationValueRegion {
+    pub fn source_offset(&self, column: u16) -> usize {
+        let cell = usize::from(column.saturating_sub(self.area.x));
+        self.offsets[cell.min(self.offsets.len() - 1)]
+    }
+}
+
+pub(super) fn layout(draft: &ConfigurationDraft, area: Rect) -> ConfigurationTextLayout {
+    let text = prepare(draft, area);
+    let scroll_limit = text
+        .lines
+        .len()
+        .saturating_sub(usize::from(area.height))
+        .min(u16::MAX as usize) as u16;
+    let scroll = draft.scroll.min(scroll_limit);
+    let values = text
+        .values
+        .into_iter()
+        .filter_map(|value| {
+            let row = value.line.checked_sub(usize::from(scroll))?;
+            (row < usize::from(area.height)).then_some(ConfigurationValueRegion {
+                area: Rect::new(
+                    area.x + value.column,
+                    area.y + row as u16,
+                    area.width.saturating_sub(value.column),
+                    1,
+                ),
+                field: value.field,
+                offsets: value.offsets,
+            })
+        })
+        .collect();
+    ConfigurationTextLayout {
+        area,
+        lines: text.lines,
+        values,
+        scroll,
+        scroll_limit,
+    }
 }

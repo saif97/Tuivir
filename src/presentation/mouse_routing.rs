@@ -51,6 +51,9 @@ fn drag(layout: &ScreenLayout, input: MouseInput, boundary_grab: Option<u16>) ->
     if boundary_grab.is_none() {
         let panes = layout.panes.as_ref()?;
         let point = point(input);
+        if layout.configuration.is_some() {
+            return None;
+        }
         if panes.detail_content.contains(point) {
             return Some(Command::ExtendDetailsSelection {
                 line: point.y - panes.detail_content.y,
@@ -113,6 +116,17 @@ fn press(layout: &ScreenLayout, input: MouseInput) -> Option<Command> {
     }
     if let Some(index) = index_containing(&panes.detail_views, point) {
         return Some(Command::ActivateDetailView(index));
+    }
+    if let Some(configuration) = &layout.configuration
+        && let Some(value) = configuration
+            .values
+            .iter()
+            .find(|value| value.area.contains(point))
+    {
+        return Some(Command::SelectConfigurationValue {
+            field: value.field,
+            offset: value.source_offset(point.x),
+        });
     }
     if panes.detail_content.contains(point) {
         return Some(Command::BeginDetailsSelection {

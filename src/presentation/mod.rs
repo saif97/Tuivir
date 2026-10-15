@@ -12,3 +12,5 @@ pub use render::{
     render_resource_shell_text, render_to_text, render_with_layout,
 };
 pub use screen_layout::{ResourceShellLayout, ScreenLayout, WorkspacePanes};
+
+pub use configuration_text::{ConfigurationTextLayout, ConfigurationValueRegion};

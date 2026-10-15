@@ -73,6 +73,12 @@ pub enum Command {
     ScrollDetailsUp,
     /// Copies the text selected in the visible detail view.
     CopyDetails,
+    /// Selects one read-only Settings value at an original source byte boundary.
+    SelectConfigurationValue {
+        field: usize,
+        offset: usize,
+    },
+    ClearConfigurationSelection,
     /// Starts a selection at a source-line character boundary in Details.
     BeginDetailsSelection {
         line: u16,

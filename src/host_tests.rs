@@ -1199,6 +1199,7 @@ fn mouse_routing_resolves_each_region_without_a_terminal() {
         }),
         overlay: None,
         resource_shell: None,
+        configuration: None,
     };
 
     assert_eq!(
@@ -1269,6 +1270,7 @@ fn mouse_detail_click_focuses_details_without_live_terminal() {
         }),
         overlay: None,
         resource_shell: None,
+        configuration: None,
     };
     handle_mouse(
         &mut app,

@@ -1,7 +1,8 @@
 mod configuration;
 pub use configuration::{
     ConfigurationChange, ConfigurationDraft, ConfigurationField, ConfigurationOutcome,
-    ConfigurationReview, ConfigurationUpdate, FieldConstraint, MemoryGiB, ResourceConfiguration,
+    ConfigurationReview, ConfigurationSelection, ConfigurationUpdate, FieldConstraint, MemoryGiB,
+    ResourceConfiguration,
 };
 mod app;
 mod command;

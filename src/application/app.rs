@@ -262,6 +262,8 @@ impl AppState {
 pub struct KeyHints {
     pub confirm: Option<String>,
     pub cancel: Option<String>,
+    pub copy_details: Option<String>,
+    pub clear_configuration_selection: Option<String>,
     pub scroll_details_up: Option<String>,
     pub scroll_details_down: Option<String>,
     pub focus_providers: Option<String>,
@@ -287,6 +289,12 @@ impl KeyHints {
         Self {
             confirm: confirmation_keys(Command::Confirm),
             cancel: confirmation_keys(Command::Cancel),
+            copy_details: registry
+                .first_key(Command::CopyDetails)
+                .map(|key| key.to_string()),
+            clear_configuration_selection: registry
+                .first_key(Command::ClearConfigurationSelection)
+                .map(|key| key.to_string()),
             scroll_details_up: registry
                 .first_key(Command::ScrollDetailsUp)
                 .map(|key| key.to_string()),
@@ -652,6 +660,10 @@ impl App {
                         .iter()
                         .any(super::ConfigurationField::editable)
                 }),
+            Command::ClearConfigurationSelection => self
+                .state
+                .selected_configuration()
+                .is_some_and(|draft| draft.selection.is_some()),
             _ => true,
         }
     }
@@ -806,6 +818,7 @@ impl App {
                             return Vec::new();
                         }
                         draft.scroll = 0;
+                        draft.selection = None;
                         match command {
                             Command::EditConfigurationField => {
                                 draft.editing = draft
@@ -935,15 +948,40 @@ impl App {
             }
             // A Details selection arrives through the mouse path. Until one is
             // present, Copy deliberately has nothing to send to the host.
+            Command::SelectConfigurationValue { field, offset } => {
+                if self.state.configuration_selected() {
+                    self.state.focused_pane = FocusedPane::Details;
+                    if let Some(draft) = self.selected_configuration_mut() {
+                        draft.select_value(field, offset);
+                    }
+                }
+                Vec::new()
+            }
+            Command::ClearConfigurationSelection => {
+                if let Some(draft) = self.selected_configuration_mut() {
+                    draft.selection = None;
+                }
+                Vec::new()
+            }
             Command::CopyDetails => {
-                self.state.pending_details_copy = self
-                    .state
-                    .active_workspace()
-                    .and_then(ProviderWorkspaceState::selected_detail_text);
+                self.state.pending_details_copy = if self.state.configuration_selected() {
+                    self.state
+                        .selected_configuration()
+                        .and_then(ConfigurationDraft::selected_value_text)
+                } else {
+                    self.state
+                        .active_workspace()
+                        .and_then(ProviderWorkspaceState::selected_detail_text)
+                };
                 Vec::new()
             }
             Command::BeginDetailsSelection { line, column } => {
                 self.state.focused_pane = FocusedPane::Details;
+                if self.state.configuration_selected()
+                    && let Some(draft) = self.selected_configuration_mut()
+                {
+                    draft.selection = None;
+                }
                 if let Some(workspace) = self.state.active_workspace_mut() {
                     workspace.begin_detail_selection(line, column);
                 }

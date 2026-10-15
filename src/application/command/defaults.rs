@@ -264,10 +264,17 @@ pub(super) const BUILTIN_COMMANDS: &[CommandDefinition] = &[
         default_keys: &["ctrl+u", "pageup"],
     },
     CommandDefinition {
+        id: "configuration_clear_selection",
+        description: "Clear selected value",
+        command: Command::ClearConfigurationSelection,
+        scopes: &[CommandScope::ConfigurationForm],
+        default_keys: &["esc"],
+    },
+    CommandDefinition {
         id: "details_copy",
         description: "Copy selected details",
         command: Command::CopyDetails,
-        scopes: DETAILS,
+        scopes: DETAIL_TABS,
         default_keys: &["y"],
     },
     CommandDefinition {

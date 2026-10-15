@@ -86,8 +86,26 @@ pub struct ConfigurationDraft {
     pub editing: bool,
     pub applying: bool,
     pub scroll: u16,
+    pub selection: Option<ConfigurationSelection>,
     pub(crate) scroll_limit: u16,
     pub(crate) request_id: Option<ProviderRequestId>,
+}
+
+/// A selection in one original value; visual wrapping never changes its byte offsets.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConfigurationSelection {
+    pub field: usize,
+    pub anchor: usize,
+    /// A click selects the whole value; dragging defines a half-open source range.
+    pub cursor: Option<usize>,
+}
+
+impl ConfigurationSelection {
+    pub fn range(&self, length: usize) -> std::ops::Range<usize> {
+        self.cursor.map_or(0..length, |cursor| {
+            self.anchor.min(cursor)..self.anchor.max(cursor)
+        })
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -243,7 +261,40 @@ impl ConfigurationField {
     }
 }
 impl ConfigurationDraft {
+    pub fn select_value(&mut self, field: usize, offset: usize) {
+        let Some(value) = self
+            .actual
+            .as_ref()
+            .and_then(|actual| actual.fields.get(field))
+        else {
+            return;
+        };
+        if value.editable() || !value.value.is_char_boundary(offset) {
+            return;
+        }
+        self.editing = false;
+        self.selection = Some(ConfigurationSelection {
+            field,
+            anchor: offset,
+            cursor: None,
+        });
+    }
+
+    pub fn selected_value_text(&self) -> Option<String> {
+        let selection = self.selection.as_ref()?;
+        let field = self.actual.as_ref()?.fields.get(selection.field)?;
+        if field.editable() {
+            return None;
+        }
+        field
+            .value
+            .get(selection.range(field.value.len()))
+            .filter(|text| !text.is_empty())
+            .map(str::to_owned)
+    }
+
     pub fn reconcile(&mut self, actual: ResourceConfiguration) {
+        self.selection = None;
         self.proposed = actual
             .fields
             .iter()

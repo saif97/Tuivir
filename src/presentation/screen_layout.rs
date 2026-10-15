@@ -38,6 +38,7 @@ pub struct ScreenLayout {
     /// The currently visible Resource Shell Session terminal and, when
     /// enlarged, its single line of Tuivir chrome.
     pub resource_shell: Option<ResourceShellLayout>,
+    pub configuration: Option<super::configuration_text::ConfigurationTextLayout>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -82,6 +83,7 @@ impl ScreenLayout {
                 active_target: None,
                 provider_workspaces: Vec::new(),
                 panes: None,
+                configuration: None,
                 overlay: None,
                 resource_shell: Some(ResourceShellLayout {
                     header: Some(rows[0]),
@@ -128,6 +130,9 @@ impl ScreenLayout {
         }
 
         let panes = measure_panes(state, workspace);
+        let configuration = panes
+            .as_ref()
+            .and_then(|panes| super::render::configuration_layout(state, panes.detail_content));
         let resource_shell = state
             .visible_resource_shell_session()
             .and(panes.as_ref())
@@ -147,6 +152,7 @@ impl ScreenLayout {
             panes,
             overlay: overlay_area(state, area),
             resource_shell,
+            configuration,
         }
     }
 }

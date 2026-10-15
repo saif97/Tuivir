@@ -153,6 +153,7 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
         state.hints.focus_details.as_deref(),
         frame,
         columns[1],
+        layout.configuration.as_ref(),
     );
 
     if let (Some(help), Some(area)) = (&state.help_overlay, help_overlay_area(state, frame.area()))
@@ -706,6 +707,7 @@ fn render_details_panel(
     details_hint: Option<&str>,
     frame: &mut Frame<'_>,
     area: Rect,
+    configuration: Option<&super::configuration_text::ConfigurationTextLayout>,
 ) {
     let summary = view
         .and_then(|view| view.selected_resource)
@@ -776,7 +778,7 @@ fn render_details_panel(
             rows[1],
         );
     } else if state.configuration_selected() {
-        render_configuration(state, focused, frame, rows[1]);
+        render_configuration(state, focused, frame, rows[1], configuration);
     } else if view.is_some_and(|view| view.shell_selected) {
         render_resource_shell_state(resource_shell_session, frame, rows[1]);
     } else if let Some(details) = view.and_then(|view| view.details) {
@@ -801,7 +803,13 @@ fn render_details_panel(
     frame.render_widget(Paragraph::new(Line::from(spans)), rows[0]);
 }
 
-fn render_configuration(state: &AppState, focused: bool, frame: &mut Frame<'_>, area: Rect) {
+fn render_configuration(
+    state: &AppState,
+    focused: bool,
+    frame: &mut Frame<'_>,
+    area: Rect,
+    configuration: Option<&super::configuration_text::ConfigurationTextLayout>,
+) {
     let Some(draft) = state.selected_configuration() else {
         return;
     };
@@ -920,7 +928,18 @@ fn render_configuration(state: &AppState, focused: bool, frame: &mut Frame<'_>, 
             if changed == 1 { "" } else { "s" }
         )
     };
-    if draft.scroll_limit > 0 && !draft.editing {
+    if draft.selection.is_some() && !draft.editing {
+        if changed == 0 {
+            status = "Value selected".into();
+        }
+        if let Some(key) = &state.hints.copy_details {
+            status.push_str(&format!(" · {key} copy value"));
+        }
+        if let Some(key) = &state.hints.clear_configuration_selection {
+            status.push_str(&format!(" · {key} clear"));
+        }
+    }
+    if draft.scroll_limit > 0 && !draft.editing && draft.selection.is_none() {
         let keys = [
             state.hints.scroll_details_up.as_deref(),
             state.hints.scroll_details_down.as_deref(),
@@ -941,9 +960,20 @@ fn render_configuration(state: &AppState, focused: bool, frame: &mut Frame<'_>, 
         })),
         rows[3],
     );
-    let messages = configuration_messages(draft, rows[4]);
-    let paragraph = Paragraph::new(messages);
-    frame.render_widget(paragraph.scroll((draft.scroll, 0)), rows[4]);
+    if let Some(text) = configuration {
+        for (row, line) in text
+            .lines
+            .iter()
+            .skip(usize::from(text.scroll))
+            .take(usize::from(text.area.height))
+            .enumerate()
+        {
+            frame.render_widget(
+                line,
+                Rect::new(text.area.x, text.area.y + row as u16, text.area.width, 1),
+            );
+        }
+    }
 }
 
 fn configuration_rows(editable_count: usize, area: Rect) -> ([Rect; 5], usize) {
@@ -969,37 +999,30 @@ fn configuration_rows(editable_count: usize, area: Rect) -> ([Rect; 5], usize) {
     ([rows[0], rows[1], rows[2], rows[3], rows[4]], field_height)
 }
 
-fn configuration_messages<'a>(
-    draft: &'a crate::application::ConfigurationDraft,
+pub(super) fn configuration_layout(
+    state: &AppState,
     area: Rect,
-) -> Vec<Line<'a>> {
-    super::configuration_text::prepare(draft, area).lines
-}
-
-/// Report the measured content limit to the application without putting terminal layout in it.
-pub fn configuration_scroll_limit(state: &AppState, layout: &ScreenLayout) -> u16 {
+) -> Option<super::configuration_text::ConfigurationTextLayout> {
     if !state.configuration_selected() {
-        return 0;
+        return None;
     }
-    let Some(draft) = state.selected_configuration() else {
-        return 0;
-    };
-    let Some(actual) = &draft.actual else {
-        return 0;
-    };
-    let Some(panes) = &layout.panes else {
-        return 0;
-    };
+    let draft = state.selected_configuration()?;
+    let actual = draft.actual.as_ref()?;
     let count = actual
         .fields
         .iter()
         .filter(|field| field.editable())
         .count();
-    let (rows, _) = configuration_rows(count, panes.detail_content);
-    configuration_messages(draft, rows[4])
-        .len()
-        .saturating_sub(usize::from(rows[4].height))
-        .min(u16::MAX as usize) as u16
+    let (rows, _) = configuration_rows(count, area);
+    Some(super::configuration_text::layout(draft, rows[4]))
+}
+
+/// Report the measured content limit to the application without putting terminal layout in it.
+pub fn configuration_scroll_limit(_state: &AppState, layout: &ScreenLayout) -> u16 {
+    layout
+        .configuration
+        .as_ref()
+        .map_or(0, |text| text.scroll_limit)
 }
 
 fn render_resource_shell_state(
@@ -1115,6 +1138,10 @@ fn render_detail_content(
     frame.render_widget(Paragraph::new(lines), area);
 }
 
+pub(super) fn selection_style() -> Style {
+    Style::default().fg(Color::White).bg(Color::Blue)
+}
+
 fn detail_line(text: &str, line: u16, selection: Option<&DetailSelection>) -> Line<'static> {
     let Some(selection) = selection else {
         return Line::from(text.to_owned());
@@ -1146,7 +1173,7 @@ fn detail_line(text: &str, line: u16, selection: Option<&DetailSelection>) -> Li
     let after = text.chars().skip(last).collect::<String>();
     Line::from(vec![
         Span::raw(before),
-        Span::styled(selected, Style::default().fg(Color::White).bg(Color::Blue)),
+        Span::styled(selected, selection_style()),
         Span::raw(after),
     ])
 }

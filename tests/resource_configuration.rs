@@ -1735,3 +1735,68 @@ async fn wrapped_settings_values_keep_their_column_and_do_not_hide_long_labels()
     assert!(screen.contains("NestedKey"), "{screen}");
     cli.assert_exhausted();
 }
+
+fn point_at_text(screen: &str, text: &str) -> (u16, u16) {
+    use unicode_width::UnicodeWidthStr;
+    screen
+        .lines()
+        .enumerate()
+        .find_map(|(row, line)| {
+            line.find(text)
+                .map(|byte| (line[..byte].width() as u16, row as u16))
+        })
+        .unwrap_or_else(|| panic!("Missing {text}: {screen}"))
+}
+
+fn settings_pointer(
+    app: &mut App,
+    action: tuivir::presentation::MouseAction,
+    column: u16,
+    row: u16,
+    width: u16,
+    height: u16,
+) {
+    let layout = tuivir::presentation::ScreenLayout::measure(
+        app.state(),
+        ratatui::layout::Rect::new(0, 0, width, height),
+    );
+    if let Some(command) = tuivir::presentation::resolve_mouse(
+        &layout,
+        tuivir::presentation::MouseInput {
+            action,
+            column,
+            row,
+        },
+        None,
+    ) {
+        app.invoke(command);
+    }
+}
+
+#[tokio::test]
+async fn clicking_a_wrapped_read_only_value_copies_its_exact_original_string() {
+    let digest = "sha256:0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz";
+    let initial =
+        serde_json::json!({"CPU":2,"Memory":4096,"State":"stopped","Digest":digest}).to_string();
+    let (mut app, _, cli) = tart_app(&initial, vec![]).await;
+    let screen = render_to_text(app.state(), 150, 36);
+    let (column, row) = point_at_text(&screen, "sha256:");
+    settings_pointer(
+        &mut app,
+        tuivir::presentation::MouseAction::Press,
+        column,
+        row,
+        150,
+        36,
+    );
+    assert!(render_to_text(app.state(), 150, 36).contains("y copy value"));
+    let backgrounds = tuivir::presentation::render_background_colours(app.state(), 150, 36);
+    assert_eq!(
+        backgrounds[row as usize][column as usize],
+        ratatui::style::Color::Blue,
+        "Clicked value should be visibly selected"
+    );
+    press(&mut app, "y");
+    assert_eq!(app.take_pending_details_copy(), Some(digest.to_owned()));
+    cli.assert_exhausted();
+}
