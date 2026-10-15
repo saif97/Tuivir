@@ -1800,3 +1800,47 @@ async fn clicking_a_wrapped_read_only_value_copies_its_exact_original_string() {
     assert_eq!(app.take_pending_details_copy(), Some(digest.to_owned()));
     cli.assert_exhausted();
 }
+
+#[tokio::test]
+async fn dragging_back_across_wrapped_unicode_values_copies_only_source_text() {
+    let value =
+        "prefix 世界e\u{301}🙂 keep  both spaces /a/very/long/path/with/many/segments omega suffix";
+    let initial =
+        serde_json::json!({"CPU":2,"Memory":4096,"State":"stopped","Text":value}).to_string();
+    let (mut app, _, cli) = tart_app(&initial, vec![]).await;
+    let screen = render_to_text(app.state(), 150, 36);
+    let (end_column, end_row) = point_at_text(&screen, "omega");
+    let (start_column, start_row) = point_at_text(&screen, "世");
+    assert!(
+        end_row > start_row,
+        "Test requires a wrapped value: {screen}"
+    );
+    settings_pointer(
+        &mut app,
+        tuivir::presentation::MouseAction::Press,
+        end_column + 5,
+        end_row,
+        150,
+        36,
+    );
+    settings_pointer(
+        &mut app,
+        tuivir::presentation::MouseAction::Drag,
+        start_column,
+        start_row,
+        150,
+        36,
+    );
+    press(&mut app, "y");
+    assert_eq!(
+        app.take_pending_details_copy().as_deref(),
+        Some("世界e\u{301}🙂 keep  both spaces /a/very/long/path/with/many/segments omega")
+    );
+    press(&mut app, "esc");
+    press(&mut app, "y");
+    assert!(
+        app.take_pending_details_copy().is_none(),
+        "Cleared selection should not copy stale text"
+    );
+    cli.assert_exhausted();
+}

@@ -957,6 +957,32 @@ impl App {
                 }
                 Vec::new()
             }
+            Command::ExtendConfigurationSelection {
+                field,
+                offset,
+                scroll,
+            } => {
+                if self.state.configuration_selected() {
+                    if let Some(draft) = self.selected_configuration_mut()
+                        && let Some(selection) = &mut draft.selection
+                        && let Some(value) = draft
+                            .actual
+                            .as_ref()
+                            .and_then(|actual| actual.fields.get(selection.field))
+                    {
+                        let cursor = match field.cmp(&selection.field) {
+                            std::cmp::Ordering::Less => 0,
+                            std::cmp::Ordering::Greater => value.value.len(),
+                            std::cmp::Ordering::Equal => offset,
+                        };
+                        if value.value.is_char_boundary(cursor) {
+                            selection.cursor = Some(cursor);
+                        }
+                    }
+                    self.scroll_details(isize::from(scroll));
+                }
+                Vec::new()
+            }
             Command::ClearConfigurationSelection => {
                 if let Some(draft) = self.selected_configuration_mut() {
                     draft.selection = None;

@@ -78,6 +78,12 @@ pub enum Command {
         field: usize,
         offset: usize,
     },
+    /// Extends the selection within that value; edge drags also scroll the view.
+    ExtendConfigurationSelection {
+        field: usize,
+        offset: usize,
+        scroll: i8,
+    },
     ClearConfigurationSelection,
     /// Starts a selection at a source-line character boundary in Details.
     BeginDetailsSelection {
