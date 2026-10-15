@@ -580,11 +580,12 @@ async fn sandbox_configuration_explains_read_only_limits_without_writes() {
     let requests = app.invoke(Command::ActivateDetailView(2));
     drive(&mut app, &runtime, requests).await;
     let screen = render_to_text(app.state(), 180, 36);
+    let text = screen.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
         screen.contains("in-place CPU/memory resize is unsupported"),
         "{screen}"
     );
-    assert!(screen.contains("CPU count: not reported"), "{screen}");
+    assert!(text.contains("CPU count: not reported"), "{screen}");
     assert!(press(&mut app, "enter").is_empty());
     assert!(press(&mut app, "ctrl+a").is_empty());
     assert!(app.state().confirmation.is_none());
@@ -1099,6 +1100,7 @@ async fn apple_container_configuration_shows_read_only_values_and_explains_resiz
     let requests = app.invoke(Command::ActivateDetailView(5));
     drive(&mut app, &runtime, requests).await;
     let screen = render_to_text(app.state(), 200, 36);
+    let text = screen.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(screen.contains("Read only"), "{screen}");
     assert!(!screen.contains("No unsaved changes"), "{screen}");
     assert!(!screen.contains("Edit field"), "{screen}");
@@ -1108,11 +1110,11 @@ async fn apple_container_configuration_shows_read_only_values_and_explains_resiz
     assert!(!help.contains("Edit field"), "{help}");
     assert!(!help.contains("Review & apply"), "{help}");
     press(&mut app, "esc");
-    assert!(screen.contains("CPU count: 2"), "{screen}");
-    assert!(screen.contains("Memory (GiB): 1"), "{screen}");
+    assert!(text.contains("CPU count: 2"), "{screen}");
+    assert!(text.contains("Memory (GiB): 1"), "{screen}");
     assert!(screen.contains("Read-only settings"), "{screen}");
     assert!(
-        screen.contains("Image: docker.io/library/alpine:3.23"),
+        text.contains("Image: docker.io/library/alpine:3.23"),
         "{screen}"
     );
     assert!(
@@ -1382,16 +1384,40 @@ async fn tart_separates_editable_settings_from_read_only_details_and_skips_their
     let initial = r#"{"CPU":2,"Memory":4096,"State":"stopped","OS":"darwin","Disk":80,"Display":"1920x1080"}"#;
     let (mut app, _, cli) = tart_app(initial, vec![]).await;
     let screen = render_to_text(app.state(), 160, 32);
+    let text = screen.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(screen.contains("Editable settings"), "{screen}");
     assert!(screen.contains("Read-only settings"), "{screen}");
-    assert!(screen.contains("OS: darwin"), "{screen}");
-    assert!(screen.contains("Disk capacity (GB): 80"), "{screen}");
+    assert!(text.contains("OS: darwin"), "{screen}");
+    assert!(text.contains("Disk capacity (GB): 80"), "{screen}");
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(160, 32)).unwrap();
+    let drawn = terminal
+        .draw(|frame| tuivir::presentation::render(app.state(), frame))
+        .unwrap();
+    let heading_row = screen
+        .lines()
+        .position(|line| line.contains("Read-only settings"))
+        .unwrap();
+    let heading_column = screen
+        .lines()
+        .nth(heading_row)
+        .unwrap()
+        .chars()
+        .position(|c| c == 'R')
+        .unwrap();
+    let heading = &drawn.buffer[(heading_column as u16, heading_row as u16)];
+    let label = &drawn.buffer[(heading_column as u16, heading_row as u16 + 1)];
+    assert_ne!(
+        heading.fg, label.fg,
+        "Section heading should stand out from muted labels"
+    );
+    assert!(heading.modifier.contains(ratatui::style::Modifier::BOLD));
     press(&mut app, "down");
     press(&mut app, "down");
     edit_selected_field(&mut app, "8");
     let screen = render_to_text(app.state(), 160, 32);
+    let text = screen.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(screen.contains("Memory (GiB): 4 → 8"), "{screen}");
-    assert!(screen.contains("Disk capacity (GB): 80"), "{screen}");
+    assert!(text.contains("Disk capacity (GB): 80"), "{screen}");
     cli.assert_exhausted();
 }
 
@@ -1402,12 +1428,10 @@ async fn docker_configuration_includes_read_only_image_and_restart_policy() {
     let requests = app.invoke(Command::ActivateDetailView(4));
     drive(&mut app, &runtime, requests).await;
     let screen = render_to_text(app.state(), 160, 32);
+    let text = screen.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(screen.contains("Read-only settings"), "{screen}");
-    assert!(screen.contains("Image: alpine:3.23"), "{screen}");
-    assert!(
-        screen.contains("Restart policy: unless-stopped"),
-        "{screen}"
-    );
+    assert!(text.contains("Image: alpine:3.23"), "{screen}");
+    assert!(text.contains("Restart policy: unless-stopped"), "{screen}");
 }
 
 #[tokio::test]
@@ -1417,10 +1441,11 @@ async fn incus_configuration_shows_kind_architecture_and_profiles_as_read_only()
     let requests = app.invoke(Command::ActivateDetailView(4));
     drive(&mut app, &runtime, requests).await;
     let screen = render_to_text(app.state(), 160, 32);
+    let text = screen.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(screen.contains("Read-only settings"), "{screen}");
-    assert!(screen.contains("Kind: container"), "{screen}");
-    assert!(screen.contains("Architecture: aarch64"), "{screen}");
-    assert!(screen.contains("Profiles: default, dev"), "{screen}");
+    assert!(text.contains("Kind: container"), "{screen}");
+    assert!(text.contains("Architecture: aarch64"), "{screen}");
+    assert!(text.contains("Profiles: default, dev"), "{screen}");
     cli.assert_exhausted();
 }
 

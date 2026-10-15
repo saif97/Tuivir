@@ -953,23 +953,40 @@ fn render_configuration(state: &AppState, focused: bool, frame: &mut Frame<'_>, 
     if let Some(error) = &draft.error {
         messages.push(Line::styled(error.as_str(), themed_style(ThemeRole::Error)));
     }
-    if actual.fields.iter().any(|field| !field.editable()) {
-        messages.push(Line::styled(
-            "Read-only settings",
-            themed_style(ThemeRole::Muted).add_modifier(Modifier::BOLD),
-        ));
-        messages.extend(
-            actual
-                .fields
-                .iter()
-                .filter(|field| !field.editable())
-                .map(|field| {
-                    Line::from(vec![
-                        Span::styled(format!("{}: ", field.label), themed_style(ThemeRole::Muted)),
-                        Span::raw(field.value.as_str()),
-                    ])
-                }),
-        );
+    let read_only_fields: Vec<_> = actual
+        .fields
+        .iter()
+        .filter(|field| !field.editable())
+        .collect();
+    if !read_only_fields.is_empty() {
+        // Keep compact terminals useful; add breathing room when it fits.
+        if usize::from(rows[4].height) > messages.len() + read_only_fields.len() + 3 {
+            messages.push(Line::default());
+        }
+        let title = " Read-only settings ";
+        let rule_width = usize::from(rows[4].width).saturating_sub(title.len() + 2);
+        messages.push(Line::from(vec![
+            Span::styled("──", themed_style(ThemeRole::Muted)),
+            Span::styled(
+                title,
+                themed_style(ThemeRole::Primary).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("─".repeat(rule_width), themed_style(ThemeRole::Muted)),
+        ]));
+        let label_width = read_only_fields
+            .iter()
+            .map(|field| field.label.len() + 1)
+            .max()
+            .unwrap_or(0);
+        messages.extend(read_only_fields.iter().map(|field| {
+            Line::from(vec![
+                Span::styled(
+                    format!("  {:label_width$}  ", format!("{}:", field.label)),
+                    themed_style(ThemeRole::Muted),
+                ),
+                Span::raw(field.value.as_str()),
+            ])
+        }));
         messages.push(Line::default());
     }
     messages.push(Line::styled(
