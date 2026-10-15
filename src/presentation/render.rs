@@ -801,9 +801,6 @@ fn render_configuration(state: &AppState, focused: bool, frame: &mut Frame<'_>, 
         let mut border = Block::default()
             .borders(Borders::ALL)
             .border_style(themed_style(role));
-        if editing {
-            border = border.title(" Editing ");
-        }
         let field_area = Rect::new(
             rows[1].x,
             rows[1].y.saturating_add(index as u16 * 3),
@@ -812,7 +809,6 @@ fn render_configuration(state: &AppState, focused: bool, frame: &mut Frame<'_>, 
         )
         .intersection(rows[1]);
         let content = border.inner(field_area);
-        frame.render_widget(border, field_area);
         let mut spans = vec![Span::styled(
             format!("{}: ", field.label),
             if field.editable() {
@@ -843,7 +839,23 @@ fn render_configuration(state: &AppState, focused: bool, frame: &mut Frame<'_>, 
         if !field.editable() {
             spans.push(Span::styled(" (read-only)", themed_style(ThemeRole::Muted)));
         }
-        frame.render_widget(Paragraph::new(Line::from(spans)), content);
+        if Line::from(spans.clone()).width() > usize::from(content.width) {
+            spans.remove(0);
+            border = border.title(if editing {
+                format!(" Editing · {} ", field.label)
+            } else {
+                format!(" {} ", field.label)
+            });
+        } else if editing {
+            border = border.title(" Editing ");
+        }
+        let line = Line::from(spans);
+        let scroll = line.width().saturating_sub(usize::from(content.width));
+        frame.render_widget(border, field_area);
+        frame.render_widget(
+            Paragraph::new(line).scroll((0, scroll.min(u16::MAX as usize) as u16)),
+            content,
+        );
     }
     let changed = actual
         .fields

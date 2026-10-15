@@ -1288,3 +1288,17 @@ async fn configuration_form_distinguishes_unsaved_values_and_shows_compact_contr
     );
     cli.assert_exhausted();
 }
+
+#[tokio::test]
+async fn narrow_configuration_keeps_memory_values_and_editing_feedback_visible() {
+    let (mut app, runtime) = docker_app(DOCKER_INITIAL).await;
+    let requests = app.invoke(Command::ActivateDetailView(4));
+    drive(&mut app, &runtime, requests).await;
+    press(&mut app, "down");
+    edit_selected_field(&mut app, "805306368");
+    press(&mut app, "enter");
+    let screen = render_to_text(app.state(), 80, 24);
+    assert!(screen.contains("805306368▏"), "{screen}");
+    assert!(screen.contains("1 unsaved change"), "{screen}");
+    assert!(screen.contains("Editing"), "{screen}");
+}
