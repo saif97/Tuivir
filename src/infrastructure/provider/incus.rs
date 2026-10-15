@@ -383,6 +383,20 @@ impl ProviderWorkspace for IncusWorkspace {
                         .join(", "),
                 ));
             }
+            let mut excluded = vec![
+                "/name",
+                "/status",
+                "/type",
+                "/architecture",
+                "/profiles",
+                "/config",
+                "/expanded_config/limits.cpu",
+                "/expanded_config/limits.memory",
+            ];
+            if row.get("expanded_devices").is_some() {
+                excluded.push("/devices");
+            }
+            super::configuration::append_native_fields(&mut configuration.fields, row, &excluded);
             Ok(configuration)
         })
     }
@@ -626,7 +640,6 @@ fn instance_detail_command<'a>(
 fn instance_detail_views() -> Vec<DetailView> {
     vec![
         DetailView::new(INFO_VIEW_ID, "Info"),
-        DetailView::new(CONFIG_VIEW_ID, "Config"),
         DetailView::new(CONSOLE_LOG_VIEW_ID, "Console Log"),
         DetailView::configuration(),
     ]

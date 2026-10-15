@@ -26,6 +26,21 @@ async fn drive(app: &mut App, runtime: &ProviderRuntime, requests: Vec<ProviderR
     }
 }
 
+fn open_settings(app: &mut App) -> Vec<ProviderRequest> {
+    let tuivir::application::WorkspacePresentation::Ready(view) =
+        app.state().active_workspace().unwrap().presentation()
+    else {
+        panic!("Workspace not loaded")
+    };
+    let index = view
+        .detail_views
+        .iter()
+        .position(|view| view.is_configuration())
+        .unwrap()
+        + 1;
+    app.invoke(Command::ActivateDetailView(index))
+}
+
 async fn docker_app(inspect: &str) -> (App, ProviderRuntime) {
     let (app, runtime, _) = docker_app_with(inspect, Vec::new()).await;
     (app, runtime)
@@ -111,7 +126,7 @@ async fn docker_app_with_registry(
 async fn configuration_tab_displays_current_docker_limits_with_units() {
     let (mut app, runtime) = docker_app(r#"[{"HostConfig":{"NanoCpus":1500000000,"Memory":536870912,"MemorySwap":1073741824},"State":{"Status":"running"}}]"#).await;
     app.invoke(Command::FocusDetails);
-    let requests = app.invoke(Command::ActivateDetailView(4));
+    let requests = open_settings(&mut app);
     drive(&mut app, &runtime, requests).await;
     let screen = render_to_text(app.state(), 140, 32);
     assert!(screen.contains("CPU limit (CPUs): 1.5"), "{screen}");
@@ -130,7 +145,7 @@ fn press(app: &mut App, spelling: &str) -> Vec<ProviderRequest> {
 #[tokio::test]
 async fn typing_configuration_retains_an_unapplied_draft_across_navigation() {
     let (mut app, runtime) = docker_app(r#"[{"HostConfig":{"NanoCpus":1500000000,"Memory":536870912},"State":{"Status":"running"}}]"#).await;
-    let requests = app.invoke(Command::ActivateDetailView(4));
+    let requests = open_settings(&mut app);
     drive(&mut app, &runtime, requests).await;
     press(&mut app, "enter");
     press(&mut app, "ctrl+u");
@@ -149,7 +164,7 @@ async fn typing_configuration_retains_an_unapplied_draft_across_navigation() {
 #[tokio::test]
 async fn invalid_cpu_is_explained_without_dispatching_provider_work() {
     let (mut app, runtime) = docker_app(r#"[{"HostConfig":{"NanoCpus":1500000000,"Memory":536870912},"State":{"Status":"running"}}]"#).await;
-    let requests = app.invoke(Command::ActivateDetailView(4));
+    let requests = open_settings(&mut app);
     drive(&mut app, &runtime, requests).await;
     press(&mut app, "enter");
     press(&mut app, "ctrl+u");
@@ -168,7 +183,7 @@ async fn invalid_cpu_is_explained_without_dispatching_provider_work() {
 #[tokio::test]
 async fn apply_requires_review_of_old_and_new_values_and_can_be_cancelled() {
     let (mut app, runtime) = docker_app(r#"[{"HostConfig":{"NanoCpus":1500000000,"Memory":536870912},"State":{"Status":"running"}}]"#).await;
-    let requests = app.invoke(Command::ActivateDetailView(4));
+    let requests = open_settings(&mut app);
     drive(&mut app, &runtime, requests).await;
     press(&mut app, "enter");
     press(&mut app, "ctrl+u");
@@ -236,7 +251,7 @@ fn docker_refresh() -> Vec<(
 const DOCKER_INITIAL: &str = r#"[{"HostConfig":{"NanoCpus":1500000000,"Memory":536870912,"MemorySwap":1073741824},"State":{"Status":"running"}}]"#;
 const DOCKER_UPDATED: &str = r#"[{"HostConfig":{"NanoCpus":2000000000,"Memory":536870912,"MemorySwap":1073741824},"State":{"Status":"running"}}]"#;
 async fn edit_cpu(app: &mut App, runtime: &ProviderRuntime, value: &str) {
-    let requests = app.invoke(Command::ActivateDetailView(4));
+    let requests = open_settings(app);
     drive(app, runtime, requests).await;
     press(app, "enter");
     press(app, "ctrl+u");
@@ -445,7 +460,7 @@ async fn incus_app_with_capabilities(
 async fn incus_configuration_displays_effective_limits_with_provider_units() {
     let initial = r#"[{"name":"api","type":"container","status":"Running","expanded_config":{"limits.cpu":"0-1,3","limits.memory":"50%"}}]"#;
     let (mut app, runtime, cli) = incus_app(initial, vec![]).await;
-    let requests = app.invoke(Command::ActivateDetailView(4));
+    let requests = open_settings(&mut app);
     drive(&mut app, &runtime, requests).await;
     let screen = render_to_text(app.state(), 160, 32);
     assert!(screen.contains("CPU count or IDs: 0-1,3"), "{screen}");
@@ -678,7 +693,7 @@ async fn refresh_retries_a_failed_configuration_load() {
     let mut extra = vec![inspect_response(DOCKER_INITIAL)];
     extra.extend(docker_refresh());
     let (mut app, runtime, cli) = docker_app_with("not json", extra).await;
-    let requests = app.invoke(Command::ActivateDetailView(4));
+    let requests = open_settings(&mut app);
     drive(&mut app, &runtime, requests).await;
     assert!(render_to_text(app.state(), 160, 32).contains("Malformed Docker configuration"));
     let requests = press(&mut app, "ctrl+r");
@@ -750,7 +765,7 @@ async fn dispatched_configuration_stays_with_its_original_resource_and_freezes_i
 #[tokio::test]
 async fn configuration_form_keeps_contextual_help_and_detail_tab_navigation() {
     let (mut app, runtime) = docker_app(DOCKER_INITIAL).await;
-    let requests = app.invoke(Command::ActivateDetailView(4));
+    let requests = open_settings(&mut app);
     drive(&mut app, &runtime, requests).await;
     press(&mut app, "?");
     let screen = render_to_text(app.state(), 180, 36);
@@ -908,7 +923,7 @@ async fn existing_docker_cpu_quota_limits_are_loaded_and_updated_in_their_native
     ];
     extra.extend(docker_refresh());
     let (mut app, runtime, cli) = docker_app_with(initial, extra).await;
-    let requests = app.invoke(Command::ActivateDetailView(4));
+    let requests = open_settings(&mut app);
     drive(&mut app, &runtime, requests).await;
     let screen = render_to_text(app.state(), 180, 36);
     assert!(screen.contains("CPU limit (CPUs): 0.5"), "{screen}");
@@ -933,7 +948,7 @@ async fn configuration_instructions_follow_effective_keybindings() {
     ])
     .unwrap();
     let (mut app, runtime, cli) = docker_app_with_registry(DOCKER_INITIAL, vec![], registry).await;
-    let requests = app.invoke(Command::ActivateDetailView(4));
+    let requests = open_settings(&mut app);
     drive(&mut app, &runtime, requests).await;
     let screen = render_to_text(app.state(), 180, 36);
     assert!(!screen.contains("ctrl+a Apply"), "{screen}");
@@ -1302,7 +1317,7 @@ async fn configuration_form_distinguishes_unsaved_values_and_shows_compact_contr
 #[tokio::test]
 async fn narrow_configuration_keeps_memory_values_and_editing_feedback_visible() {
     let (mut app, runtime) = docker_app(DOCKER_INITIAL).await;
-    let requests = app.invoke(Command::ActivateDetailView(4));
+    let requests = open_settings(&mut app);
     drive(&mut app, &runtime, requests).await;
     press(&mut app, "down");
     edit_selected_field(&mut app, "0.75");
@@ -1425,7 +1440,7 @@ async fn tart_separates_editable_settings_from_read_only_details_and_skips_their
 async fn docker_configuration_includes_read_only_image_and_restart_policy() {
     let initial = r#"[{"Config":{"Image":"alpine:3.23"},"HostConfig":{"NanoCpus":1500000000,"Memory":536870912,"RestartPolicy":{"Name":"unless-stopped"}},"State":{"Status":"running"}}]"#;
     let (mut app, runtime) = docker_app(initial).await;
-    let requests = app.invoke(Command::ActivateDetailView(4));
+    let requests = open_settings(&mut app);
     drive(&mut app, &runtime, requests).await;
     let screen = render_to_text(app.state(), 160, 32);
     let text = screen.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -1438,7 +1453,7 @@ async fn docker_configuration_includes_read_only_image_and_restart_policy() {
 async fn incus_configuration_shows_kind_architecture_and_profiles_as_read_only() {
     let initial = r#"[{"name":"api","type":"container","architecture":"aarch64","profiles":["default","dev"],"status":"Running","expanded_config":{"limits.cpu":"2","limits.memory":"512MiB"}}]"#;
     let (mut app, runtime, cli) = incus_app(initial, vec![]).await;
-    let requests = app.invoke(Command::ActivateDetailView(4));
+    let requests = open_settings(&mut app);
     drive(&mut app, &runtime, requests).await;
     let screen = render_to_text(app.state(), 160, 32);
     let text = screen.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -1497,6 +1512,42 @@ async fn tart_settings_merges_native_fields_without_a_duplicate_config_tab() {
             .filter(|field| field.label.contains("Memory"))
             .count(),
         1
+    );
+    cli.assert_exhausted();
+}
+
+#[tokio::test]
+async fn incus_settings_includes_remaining_effective_config_and_devices() {
+    let initial = r#"[{"name":"api","type":"container","status":"Running","expanded_config":{"limits.cpu":"2","limits.memory":"1GiB","security.nesting":"true"},"expanded_devices":{"root":{"type":"disk","path":"/","pool":"default"}}}]"#;
+    let (mut app, runtime, cli) = incus_app(initial, vec![]).await;
+    let requests = open_settings(&mut app);
+    drive(&mut app, &runtime, requests).await;
+    let screen = render_to_text(app.state(), 180, 40);
+    let tabs = screen
+        .lines()
+        .find(|line| line.contains("Overview"))
+        .unwrap();
+    assert!(!tabs.contains("Config"), "{tabs}");
+    assert!(
+        screen.contains("security.nesting:") && screen.contains("true"),
+        "{screen}"
+    );
+    assert!(
+        screen.contains("expanded_devices.root.pool:") && screen.contains("default"),
+        "{screen}"
+    );
+    let fields = &app
+        .state()
+        .selected_configuration()
+        .unwrap()
+        .actual
+        .as_ref()
+        .unwrap()
+        .fields;
+    assert!(
+        !fields.iter().any(
+            |field| field.label.contains("limits.cpu") || field.label.contains("limits.memory")
+        )
     );
     cli.assert_exhausted();
 }
