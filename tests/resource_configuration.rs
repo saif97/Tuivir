@@ -449,10 +449,7 @@ async fn incus_configuration_displays_effective_limits_with_provider_units() {
     drive(&mut app, &runtime, requests).await;
     let screen = render_to_text(app.state(), 160, 32);
     assert!(screen.contains("CPU count or IDs: 0-1,3"), "{screen}");
-    assert!(
-        screen.contains("Memory limit (bytes, units or %): 50%"),
-        "{screen}"
-    );
+    assert!(screen.contains("Memory limit (GiB or %): 50%"), "{screen}");
     assert!(screen.contains("selected instance"), "{screen}");
     cli.assert_exhausted();
 }
@@ -500,7 +497,10 @@ async fn incus_partial_success_cleans_only_the_confirmed_field_and_keeps_the_err
             success(""),
         ),
         (
-            ProcessSpec::new("incus", &["config", "set", "api", "limits.memory=1GiB"]),
+            ProcessSpec::new(
+                "incus",
+                &["config", "set", "api", "limits.memory=1073741824"],
+            ),
             common::failure("memory limit rejected"),
         ),
         incus_read(partial),
@@ -511,7 +511,7 @@ async fn incus_partial_success_cleans_only_the_confirmed_field_and_keeps_the_err
     press(&mut app, "down");
     press(&mut app, "enter");
     press(&mut app, "ctrl+u");
-    for c in "1GiB".chars() {
+    for c in "1".chars() {
         press(&mut app, &c.to_string());
     }
     press(&mut app, "enter");
@@ -521,7 +521,7 @@ async fn incus_partial_success_cleans_only_the_confirmed_field_and_keeps_the_err
     let screen = render_to_text(app.state(), 160, 32);
     assert!(screen.contains("CPU count or IDs: 4"), "{screen}");
     assert!(!screen.contains("2 → 4"), "{screen}");
-    assert!(screen.contains("512MiB → 1GiB"), "{screen}");
+    assert!(screen.contains("0.5 → 1"), "{screen}");
     assert!(screen.contains("memory limit rejected"), "{screen}");
     cli.assert_exhausted();
 }
@@ -786,7 +786,10 @@ async fn incus_without_memory_hotplug_stops_and_restarts_a_vm_for_memory_changes
         incus_read(initial),
         (ProcessSpec::new("incus", &["stop", "api"]), success("")),
         (
-            ProcessSpec::new("incus", &["config", "set", "api", "limits.memory=512MiB"]),
+            ProcessSpec::new(
+                "incus",
+                &["config", "set", "api", "limits.memory=536870912"],
+            ),
             success(""),
         ),
         (ProcessSpec::new("incus", &["start", "api"]), success("")),
@@ -799,7 +802,7 @@ async fn incus_without_memory_hotplug_stops_and_restarts_a_vm_for_memory_changes
     press(&mut app, "down");
     press(&mut app, "enter");
     press(&mut app, "ctrl+u");
-    for c in "512MiB".chars() {
+    for c in "0.5".chars() {
         press(&mut app, &c.to_string());
     }
     press(&mut app, "enter");
@@ -855,7 +858,10 @@ async fn huge_page_vm_memory_changes_disclose_downtime_even_with_hotplug_support
             incus_read(initial),
             (ProcessSpec::new("incus", &["stop", "api"]), success("")),
             (
-                ProcessSpec::new("incus", &["config", "set", "api", "limits.memory=512MiB"]),
+                ProcessSpec::new(
+                    "incus",
+                    &["config", "set", "api", "limits.memory=536870912"],
+                ),
                 success(""),
             ),
             (ProcessSpec::new("incus", &["start", "api"]), success("")),
@@ -867,7 +873,7 @@ async fn huge_page_vm_memory_changes_disclose_downtime_even_with_hotplug_support
         press(&mut app, "down");
         press(&mut app, "enter");
         press(&mut app, "ctrl+u");
-        for c in "512MiB".chars() {
+        for c in "0.5".chars() {
             press(&mut app, &c.to_string());
         }
         press(&mut app, "enter");

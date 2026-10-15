@@ -13,9 +13,13 @@ impl MemoryGiB {
         self.0
     }
 
+    pub fn from_native_quantity(value: &str) -> Option<Self> {
+        quantity_bytes(value).map(Self)
+    }
+
     pub fn parse(value: &str) -> Option<Self> {
         if value.chars().any(|c| c.is_ascii_alphabetic()) {
-            return quantity_bytes(value).map(Self);
+            return Self::from_native_quantity(value);
         }
         let (whole, fraction) = value.split_once('.').unwrap_or((value, ""));
         let whole = if whole.is_empty() && !fraction.is_empty() {

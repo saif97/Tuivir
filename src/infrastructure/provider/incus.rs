@@ -174,7 +174,16 @@ impl ProviderWorkspace for IncusWorkspace {
                     if !["limits.cpu", "limits.memory"].contains(&change.field.id.as_str()) {
                         return Err(WorkspaceError::new("Unsupported Incus configuration field"));
                     }
-                    let assignment = format!("{}={}", change.field.id, change.proposed);
+                    let proposed =
+                        if change.field.id == "limits.memory" && !change.proposed.ends_with('%') {
+                            crate::application::MemoryGiB::parse(&change.proposed)
+                                .ok_or_else(|| WorkspaceError::new("Invalid memory size in GiB"))?
+                                .bytes()
+                                .to_string()
+                        } else {
+                            change.proposed.clone()
+                        };
+                    let assignment = format!("{}={proposed}", change.field.id);
                     cli.run(ProcessSpec::new(
                         "incus",
                         &["config", "set", &target.resource_id().0, &assignment],
@@ -324,9 +333,28 @@ impl ProviderWorkspace for IncusWorkspace {
                     ConfigurationField {
                         id: "limits.memory".into(),
                         update: memory_update,
-                        label: "Memory limit (bytes, units or %)".into(),
-                        value: value("limits.memory", if vm { "1GiB" } else { "" }),
-                        constraint: FieldConstraint::Quantity { percent: true },
+                        label: "Memory limit (GiB or %)".into(),
+                        value: {
+                            let native = value("limits.memory", if vm { "1GiB" } else { "" });
+                            if native.is_empty() || native.ends_with('%') {
+                                native
+                            } else {
+                                crate::application::MemoryGiB::from_native_quantity(&native)
+                                    .ok_or_else(|| {
+                                        WorkspaceError::new(
+                                            "Incus returned an unsupported memory size",
+                                        )
+                                    })?
+                                    .to_string()
+                            }
+                        },
+                        constraint: FieldConstraint::MemoryGiB {
+                            minimum_bytes: 1,
+                            maximum_bytes: None,
+                            step_bytes: 1,
+                            unlimited: false,
+                            percent: true,
+                        },
                     },
                 ],
                 state: incus_resource_state(row["status"].as_str().unwrap_or("unknown")),
