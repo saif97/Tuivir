@@ -109,7 +109,13 @@ impl ProviderWorkspace for DockerWorkspace {
                             ]);
                         }
                     }
-                    "memory" => args.extend(["--memory".into(), change.proposed.clone()]),
+                    "memory" => args.extend([
+                        "--memory".into(),
+                        crate::application::MemoryGiB::parse(&change.proposed)
+                            .ok_or_else(|| WorkspaceError::new("Invalid memory size in GiB"))?
+                            .bytes()
+                            .to_string(),
+                    ]),
                     _ => {
                         return Err(WorkspaceError::new(
                             "Unsupported Docker configuration field",
@@ -204,17 +210,19 @@ impl ProviderWorkspace for DockerWorkspace {
                     ConfigurationField {
                         id: "memory".into(),
                         update: ConfigurationUpdate::Live,
-                        constraint: FieldConstraint::Bytes {
-                            minimum: 6 * 1024 * 1024,
+                        constraint: FieldConstraint::MemoryGiB {
+                            minimum_bytes: 6 * 1024 * 1024,
                             unlimited: true,
-                            maximum: host["MemorySwap"].as_u64().filter(|n| *n > 0),
+                            maximum_bytes: host["MemorySwap"].as_u64().filter(|n| *n > 0),
+                            step_bytes: 1,
+                            percent: false,
                         },
-                        label: "Memory limit (bytes)".into(),
-                        value: host["Memory"].as_u64().unwrap_or(0).to_string(),
+                        label: "Memory limit (GiB)".into(),
+                        value: crate::application::MemoryGiB::from_bytes(host["Memory"].as_u64().unwrap_or(0)).to_string(),
                     },
                 ],
                 state: docker_resource_state(row["State"]["Status"].as_str().unwrap_or("unknown")),
-                notice: "Apply changes explicitly; no restart required.".into(),
+                notice: "Live updates; no restart required. Memory: 0 is unlimited; the existing memory+swap limit still applies.".into(),
             })
         })
     }

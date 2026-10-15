@@ -115,11 +115,8 @@ async fn configuration_tab_displays_current_docker_limits_with_units() {
     drive(&mut app, &runtime, requests).await;
     let screen = render_to_text(app.state(), 140, 32);
     assert!(screen.contains("CPU limit (CPUs): 1.5"), "{screen}");
-    assert!(
-        screen.contains("Memory limit (bytes): 536870912"),
-        "{screen}"
-    );
-    assert!(screen.contains("Apply"), "{screen}");
+    assert!(screen.contains("Memory limit (GiB): 0.5"), "{screen}");
+    assert!(screen.contains("Review"), "{screen}");
 }
 
 fn press(app: &mut App, spelling: &str) -> Vec<ProviderRequest> {
@@ -300,7 +297,7 @@ async fn confirmed_docker_memory_updates_without_changing_cpu_or_restarting() {
     press(&mut app, "down");
     press(&mut app, "enter");
     press(&mut app, "ctrl+u");
-    for c in "805306368".chars() {
+    for c in "0.75".chars() {
         press(&mut app, &c.to_string());
     }
     press(&mut app, "enter");
@@ -308,10 +305,7 @@ async fn confirmed_docker_memory_updates_without_changing_cpu_or_restarting() {
     let requests = press(&mut app, "enter");
     drive(&mut app, &runtime, requests).await;
     let screen = render_to_text(app.state(), 160, 32);
-    assert!(
-        screen.contains("Memory limit (bytes): 805306368"),
-        "{screen}"
-    );
+    assert!(screen.contains("Memory limit (GiB): 0.75"), "{screen}");
     assert!(screen.contains("CPU limit (CPUs): 1.5"), "{screen}");
     cli.assert_exhausted();
 }
@@ -360,10 +354,7 @@ async fn successful_apply_reconciles_equivalent_cpu_input_and_unedited_external_
         !screen.contains('→'),
         "equivalent values and untouched fields must be clean:\n{screen}"
     );
-    assert!(
-        screen.contains("Memory limit (bytes): 805306368"),
-        "{screen}"
-    );
+    assert!(screen.contains("Memory limit (GiB): 0.75"), "{screen}");
     cli.assert_exhausted();
 }
 
@@ -710,7 +701,7 @@ async fn docker_memory_validation_explains_the_existing_memory_swap_ceiling() {
     press(&mut app, "down");
     press(&mut app, "enter");
     press(&mut app, "ctrl+u");
-    for c in "2147483648".chars() {
+    for c in "2".chars() {
         press(&mut app, &c.to_string());
     }
     press(&mut app, "enter");
@@ -718,7 +709,7 @@ async fn docker_memory_validation_explains_the_existing_memory_swap_ceiling() {
     assert!(app.state().confirmation.is_none());
     let screen = render_to_text(app.state(), 180, 36);
     assert!(
-        screen.contains("existing memory+swap limit (1073741824 bytes)"),
+        screen.contains("existing Provider limit (1 GiB)"),
         "{screen}"
     );
 }
@@ -1307,10 +1298,10 @@ async fn narrow_configuration_keeps_memory_values_and_editing_feedback_visible()
     let requests = app.invoke(Command::ActivateDetailView(4));
     drive(&mut app, &runtime, requests).await;
     press(&mut app, "down");
-    edit_selected_field(&mut app, "805306368");
+    edit_selected_field(&mut app, "0.75");
     press(&mut app, "enter");
     let screen = render_to_text(app.state(), 80, 24);
-    assert!(screen.contains("805306368▏"), "{screen}");
+    assert!(screen.contains("0.75▏"), "{screen}");
     assert!(screen.contains("1 unsaved change"), "{screen}");
     assert!(screen.contains("Editing"), "{screen}");
 }
