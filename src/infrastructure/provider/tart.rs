@@ -9,7 +9,10 @@ use super::{
     provider_cli_error, require_resource_state,
 };
 use crate::{
-    application::ResourceShellProcess,
+    application::{
+        ConfigurationField, ConfigurationUpdate, FieldConstraint, ResourceConfiguration,
+        ResourceShellProcess,
+    },
     infrastructure::process::{CliRunner, ProcessError, ProcessSpec},
 };
 
@@ -53,6 +56,64 @@ fn listing_error(message: impl AsRef<str>) -> WorkspaceError {
 }
 
 impl ProviderWorkspace for TartWorkspace {
+    fn load_configuration<'a>(
+        &'a self,
+        cli: &'a dyn CliRunner,
+        target: &'a ResourceTarget,
+    ) -> Pin<Box<dyn Future<Output = Result<ResourceConfiguration, WorkspaceError>> + Send + 'a>>
+    {
+        Box::pin(async move {
+            if target.panel_id().0 != "vms" {
+                return Err(WorkspaceError::new(
+                    "Tart configuration is only available for local VMs",
+                ));
+            }
+            #[derive(Deserialize)]
+            #[serde(rename_all = "PascalCase")]
+            struct Configuration {
+                #[serde(rename = "CPU")]
+                cpu: u16,
+                memory: u64,
+                state: Option<String>,
+                running: Option<bool>,
+            }
+            let output = cli
+                .run(ProcessSpec::new(
+                    "tart",
+                    &["get", "--format", "json", "--", &target.resource_id().0],
+                ))
+                .await
+                .map_err(|error| {
+                    WorkspaceError::new(provider_cli_error(
+                        "Tart",
+                        &error,
+                        "Tart could not load VM configuration",
+                    ))
+                })?;
+            let row: Configuration = serde_json::from_str(&output.stdout).map_err(|error| {
+                WorkspaceError::new(format!("Malformed Tart configuration: {error}"))
+            })?;
+            let state = row
+                .state
+                .as_deref()
+                .map(resource_state)
+                .unwrap_or(match row.running {
+                    Some(true) => ResourceState::Running,
+                    Some(false) => ResourceState::Stopped,
+                    None => ResourceState::Unknown,
+                });
+            Ok(ResourceConfiguration {
+                fields: vec![
+                    ConfigurationField { id: "cpu".into(), label: "CPU count".into(), value: row.cpu.to_string(), constraint: FieldConstraint::ReadOnly, update: ConfigurationUpdate::Stopped },
+                    ConfigurationField { id: "memory".into(), label: "Memory (MiB)".into(), value: row.memory.to_string(), constraint: FieldConstraint::ReadOnly, update: ConfigurationUpdate::Stopped },
+                ],
+                state,
+                notice: "Tart CPU/memory changes require a stopped VM. Guest minimums are checked by Tart.".into(),
+                stop_preserves_resource: true,
+            })
+        })
+    }
+
     fn id(&self) -> ProviderId {
         ProviderId::new("tart")
     }
@@ -100,7 +161,10 @@ impl ProviderWorkspace for TartWorkspace {
             let mut vms = ResourcePanel {
                 id: ResourcePanelId::new("vms"),
                 title: "VMs".into(),
-                detail_views: vec![DetailView::new("config", "Config")],
+                detail_views: vec![
+                    DetailView::new("config", "Config"),
+                    DetailView::configuration(),
+                ],
                 resources: vec![],
             };
             let mut images = ResourcePanel {

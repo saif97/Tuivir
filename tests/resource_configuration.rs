@@ -951,3 +951,58 @@ async fn configuration_instructions_follow_effective_keybindings() {
     assert!(!screen.contains("ctrl+u clears"), "{screen}");
     cli.assert_exhausted();
 }
+
+const TART_INITIAL: &str = r#"{"CPU":2,"Memory":4096,"Running":true,"State":"running"}"#;
+const TART_LIST: &str =
+    r#"[{"Source":"local","Name":"mac","Size":20,"Accessed":"now","State":"running"}]"#;
+type CliResponse = (
+    ProcessSpec,
+    Result<
+        tuivir::infrastructure::process::ProcessOutput,
+        tuivir::infrastructure::process::ProcessError,
+    >,
+);
+
+fn tart_read(json: &str) -> CliResponse {
+    (
+        ProcessSpec::new("tart", &["get", "--format", "json", "--", "mac"]),
+        success(json),
+    )
+}
+
+async fn tart_app(
+    initial: &str,
+    extra: Vec<CliResponse>,
+) -> (App, ProviderRuntime, Arc<FixtureCli>) {
+    let cli = Arc::new(FixtureCli::new(
+        [
+            (ProcessSpec::new("tart", &["--version"]), success("2.31.0")),
+            (
+                ProcessSpec::new("tart", &["list", "--format", "json"]),
+                success(TART_LIST),
+            ),
+            tart_read(initial),
+        ]
+        .into_iter()
+        .chain(extra),
+    ));
+    let runtime = ProviderRuntime::new(
+        vec![Arc::new(tuivir::infrastructure::provider::TartWorkspace)],
+        cli.clone(),
+    );
+    let mut app = App::new();
+    let requests = app.update(runtime.discover().await.remove(0).into_event());
+    drive(&mut app, &runtime, requests).await;
+    let requests = app.invoke(Command::ActivateDetailView(2));
+    drive(&mut app, &runtime, requests).await;
+    (app, runtime, cli)
+}
+
+#[tokio::test]
+async fn tart_configuration_displays_cpu_count_and_memory_in_native_units() {
+    let (app, _, cli) = tart_app(TART_INITIAL, vec![]).await;
+    let screen = render_to_text(app.state(), 180, 36);
+    assert!(screen.contains("CPU count: 2"), "{screen}");
+    assert!(screen.contains("Memory (MiB): 4096"), "{screen}");
+    cli.assert_exhausted();
+}
