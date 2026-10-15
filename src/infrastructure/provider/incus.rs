@@ -313,7 +313,7 @@ impl ProviderWorkspace for IncusWorkspace {
             } else {
                 ConfigurationUpdate::Live
             };
-            Ok(ResourceConfiguration {
+            let mut configuration = ResourceConfiguration {
                 stop_preserves_resource: row["ephemeral"].as_bool() != Some(true),
                 fields: vec![
                     ConfigurationField {
@@ -361,7 +361,29 @@ impl ProviderWorkspace for IncusWorkspace {
                 notice:
                     "Edits set overrides on the selected instance; shared profiles stay unchanged."
                         .into(),
-            })
+            };
+            for (id, label, value) in [
+                ("kind", "Kind", row["type"].as_str()),
+                ("architecture", "Architecture", row["architecture"].as_str()),
+            ] {
+                if let Some(value) = value {
+                    configuration
+                        .fields
+                        .push(ConfigurationField::read_only(id, label, value));
+                }
+            }
+            if let Some(profiles) = row["profiles"].as_array() {
+                configuration.fields.push(ConfigurationField::read_only(
+                    "profiles",
+                    "Profiles",
+                    profiles
+                        .iter()
+                        .filter_map(serde_json::Value::as_str)
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ));
+            }
+            Ok(configuration)
         })
     }
 

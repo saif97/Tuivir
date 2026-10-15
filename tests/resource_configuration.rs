@@ -1404,3 +1404,17 @@ async fn docker_configuration_includes_read_only_image_and_restart_policy() {
         "{screen}"
     );
 }
+
+#[tokio::test]
+async fn incus_configuration_shows_kind_architecture_and_profiles_as_read_only() {
+    let initial = r#"[{"name":"api","type":"container","architecture":"aarch64","profiles":["default","dev"],"status":"Running","expanded_config":{"limits.cpu":"2","limits.memory":"512MiB"}}]"#;
+    let (mut app, runtime, cli) = incus_app(initial, vec![]).await;
+    let requests = app.invoke(Command::ActivateDetailView(4));
+    drive(&mut app, &runtime, requests).await;
+    let screen = render_to_text(app.state(), 160, 32);
+    assert!(screen.contains("Read-only settings"), "{screen}");
+    assert!(screen.contains("Kind: container"), "{screen}");
+    assert!(screen.contains("Architecture: aarch64"), "{screen}");
+    assert!(screen.contains("Profiles: default, dev"), "{screen}");
+    cli.assert_exhausted();
+}
