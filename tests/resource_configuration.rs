@@ -576,11 +576,21 @@ async fn sandbox_configuration_explains_read_only_limits_without_writes() {
         ),
         (
             ProcessSpec::new("sbx", &["ls", "--json"]),
-            success(include_str!("fixtures/docker-sandbox/sandboxes.json")),
+            success(
+                &include_str!("fixtures/docker-sandbox/sandboxes.json").replace(
+                    "\"protocol\": \"tcp\"",
+                    "\"protocol\": \"tcp\", \"description\": \"forwarded\"",
+                ),
+            ),
         ),
         (
             ProcessSpec::new("sbx", &["ls", "--json"]),
-            success(include_str!("fixtures/docker-sandbox/sandboxes.json")),
+            success(
+                &include_str!("fixtures/docker-sandbox/sandboxes.json").replace(
+                    "\"protocol\": \"tcp\"",
+                    "\"protocol\": \"tcp\", \"description\": \"forwarded\"",
+                ),
+            ),
         ),
     ]));
     let runtime = ProviderRuntime::new(
@@ -603,6 +613,17 @@ async fn sandbox_configuration_explains_read_only_limits_without_writes() {
     assert!(text.contains("CPU count: not reported"), "{screen}");
     assert!(text.contains("agent: claude"), "{screen}");
     assert!(screen.contains("/home/vibebox/projects/tuivir"), "{screen}");
+    assert!(
+        app.state()
+            .selected_configuration()
+            .unwrap()
+            .actual
+            .as_ref()
+            .unwrap()
+            .fields
+            .iter()
+            .any(|field| field.label == "ports" && field.value.contains("forwarded"))
+    );
     assert!(press(&mut app, "enter").is_empty());
     assert!(press(&mut app, "ctrl+a").is_empty());
     assert!(app.state().confirmation.is_none());

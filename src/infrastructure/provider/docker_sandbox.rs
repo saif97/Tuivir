@@ -59,6 +59,8 @@ struct SandboxPort {
     host_port: u16,
     sandbox_port: u16,
     protocol: String,
+    #[serde(flatten)]
+    additional_fields: serde_json::Map<String, serde_json::Value>,
 }
 
 /// The summary fields shown beside a selected sandbox.
