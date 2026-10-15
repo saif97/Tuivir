@@ -152,6 +152,10 @@ impl ProviderWorkspace for TartWorkspace {
                 memory: u64,
                 state: Option<String>,
                 running: Option<bool>,
+                #[serde(rename = "OS")]
+                os: Option<String>,
+                disk: Option<u64>,
+                display: Option<String>,
             }
             let output = cli
                 .run(ProcessSpec::new(
@@ -178,7 +182,7 @@ impl ProviderWorkspace for TartWorkspace {
                     Some(false) => ResourceState::Stopped,
                     None => ResourceState::Unknown,
                 });
-            Ok(ResourceConfiguration {
+            let mut configuration = ResourceConfiguration {
                 fields: vec![
                     ConfigurationField { id: "cpu".into(), label: "CPU count".into(), value: row.cpu.to_string(), constraint: FieldConstraint::Integer { minimum: 1, maximum: u16::MAX as u64 }, update: ConfigurationUpdate::Stopped },
                     ConfigurationField { id: "memory".into(), label: "Memory (GiB)".into(), value: crate::application::MemoryGiB::from_bytes(row.memory.checked_mul(1024 * 1024).ok_or_else(|| WorkspaceError::new("Tart memory size is too large"))?).to_string(), constraint: FieldConstraint::MemoryGiB { minimum_bytes: 1024 * 1024, maximum_bytes: None, step_bytes: 1024 * 1024, unlimited: false, percent: false }, update: ConfigurationUpdate::Stopped },
@@ -186,7 +190,25 @@ impl ProviderWorkspace for TartWorkspace {
                 state,
                 notice: "Tart CPU/memory changes require a stopped VM. Guest minimums are checked by Tart.".into(),
                 stop_preserves_resource: true,
-            })
+            };
+            if let Some(os) = row.os {
+                configuration
+                    .fields
+                    .push(ConfigurationField::read_only("os", "OS", os));
+            }
+            if let Some(disk) = row.disk {
+                configuration.fields.push(ConfigurationField::read_only(
+                    "disk",
+                    "Disk capacity (GB)",
+                    disk.to_string(),
+                ));
+            }
+            if let Some(display) = row.display {
+                configuration
+                    .fields
+                    .push(ConfigurationField::read_only("display", "Display", display));
+            }
+            Ok(configuration)
         })
     }
 

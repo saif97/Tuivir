@@ -807,11 +807,22 @@ impl App {
                             }
                             Command::FinishConfigurationField => draft.editing = false,
                             Command::NextConfigurationField => {
-                                draft.selected_field = (draft.selected_field + 1)
-                                    .min(draft.proposed.len().saturating_sub(1))
+                                if let Some(actual) = &draft.actual
+                                    && let Some(index) = (draft.selected_field + 1
+                                        ..actual.fields.len())
+                                        .find(|index| actual.fields[*index].editable())
+                                {
+                                    draft.selected_field = index;
+                                }
                             }
                             Command::PreviousConfigurationField => {
-                                draft.selected_field = draft.selected_field.saturating_sub(1)
+                                if let Some(actual) = &draft.actual
+                                    && let Some(index) = (0..draft.selected_field)
+                                        .rev()
+                                        .find(|index| actual.fields[*index].editable())
+                                {
+                                    draft.selected_field = index;
+                                }
                             }
                             _ if draft.editing => {
                                 if let Some(value) = draft.proposed.get_mut(draft.selected_field) {

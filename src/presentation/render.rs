@@ -821,14 +821,20 @@ fn render_configuration(state: &AppState, focused: bool, frame: &mut Frame<'_>, 
         area.width.saturating_sub(2),
         area.height.saturating_sub(1),
     );
-    let field_height = if usize::from(area.height) < actual.fields.len() * 3 + 5 {
+    let editable_count = actual
+        .fields
+        .iter()
+        .filter(|field| field.editable())
+        .count();
+    let field_height = if usize::from(area.height) < editable_count * 3 + 6 {
         1
     } else {
         3
     };
     let rows = Layout::vertical([
         Constraint::Length(1),
-        Constraint::Length((actual.fields.len() * field_height) as u16),
+        Constraint::Length(u16::from(editable_count > 0)),
+        Constraint::Length((editable_count * field_height) as u16),
         Constraint::Length(1),
         Constraint::Min(0),
     ])
@@ -838,7 +844,19 @@ fn render_configuration(state: &AppState, focused: bool, frame: &mut Frame<'_>, 
             .style(resource_state_style(actual.state)),
         rows[0],
     );
-    for (index, field) in actual.fields.iter().enumerate() {
+    if editable_count > 0 {
+        frame.render_widget(
+            Paragraph::new("Editable settings").style(themed_style(ThemeRole::Muted)),
+            rows[1],
+        );
+    }
+    for (position, (index, field)) in actual
+        .fields
+        .iter()
+        .enumerate()
+        .filter(|(_, field)| field.editable())
+        .enumerate()
+    {
         let proposed = draft.proposed.get(index).unwrap_or(&field.value);
         let changed = !field.matches(proposed);
         let selected = focused && field.editable() && index == draft.selected_field;
@@ -856,12 +874,12 @@ fn render_configuration(state: &AppState, focused: bool, frame: &mut Frame<'_>, 
             })
             .border_style(themed_style(role));
         let field_area = Rect::new(
-            rows[1].x,
-            rows[1].y.saturating_add((index * field_height) as u16),
-            rows[1].width,
+            rows[2].x,
+            rows[2].y.saturating_add((position * field_height) as u16),
+            rows[2].width,
             field_height as u16,
         )
-        .intersection(rows[1]);
+        .intersection(rows[2]);
         let content = border.inner(field_area);
         let mut spans = vec![Span::styled(
             format!("{}: ", field.label),
@@ -939,7 +957,7 @@ fn render_configuration(state: &AppState, focused: bool, frame: &mut Frame<'_>, 
         } else {
             ThemeRole::Muted
         })),
-        rows[2],
+        rows[3],
     );
     let mut messages = Vec::new();
     if let Some(error) = draft.validation_error() {
@@ -948,13 +966,32 @@ fn render_configuration(state: &AppState, focused: bool, frame: &mut Frame<'_>, 
     if let Some(error) = &draft.error {
         messages.push(Line::styled(error.as_str(), themed_style(ThemeRole::Error)));
     }
+    if actual.fields.iter().any(|field| !field.editable()) {
+        messages.push(Line::styled(
+            "Read-only settings",
+            themed_style(ThemeRole::Muted).add_modifier(Modifier::BOLD),
+        ));
+        messages.extend(
+            actual
+                .fields
+                .iter()
+                .filter(|field| !field.editable())
+                .map(|field| {
+                    Line::from(vec![
+                        Span::styled(format!("{}: ", field.label), themed_style(ThemeRole::Muted)),
+                        Span::raw(field.value.as_str()),
+                    ])
+                }),
+        );
+        messages.push(Line::default());
+    }
     messages.push(Line::styled(
         actual.notice.as_str(),
         themed_style(ThemeRole::Muted),
     ));
     frame.render_widget(
         Paragraph::new(messages).wrap(ratatui::widgets::Wrap { trim: true }),
-        rows[3],
+        rows[4],
     );
 }
 

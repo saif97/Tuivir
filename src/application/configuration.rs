@@ -119,6 +119,20 @@ pub enum FieldConstraint {
     },
 }
 impl ConfigurationField {
+    pub fn read_only(
+        id: impl Into<String>,
+        label: impl Into<String>,
+        value: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+            value: value.into(),
+            constraint: FieldConstraint::ReadOnly,
+            update: ConfigurationUpdate::Live,
+        }
+    }
+
     pub fn editable(&self) -> bool {
         self.constraint != FieldConstraint::ReadOnly
     }

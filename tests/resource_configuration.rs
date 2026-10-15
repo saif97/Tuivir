@@ -585,7 +585,7 @@ async fn sandbox_configuration_explains_read_only_limits_without_writes() {
         "{screen}"
     );
     assert!(
-        screen.contains("CPU count: not reported (read-only)"),
+        screen.contains("CPU count: not reported"),
         "{screen}"
     );
     assert!(press(&mut app, "enter").is_empty());
@@ -1111,8 +1111,8 @@ async fn apple_container_configuration_shows_read_only_values_and_explains_resiz
     assert!(!help.contains("Edit field"), "{help}");
     assert!(!help.contains("Review & apply"), "{help}");
     press(&mut app, "esc");
-    assert!(screen.contains("CPU count: 2 (read-only)"), "{screen}");
-    assert!(screen.contains("Memory (GiB): 1 (read-only)"), "{screen}");
+    assert!(screen.contains("CPU count: 2"), "{screen}");
+    assert!(screen.contains("Memory (GiB): 1"), "{screen}");
     assert!(
         screen.contains("in-place CPU/memory resize is unsupported"),
         "{screen}"
@@ -1372,5 +1372,23 @@ async fn configuration_review_explains_the_target_downtime_and_apply_controls() 
     press(&mut app, "esc");
     assert!(app.state().confirmation.is_none());
     assert!(render_to_text(app.state(), 100, 22).contains("2 → 4"));
+    cli.assert_exhausted();
+}
+
+#[tokio::test]
+async fn tart_separates_editable_settings_from_read_only_details_and_skips_their_focus() {
+    let initial = r#"{"CPU":2,"Memory":4096,"State":"stopped","OS":"darwin","Disk":80,"Display":"1920x1080"}"#;
+    let (mut app, _, cli) = tart_app(initial, vec![]).await;
+    let screen = render_to_text(app.state(), 160, 32);
+    assert!(screen.contains("Editable settings"), "{screen}");
+    assert!(screen.contains("Read-only settings"), "{screen}");
+    assert!(screen.contains("OS: darwin"), "{screen}");
+    assert!(screen.contains("Disk capacity (GB): 80"), "{screen}");
+    press(&mut app, "down");
+    press(&mut app, "down");
+    edit_selected_field(&mut app, "8");
+    let screen = render_to_text(app.state(), 160, 32);
+    assert!(screen.contains("Memory (GiB): 4 → 8"), "{screen}");
+    assert!(screen.contains("Disk capacity (GB): 80"), "{screen}");
     cli.assert_exhausted();
 }
