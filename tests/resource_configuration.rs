@@ -1651,6 +1651,7 @@ async fn settings_scrolls_remaining_configuration_without_moving_editable_contro
         app.state(),
         &layout,
     ));
+    assert!(render_to_text(app.state(), 100, 20).contains("ctrl+u/ctrl+d scroll"));
     for _ in 0..8 {
         press(&mut app, "pagedown");
     }

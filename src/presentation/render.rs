@@ -904,7 +904,7 @@ fn render_configuration(state: &AppState, focused: bool, frame: &mut Frame<'_>, 
         .zip(&draft.proposed)
         .filter(|(field, proposed)| !field.matches(proposed))
         .count();
-    let status = if draft.applying {
+    let mut status = if draft.applying {
         "Applying changes…".into()
     } else if !actual
         .fields
@@ -920,6 +920,19 @@ fn render_configuration(state: &AppState, focused: bool, frame: &mut Frame<'_>, 
             if changed == 1 { "" } else { "s" }
         )
     };
+    if draft.scroll_limit > 0 {
+        let keys = [
+            state.hints.scroll_details_up.as_deref(),
+            state.hints.scroll_details_down.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join("/");
+        if !keys.is_empty() {
+            status.push_str(&format!(" · {keys} scroll"));
+        }
+    }
     frame.render_widget(
         Paragraph::new(status).style(themed_style(if changed > 0 {
             ThemeRole::Warning

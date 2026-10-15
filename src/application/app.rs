@@ -262,6 +262,8 @@ impl AppState {
 pub struct KeyHints {
     pub confirm: Option<String>,
     pub cancel: Option<String>,
+    pub scroll_details_up: Option<String>,
+    pub scroll_details_down: Option<String>,
     pub focus_providers: Option<String>,
     pub focus_resource_panels: Vec<Option<String>>,
     pub focus_details: Option<String>,
@@ -285,6 +287,12 @@ impl KeyHints {
         Self {
             confirm: confirmation_keys(Command::Confirm),
             cancel: confirmation_keys(Command::Cancel),
+            scroll_details_up: registry
+                .first_key(Command::ScrollDetailsUp)
+                .map(|key| key.to_string()),
+            scroll_details_down: registry
+                .first_key(Command::ScrollDetailsDown)
+                .map(|key| key.to_string()),
             focus_providers: registry
                 .first_key(Command::FocusProviders)
                 .map(|key| key.to_string()),
