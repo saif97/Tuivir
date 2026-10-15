@@ -930,13 +930,7 @@ fn render_configuration(state: &AppState, focused: bool, frame: &mut Frame<'_>, 
     );
     let messages = configuration_messages(draft, rows[4]);
     let paragraph = Paragraph::new(messages).wrap(ratatui::widgets::Wrap { trim: true });
-    let limit = paragraph
-        .line_count(rows[4].width)
-        .saturating_sub(usize::from(rows[4].height));
-    frame.render_widget(
-        paragraph.scroll((draft.scroll.min(limit.min(u16::MAX as usize) as u16), 0)),
-        rows[4],
-    );
+    frame.render_widget(paragraph.scroll((draft.scroll, 0)), rows[4]);
 }
 
 fn configuration_rows(editable_count: usize, area: Rect) -> ([Rect; 5], usize) {
@@ -998,13 +992,21 @@ fn configuration_messages<'a>(
         ]));
         let label_width = read_only_fields
             .iter()
-            .map(|field| field.label.len() + 1)
+            .map(|field| Line::from(field.label.as_str()).width() + 1)
             .max()
-            .unwrap_or(0);
+            .unwrap_or(0)
+            .min(usize::from(area.width) / 2);
         messages.extend(read_only_fields.iter().map(|field| {
             Line::from(vec![
                 Span::styled(
-                    format!("  {:label_width$}  ", format!("{}:", field.label)),
+                    format!(
+                        "  {}:{}  ",
+                        field.label,
+                        " ".repeat(
+                            label_width
+                                .saturating_sub(Line::from(field.label.as_str()).width() + 1)
+                        )
+                    ),
                     themed_style(ThemeRole::Muted),
                 ),
                 Span::raw(field.value.as_str()),

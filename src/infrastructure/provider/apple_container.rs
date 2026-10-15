@@ -371,7 +371,7 @@ impl ProviderWorkspace for AppleContainerWorkspace {
                 .ok_or_else(|| {
                     WorkspaceError::new("Apple Container did not report the selected Container")
                 })?;
-            let row: ContainerRow = serde_json::from_value(native.clone()).map_err(malformed)?;
+            let row: ContainerRow = ContainerRow::deserialize(native).map_err(malformed)?;
             let mut configuration = ResourceConfiguration {
                 fields: vec![
                     ConfigurationField { id: "cpu".into(), label: "CPU count".into(), value: row.configuration.resources.cpus.to_string(), constraint: FieldConstraint::ReadOnly, update: ConfigurationUpdate::Live },

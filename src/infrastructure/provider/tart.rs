@@ -174,7 +174,7 @@ impl ProviderWorkspace for TartWorkspace {
                 serde_json::from_str(&output.stdout).map_err(|error| {
                     WorkspaceError::new(format!("Malformed Tart configuration: {error}"))
                 })?;
-            let row: Configuration = serde_json::from_value(native.clone()).map_err(|error| {
+            let row: Configuration = Configuration::deserialize(&native).map_err(|error| {
                 WorkspaceError::new(format!("Malformed Tart configuration: {error}"))
             })?;
             let state = row
