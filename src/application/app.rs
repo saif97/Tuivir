@@ -651,6 +651,19 @@ impl App {
                 .filter(|entry| match entry.command {
                     Command::Resource(command) => resource
                         .is_some_and(|resource| resource.available_commands.contains(&command)),
+                    Command::EditConfigurationField
+                    | Command::ApplyConfiguration
+                    | Command::NextConfigurationField
+                    | Command::PreviousConfigurationField => self
+                        .state
+                        .selected_configuration()
+                        .and_then(|draft| draft.actual.as_ref())
+                        .is_some_and(|actual| {
+                            actual
+                                .fields
+                                .iter()
+                                .any(super::ConfigurationField::editable)
+                        }),
                     _ => true,
                 })
                 .filter(|entry| entry.command != Command::ToggleHelp)

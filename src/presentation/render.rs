@@ -791,7 +791,7 @@ fn render_configuration(state: &AppState, focused: bool, frame: &mut Frame<'_>, 
     for (index, field) in actual.fields.iter().enumerate() {
         let proposed = draft.proposed.get(index).unwrap_or(&field.value);
         let changed = !field.matches(proposed);
-        let selected = focused && index == draft.selected_field;
+        let selected = focused && field.editable() && index == draft.selected_field;
         let editing = selected && draft.editing;
         let role = if selected {
             ThemeRole::Primary
@@ -853,6 +853,12 @@ fn render_configuration(state: &AppState, focused: bool, frame: &mut Frame<'_>, 
         .count();
     let status = if draft.applying {
         "Applying changes…".into()
+    } else if !actual
+        .fields
+        .iter()
+        .any(crate::application::ConfigurationField::editable)
+    {
+        "Read only · Resizing is unavailable".into()
     } else if changed == 0 {
         "No unsaved changes".into()
     } else {

@@ -1105,6 +1105,10 @@ async fn apple_container_configuration_shows_read_only_values_and_explains_resiz
     let requests = app.invoke(Command::ActivateDetailView(5));
     drive(&mut app, &runtime, requests).await;
     let screen = render_to_text(app.state(), 200, 36);
+    assert!(screen.contains("Read only"), "{screen}");
+    assert!(!screen.contains("No unsaved changes"), "{screen}");
+    assert!(!screen.contains("Edit field"), "{screen}");
+    assert!(!screen.contains("Review changes"), "{screen}");
     assert!(screen.contains("CPU count: 2 (read-only)"), "{screen}");
     assert!(
         screen.contains("Memory (bytes): 1073741824 (read-only)"),
