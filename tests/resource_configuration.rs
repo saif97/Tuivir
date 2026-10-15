@@ -1423,3 +1423,18 @@ async fn incus_configuration_shows_kind_architecture_and_profiles_as_read_only()
     assert!(screen.contains("Profiles: default, dev"), "{screen}");
     cli.assert_exhausted();
 }
+
+#[tokio::test]
+async fn narrow_configuration_review_keeps_downtime_and_both_actions_visible() {
+    let (mut app, _, cli) = tart_app(TART_INITIAL, vec![]).await;
+    edit_selected_field(&mut app, "4");
+    press(&mut app, "ctrl+a");
+    for width in [20, 30] {
+        let screen = render_to_text(app.state(), width, 24);
+        assert!(screen.contains("stop/start"), "{screen}");
+        assert!(screen.contains("running."), "{screen}");
+        assert!(screen.contains("Apply changes"), "{screen}");
+        assert!(screen.contains("Cancel"), "{screen}");
+    }
+    cli.assert_exhausted();
+}

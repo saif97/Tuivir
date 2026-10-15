@@ -222,16 +222,10 @@ fn resource_shell_header(state: &AppState, identity: String) -> Line<'static> {
     Line::from(spans)
 }
 
-fn render_configuration_review(
+pub(super) fn configuration_review_paragraph<'a>(
     state: &AppState,
-    review: &crate::application::ConfigurationReview,
-    frame: &mut Frame<'_>,
-    area: Rect,
-) {
-    let block = modal_block(" Review changes ", ThemeRole::Warning);
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-    let rows = Layout::vertical([Constraint::Min(0), Constraint::Length(2)]).split(inner);
+    review: &'a crate::application::ConfigurationReview,
+) -> Paragraph<'a> {
     let mut lines = vec![
         Line::styled(
             format!("Resource: {}", review.resource_name),
@@ -255,27 +249,30 @@ fn render_configuration_review(
         review.downtime(),
         themed_style(ThemeRole::Warning),
     ));
-    frame.render_widget(
-        Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: true }),
-        rows[0],
-    );
     let apply = state.hints.confirm.as_deref().unwrap_or("unbound");
     let cancel = state.hints.cancel.as_deref().unwrap_or("unbound");
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(
-                format!("[ {apply} Apply changes ]"),
-                themed_style(ThemeRole::Primary).add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("   "),
-            Span::styled(
-                format!("[ {cancel} Cancel ]"),
-                themed_style(ThemeRole::Muted),
-            ),
-        ]))
-        .wrap(ratatui::widgets::Wrap { trim: true }),
-        rows[1],
-    );
+    lines.push(Line::default());
+    lines.push(Line::styled(
+        format!("Apply changes [{apply}]"),
+        themed_style(ThemeRole::Primary).add_modifier(Modifier::BOLD),
+    ));
+    lines.push(Line::styled(
+        format!("Cancel [{cancel}]"),
+        themed_style(ThemeRole::Muted),
+    ));
+    Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: true })
+}
+
+fn render_configuration_review(
+    state: &AppState,
+    review: &crate::application::ConfigurationReview,
+    frame: &mut Frame<'_>,
+    area: Rect,
+) {
+    let block = modal_block(" Review changes ", ThemeRole::Warning);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    frame.render_widget(configuration_review_paragraph(state, review), inner);
 }
 
 fn render_confirmation(state: &AppState, frame: &mut Frame<'_>) {
