@@ -51,14 +51,6 @@ impl FixtureCli {
         }
     }
 
-    pub fn assert_exhausted(&self) {
-        let queue = self.queue();
-        assert!(
-            queue.is_empty(),
-            "expected CLI requests were not issued: {queue:?}"
-        );
-    }
-
     fn queue(
         &self,
     ) -> MutexGuard<'_, VecDeque<(ProcessSpec, Result<ProcessOutput, ProcessError>)>> {
