@@ -99,3 +99,51 @@ pub async fn apply_configuration(
         }
     }
 }
+
+/// Preserve native settings that have no dedicated control or readable field.
+/// Paths use JSON Pointer syntax so native keys containing dots stay distinct.
+pub(super) fn append_native_fields(
+    fields: &mut Vec<crate::application::ConfigurationField>,
+    value: &serde_json::Value,
+    excluded: &[&str],
+) {
+    fn append(
+        fields: &mut Vec<crate::application::ConfigurationField>,
+        value: &serde_json::Value,
+        path: String,
+        label: String,
+        excluded: &[&str],
+    ) {
+        if excluded.contains(&path.as_str()) {
+            return;
+        }
+        if let Some(object) = value.as_object()
+            && !object.is_empty()
+        {
+            for (key, value) in object {
+                let escaped = key.replace('~', "~0").replace('/', "~1");
+                append(
+                    fields,
+                    value,
+                    format!("{path}/{escaped}"),
+                    if label.is_empty() {
+                        key.clone()
+                    } else {
+                        format!("{label}.{key}")
+                    },
+                    excluded,
+                );
+            }
+        } else if !path.is_empty() {
+            fields.push(crate::application::ConfigurationField::read_only(
+                format!("native:{path}"),
+                label,
+                value
+                    .as_str()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| value.to_string()),
+            ));
+        }
+    }
+    append(fields, value, String::new(), String::new(), excluded);
+}

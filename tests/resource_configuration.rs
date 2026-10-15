@@ -988,7 +988,7 @@ async fn tart_app(
     let mut app = App::new();
     let requests = app.update(runtime.discover().await.remove(0).into_event());
     drive(&mut app, &runtime, requests).await;
-    let requests = app.invoke(Command::ActivateDetailView(2));
+    let requests = app.invoke(Command::ActivateDetailView(1));
     drive(&mut app, &runtime, requests).await;
     (app, runtime, cli)
 }
@@ -1461,5 +1461,42 @@ async fn narrow_configuration_review_keeps_downtime_and_both_actions_visible() {
         assert!(screen.contains("Apply changes"), "{screen}");
         assert!(screen.contains("Cancel"), "{screen}");
     }
+    cli.assert_exhausted();
+}
+
+#[tokio::test]
+async fn tart_settings_merges_native_fields_without_a_duplicate_config_tab() {
+    let initial = r#"{"CPU":2,"Memory":4096,"State":"stopped","OS":"darwin","Disk":80,"Display":"1280x800","Architecture":"arm64","Network":{"Mode":"shared"}}"#;
+    let (app, _, cli) = tart_app(initial, vec![]).await;
+    let screen = render_to_text(app.state(), 180, 36);
+    assert!(screen.contains("[ Settings ]"), "{screen}");
+    let tabs = screen
+        .lines()
+        .find(|line| line.contains("Overview"))
+        .unwrap();
+    assert!(!tabs.contains("Config"), "{tabs}");
+    assert!(
+        screen.contains("Architecture:") && screen.contains("arm64"),
+        "{screen}"
+    );
+    assert!(
+        screen.contains("Network.Mode:") && screen.contains("shared"),
+        "{screen}"
+    );
+    let fields = &app
+        .state()
+        .selected_configuration()
+        .unwrap()
+        .actual
+        .as_ref()
+        .unwrap()
+        .fields;
+    assert_eq!(
+        fields
+            .iter()
+            .filter(|field| field.label.contains("Memory"))
+            .count(),
+        1
+    );
     cli.assert_exhausted();
 }

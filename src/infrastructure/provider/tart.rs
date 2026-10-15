@@ -156,6 +156,8 @@ impl ProviderWorkspace for TartWorkspace {
                 os: Option<String>,
                 disk: Option<u64>,
                 display: Option<String>,
+                #[serde(flatten)]
+                additional_fields: serde_json::Map<String, serde_json::Value>,
             }
             let output = cli
                 .run(ProcessSpec::new(
@@ -208,6 +210,11 @@ impl ProviderWorkspace for TartWorkspace {
                     .fields
                     .push(ConfigurationField::read_only("display", "Display", display));
             }
+            super::configuration::append_native_fields(
+                &mut configuration.fields,
+                &serde_json::Value::Object(row.additional_fields),
+                &[],
+            );
             Ok(configuration)
         })
     }
@@ -259,10 +266,7 @@ impl ProviderWorkspace for TartWorkspace {
             let mut vms = ResourcePanel {
                 id: ResourcePanelId::new("vms"),
                 title: "VMs".into(),
-                detail_views: vec![
-                    DetailView::new("config", "Config"),
-                    DetailView::configuration(),
-                ],
+                detail_views: vec![DetailView::configuration()],
                 resources: vec![],
             };
             let mut images = ResourcePanel {

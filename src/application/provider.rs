@@ -133,7 +133,7 @@ impl DetailView {
     pub fn configuration() -> Self {
         Self {
             id: DetailViewId::new("configuration"),
-            title: "Configuration".into(),
+            title: "Settings".into(),
             source: DetailViewSource::Configuration,
         }
     }
