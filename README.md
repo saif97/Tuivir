@@ -149,8 +149,8 @@ footer. Run `tuivir --help` for command-line options.
 
 ### Resource CPU and memory
 
-Select a Docker container or Incus instance, focus Details, and move to the
-Configuration tab with the left/right keys. Up/down selects a field; Enter
+Select a Docker container, Incus instance, or local Tart VM, focus Details,
+and move to the Configuration tab with the left/right keys. Up/down selects a field; Enter
 edits it, Backspace removes a character, and Ctrl+U clears the input. Enter or
 Esc keeps the draft without writing. Ctrl+A opens a review of current and
 proposed values and any necessary downtime; confirm explicitly to Apply.
@@ -159,7 +159,14 @@ limits accept whole bytes (0 is unlimited; nonzero limits must be at least
 6 MiB and fit the existing memory+swap limit). Incus accepts CPU counts or CPU
 IDs/ranges and memory sizes such as `512MiB` or `50%`. Supported servers also
 accept VM CPU topology syntax. Incus edits set instance overrides without
-changing shared profiles. Docker Sandbox limits are read-only where reported.
+changing shared profiles. Tart accepts a positive whole CPU count and memory
+in MiB; changes require stop/start for running VMs, while stopped VMs stay
+stopped. Tart checks guest-specific minimums when applying changes.
+
+Docker Sandbox limits are read-only where reported. Apple Container shows
+inspected CPU count and memory in bytes read-only: the CLI has no supported
+in-place CPU/memory resize operation for existing Containers. Configure those
+resources at creation outside Tuivir. Disk sizing is outside this feature.
 
 Drafts survive Resource and Provider Workspace navigation for the current
 session. Refresh with Ctrl+R to reload actual values while keeping edits.
