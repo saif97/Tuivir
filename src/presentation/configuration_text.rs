@@ -1,6 +1,6 @@
 //! Wrap Settings values without mixing their source text with visual padding.
 
-use std::ops::Range;
+use std::{borrow::Cow, ops::Range};
 
 use ratatui::{
     layout::Rect,
@@ -32,11 +32,21 @@ struct Chunk {
     offsets: Vec<usize>,
 }
 
-fn visible(grapheme: &str) -> String {
-    if grapheme.chars().any(char::is_control) {
-        grapheme.chars().flat_map(char::escape_default).collect()
+fn visible(grapheme: &str, width: usize) -> Cow<'_, str> {
+    let text = if grapheme.chars().any(char::is_control) {
+        Cow::Owned(
+            grapheme
+                .chars()
+                .flat_map(char::escape_default)
+                .collect::<String>(),
+        )
     } else {
-        grapheme.to_owned()
+        Cow::Borrowed(grapheme)
+    };
+    if text.width() > width {
+        Cow::Borrowed("�")
+    } else {
+        text
     }
 }
 
@@ -52,7 +62,7 @@ fn wrap(text: &str, width: usize) -> Vec<Chunk> {
         let mut cells = 0;
         let mut word_boundary = None;
         while end < graphemes.len() && graphemes[end].1 != "\n" && graphemes[end].1 != "\r\n" {
-            let size = visible(graphemes[end].1).width().min(width);
+            let size = visible(graphemes[end].1, width).width();
             if cells + size > width && end > start {
                 break;
             }
@@ -75,10 +85,7 @@ fn wrap(text: &str, width: usize) -> Vec<Chunk> {
         let mut display = String::new();
         let mut offsets = vec![byte_start];
         for (index, &(byte, grapheme)) in graphemes[start..end].iter().enumerate() {
-            let mut glyph = visible(grapheme);
-            if glyph.width() > width {
-                glyph = "�".into();
-            }
+            let glyph = visible(grapheme, width);
             let next = graphemes
                 .get(start + index + 1)
                 .map_or(text.len(), |(byte, _)| *byte);
@@ -107,7 +114,8 @@ fn value_spans(
     draft: &ConfigurationDraft,
     field: usize,
     value: &str,
-    chunk: &Chunk,
+    range: Range<usize>,
+    text: String,
     width: usize,
 ) -> Vec<Span<'static>> {
     let Some(selection) = draft
@@ -115,29 +123,22 @@ fn value_spans(
         .as_ref()
         .filter(|selection| selection.field == field)
     else {
-        return vec![Span::raw(chunk.text.clone())];
+        return vec![Span::raw(text)];
     };
-    let range = selection.range(value.len());
-    let start = range.start.max(chunk.range.start).min(chunk.range.end);
-    let end = range.end.min(chunk.range.end).max(start);
+    let selected = selection.range(value.len());
+    let start = selected.start.max(range.start).min(range.end);
+    let end = selected.end.min(range.end).max(start);
     [
-        (chunk.range.start..start, false),
+        (range.start..start, false),
         (start..end, true),
-        (end..chunk.range.end, false),
+        (end..range.end, false),
     ]
     .into_iter()
     .filter(|(range, _)| !range.is_empty())
     .map(|(range, selected)| {
         let text = value[range]
             .graphemes(true)
-            .map(|grapheme| {
-                let text = visible(grapheme);
-                if text.width() > width {
-                    "�".to_owned()
-                } else {
-                    text
-                }
-            })
+            .map(|grapheme| visible(grapheme, width))
             .collect::<String>();
         Span::styled(
             text,
@@ -220,6 +221,7 @@ pub(super) fn prepare(draft: &ConfigurationDraft, area: Rect) -> ConfigurationTe
             } else {
                 values.len().max(labels.len())
             };
+            let mut values = values.into_iter();
             for row in 0..rows {
                 let label = if stacked {
                     ""
@@ -230,13 +232,20 @@ pub(super) fn prepare(draft: &ConfigurationDraft, area: Rect) -> ConfigurationTe
                     Span::styled(label.to_owned(), themed_style(ThemeRole::Muted)),
                     Span::raw(" ".repeat(value_column.saturating_sub(label.width()))),
                 ];
-                if let Some(chunk) = values.get(row) {
-                    spans.extend(value_spans(draft, index, &field.value, chunk, value_width));
+                if let Some(chunk) = values.next() {
+                    spans.extend(value_spans(
+                        draft,
+                        index,
+                        &field.value,
+                        chunk.range,
+                        chunk.text,
+                        value_width,
+                    ));
                     result.values.push(ValueRun {
                         line: result.lines.len(),
                         column: value_column as u16,
                         field: index,
-                        offsets: chunk.offsets.clone(),
+                        offsets: chunk.offsets,
                     });
                 }
                 result.lines.push(Line::from(spans));
