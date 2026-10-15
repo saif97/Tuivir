@@ -1063,3 +1063,59 @@ async fn tart_apply_reviews_downtime_then_updates_and_restarts_the_same_vm() {
     assert!(!screen.contains('→'), "{screen}");
     cli.assert_exhausted();
 }
+
+#[tokio::test]
+async fn apple_container_configuration_shows_read_only_values_and_explains_resize_limit() {
+    let containers = include_str!("fixtures/apple-container/containers.json");
+    let cli = Arc::new(FixtureCli::new([
+        (
+            ProcessSpec::new("container", &["system", "version", "--format", "json"]),
+            success(include_str!("fixtures/apple-container/version.json")),
+        ),
+        (
+            ProcessSpec::new("container", &["list", "--all", "--format", "json"]),
+            success(containers),
+        ),
+        (
+            ProcessSpec::new("container", &["image", "list", "--format", "json"]),
+            success("[]"),
+        ),
+        (
+            ProcessSpec::new("container", &["network", "list", "--format", "json"]),
+            success("[]"),
+        ),
+        (
+            ProcessSpec::new("container", &["volume", "list", "--format", "json"]),
+            success("[]"),
+        ),
+        (
+            ProcessSpec::new("container", &["inspect", "--", "web"]),
+            success(containers),
+        ),
+    ]));
+    let runtime = ProviderRuntime::new(
+        vec![Arc::new(
+            tuivir::infrastructure::provider::AppleContainerWorkspace,
+        )],
+        cli.clone(),
+    );
+    let mut app = App::new();
+    let requests = app.update(runtime.discover().await.remove(0).into_event());
+    drive(&mut app, &runtime, requests).await;
+    let requests = app.invoke(Command::ActivateDetailView(5));
+    drive(&mut app, &runtime, requests).await;
+    let screen = render_to_text(app.state(), 200, 36);
+    assert!(screen.contains("CPU count: 2 (read-only)"), "{screen}");
+    assert!(
+        screen.contains("Memory (bytes): 1073741824 (read-only)"),
+        "{screen}"
+    );
+    assert!(
+        screen.contains("in-place CPU/memory resize is unsupported"),
+        "{screen}"
+    );
+    assert!(press(&mut app, "enter").is_empty());
+    assert!(press(&mut app, "ctrl+a").is_empty());
+    assert!(app.state().confirmation.is_none());
+    cli.assert_exhausted();
+}
