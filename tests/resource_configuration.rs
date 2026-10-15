@@ -1119,3 +1119,140 @@ async fn apple_container_configuration_shows_read_only_values_and_explains_resiz
     assert!(app.state().confirmation.is_none());
     cli.assert_exhausted();
 }
+
+#[tokio::test]
+async fn tart_stopped_vm_remains_stopped_after_memory_changes() {
+    let initial = r#"{"CPU":2,"Memory":4096,"Running":false,"State":"stopped"}"#;
+    let updated = initial.replace("4096", "8192");
+    let (mut app, runtime, cli) = tart_app(
+        initial,
+        vec![
+            tart_read(initial),
+            (
+                ProcessSpec::new("tart", &["set", "--memory", "8192", "--", "mac"]),
+                success(""),
+            ),
+            tart_read(&updated),
+            (
+                ProcessSpec::new("tart", &["list", "--format", "json"]),
+                success(&TART_LIST.replace("running", "stopped")),
+            ),
+        ],
+    )
+    .await;
+    press(&mut app, "down");
+    edit_selected_field(&mut app, "8192");
+    press(&mut app, "ctrl+a");
+    assert!(render_to_text(app.state(), 180, 36).contains("Resource remains stopped"));
+    let requests = press(&mut app, "enter");
+    drive(&mut app, &runtime, requests).await;
+    let screen = render_to_text(app.state(), 180, 36);
+    assert!(screen.contains("Resource State: Stopped"), "{screen}");
+    assert!(screen.contains("Memory (MiB): 8192"), "{screen}");
+    cli.assert_exhausted();
+}
+
+#[tokio::test]
+async fn tart_rejected_native_minimum_preserves_draft_and_restarts_the_vm() {
+    let (mut app, runtime, cli) = tart_app(
+        TART_INITIAL,
+        vec![
+            tart_read(TART_INITIAL),
+            (
+                ProcessSpec::new("tart", &["stop", "--", "mac"]),
+                success(""),
+            ),
+            (
+                ProcessSpec::new("tart", &["set", "--memory", "1", "--", "mac"]),
+                common::failure("VM should have 4096 MiB of memory at minimum"),
+            ),
+            (
+                ProcessSpec::background("tart", &["run", "--no-graphics", "--", "mac"]),
+                success(""),
+            ),
+            tart_read(TART_INITIAL),
+            (
+                ProcessSpec::new("tart", &["list", "--format", "json"]),
+                success(TART_LIST),
+            ),
+        ],
+    )
+    .await;
+    press(&mut app, "down");
+    edit_selected_field(&mut app, "1");
+    press(&mut app, "ctrl+a");
+    let requests = press(&mut app, "enter");
+    drive(&mut app, &runtime, requests).await;
+    let screen = render_to_text(app.state(), 180, 36);
+    assert!(screen.contains("4096 → 1"), "{screen}");
+    assert!(screen.contains("memory at minimum"), "{screen}");
+    assert!(screen.contains("Resource State: Running"), "{screen}");
+    cli.assert_exhausted();
+}
+
+#[tokio::test]
+async fn tart_restart_failure_reports_saved_settings_and_actual_stopped_state() {
+    let updated = r#"{"CPU":4,"Memory":4096,"Running":false,"State":"stopped"}"#;
+    let (mut app, runtime, cli) = tart_app(
+        TART_INITIAL,
+        vec![
+            tart_read(TART_INITIAL),
+            (
+                ProcessSpec::new("tart", &["stop", "--", "mac"]),
+                success(""),
+            ),
+            (
+                ProcessSpec::new("tart", &["set", "--cpu", "4", "--", "mac"]),
+                success(""),
+            ),
+            (
+                ProcessSpec::background("tart", &["run", "--no-graphics", "--", "mac"]),
+                common::failure("guest failed to boot"),
+            ),
+            tart_read(updated),
+            (
+                ProcessSpec::new("tart", &["list", "--format", "json"]),
+                success(&TART_LIST.replace("running", "stopped")),
+            ),
+        ],
+    )
+    .await;
+    edit_selected_field(&mut app, "4");
+    press(&mut app, "ctrl+a");
+    let requests = press(&mut app, "enter");
+    drive(&mut app, &runtime, requests).await;
+    let screen = render_to_text(app.state(), 180, 36);
+    assert!(
+        screen.contains("Settings saved, but restart failed"),
+        "{screen}"
+    );
+    assert!(screen.contains("guest failed to boot"), "{screen}");
+    assert!(screen.contains("Resource State: Stopped"), "{screen}");
+    assert!(screen.contains("CPU count: 4"), "{screen}");
+    assert!(!screen.contains('→'), "{screen}");
+    cli.assert_exhausted();
+}
+
+#[tokio::test]
+async fn tart_rejects_invalid_counts_before_review_or_provider_writes() {
+    for (field, value) in [
+        (0, "0"),
+        (0, "1.5"),
+        (0, "65536"),
+        (0, "0-3"),
+        (1, "0"),
+        (1, "512MiB"),
+        (1, "17592186044416"),
+    ] {
+        let (mut app, _, cli) = tart_app(TART_INITIAL, vec![]).await;
+        if field == 1 {
+            press(&mut app, "down");
+        }
+        edit_selected_field(&mut app, value);
+        assert!(press(&mut app, "ctrl+a").is_empty());
+        assert!(app.state().confirmation.is_none());
+        let screen = render_to_text(app.state(), 180, 36);
+        assert!(screen.contains("must be a whole number"), "{screen}");
+        cli.assert_exhausted();
+    }
+}
