@@ -125,7 +125,7 @@ fn value_spans(
     else {
         return vec![Span::raw(text)];
     };
-    let selected = selection.range(value.len());
+    let selected = selection.text.range();
     let start = selected.start.max(range.start).min(range.end);
     let end = selected.end.min(range.end).max(start);
     [

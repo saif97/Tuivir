@@ -6,7 +6,7 @@
 
 use super::input::{MouseAction, MouseInput};
 use super::screen_layout::ScreenLayout;
-use crate::application::Command;
+use crate::application::{Command, DetailSelectionPoint};
 
 /// Resolves one mouse event against the layout that drew the screen.
 ///
@@ -75,16 +75,21 @@ fn drag(layout: &ScreenLayout, input: MouseInput, boundary_grab: Option<u16>) ->
             } else {
                 value.source_offset(point.x)
             };
-            return Some(Command::ExtendConfigurationSelection {
-                field: value.field,
-                offset,
+            return Some(Command::ExtendDetailsSelection {
+                point: DetailSelectionPoint::ConfigurationValue {
+                    field: value.field,
+                    offset,
+                },
                 scroll,
             });
         }
         if panes.detail_content.contains(point) {
             return Some(Command::ExtendDetailsSelection {
-                line: point.y - panes.detail_content.y,
-                column: point.x - panes.detail_content.x,
+                point: DetailSelectionPoint::Text {
+                    line: point.y - panes.detail_content.y,
+                    column: point.x - panes.detail_content.x,
+                },
+                scroll: 0,
             });
         }
         if point.x >= panes.detail_content.x && point.x < panes.detail_content.right() {
@@ -150,15 +155,19 @@ fn press(layout: &ScreenLayout, input: MouseInput) -> Option<Command> {
             .iter()
             .find(|value| value.area.contains(point))
     {
-        return Some(Command::SelectConfigurationValue {
-            field: value.field,
-            offset: value.source_offset(point.x),
+        return Some(Command::BeginDetailsSelection {
+            point: DetailSelectionPoint::ConfigurationValue {
+                field: value.field,
+                offset: value.source_offset(point.x),
+            },
         });
     }
     if panes.detail_content.contains(point) {
         return Some(Command::BeginDetailsSelection {
-            line: point.y - panes.detail_content.y,
-            column: point.x - panes.detail_content.x,
+            point: DetailSelectionPoint::Text {
+                line: point.y - panes.detail_content.y,
+                column: point.x - panes.detail_content.x,
+            },
         });
     }
     if let Some(panel) = index_containing(&panes.resource_panels, point) {

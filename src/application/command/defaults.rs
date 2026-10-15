@@ -266,7 +266,7 @@ pub(super) const BUILTIN_COMMANDS: &[CommandDefinition] = &[
     CommandDefinition {
         id: "configuration_clear_selection",
         description: "Clear selected value",
-        command: Command::ClearConfigurationSelection,
+        command: Command::ClearDetailsSelection,
         scopes: &[CommandScope::ConfigurationForm],
         default_keys: &["esc"],
     },

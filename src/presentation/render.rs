@@ -1146,11 +1146,8 @@ fn detail_line(text: &str, line: u16, selection: Option<&DetailSelection>) -> Li
     let Some(selection) = selection else {
         return Line::from(text.to_owned());
     };
-    let (start, end) = if selection.start <= selection.end {
-        (selection.start, selection.end)
-    } else {
-        (selection.end, selection.start)
-    };
+    let range = selection.range();
+    let (start, end) = (range.start, range.end);
     if start == end || line < start.line || line > end.line {
         return Line::from(text.to_owned());
     }

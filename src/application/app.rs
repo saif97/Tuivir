@@ -293,7 +293,7 @@ impl KeyHints {
                 .first_key(Command::CopyDetails)
                 .map(|key| key.to_string()),
             clear_configuration_selection: registry
-                .first_key(Command::ClearConfigurationSelection)
+                .first_key(Command::ClearDetailsSelection)
                 .map(|key| key.to_string()),
             scroll_details_up: registry
                 .first_key(Command::ScrollDetailsUp)
@@ -660,7 +660,7 @@ impl App {
                         .iter()
                         .any(super::ConfigurationField::editable)
                 }),
-            Command::ClearConfigurationSelection => self
+            Command::ClearDetailsSelection => self
                 .state
                 .selected_configuration()
                 .is_some_and(|draft| draft.selection.is_some()),
@@ -755,6 +755,7 @@ impl App {
         if !matches!(
             command,
             Command::CopyDetails
+                | Command::ClearDetailsSelection
                 | Command::BeginDetailsSelection { .. }
                 | Command::ExtendDetailsSelection { .. }
                 | Command::ExtendDetailsSelectionAtEdge { .. }
@@ -946,36 +947,10 @@ impl App {
                 self.scroll_details(-DETAIL_SCROLL_LINES);
                 Vec::new()
             }
-            // A Details selection arrives through the mouse path. Until one is
-            // present, Copy deliberately has nothing to send to the host.
-            Command::SelectConfigurationValue { field, offset } => {
-                if self.state.configuration_selected() {
-                    self.state.focused_pane = FocusedPane::Details;
-                    if let Some(draft) = self.selected_configuration_mut() {
-                        draft.select_value(field, offset);
-                    }
+            Command::ClearDetailsSelection => {
+                if let Some(workspace) = self.state.active_workspace_mut() {
+                    workspace.clear_detail_selection();
                 }
-                Vec::new()
-            }
-            Command::ExtendConfigurationSelection {
-                field,
-                offset,
-                scroll,
-            } => {
-                if self.state.configuration_selected()
-                    && self
-                        .state
-                        .selected_configuration()
-                        .is_some_and(|draft| draft.selection.is_some())
-                {
-                    if let Some(draft) = self.selected_configuration_mut() {
-                        draft.extend_selection(field, offset);
-                    }
-                    self.scroll_details(isize::from(scroll));
-                }
-                Vec::new()
-            }
-            Command::ClearConfigurationSelection => {
                 if let Some(draft) = self.selected_configuration_mut() {
                     draft.selection = None;
                 }
@@ -993,21 +968,49 @@ impl App {
                 };
                 Vec::new()
             }
-            Command::BeginDetailsSelection { line, column } => {
+            Command::BeginDetailsSelection { point } => {
                 self.state.focused_pane = FocusedPane::Details;
-                if self.state.configuration_selected()
-                    && let Some(draft) = self.selected_configuration_mut()
-                {
-                    draft.selection = None;
-                }
-                if let Some(workspace) = self.state.active_workspace_mut() {
-                    workspace.begin_detail_selection(line, column);
+                match point {
+                    super::DetailSelectionPoint::ConfigurationValue { field, offset }
+                        if self.state.configuration_selected() =>
+                    {
+                        if let Some(draft) = self.selected_configuration_mut() {
+                            draft.select_value(field, offset);
+                        }
+                    }
+                    super::DetailSelectionPoint::Text { line, column } => {
+                        if self.state.configuration_selected() {
+                            if let Some(draft) = self.selected_configuration_mut() {
+                                draft.selection = None;
+                            }
+                        } else if let Some(workspace) = self.state.active_workspace_mut() {
+                            workspace.begin_detail_selection(line, column);
+                        }
+                    }
+                    _ => {}
                 }
                 Vec::new()
             }
-            Command::ExtendDetailsSelection { line, column } => {
-                if let Some(workspace) = self.state.active_workspace_mut() {
-                    workspace.extend_detail_selection(line, column);
+            Command::ExtendDetailsSelection { point, scroll } => {
+                match point {
+                    super::DetailSelectionPoint::ConfigurationValue { field, offset }
+                        if self.state.configuration_selected() =>
+                    {
+                        if let Some(draft) = self.selected_configuration_mut()
+                            && draft.selection.is_some()
+                        {
+                            draft.extend_selection(field, offset);
+                            self.scroll_details(isize::from(scroll));
+                        }
+                    }
+                    super::DetailSelectionPoint::Text { line, column }
+                        if !self.state.configuration_selected() =>
+                    {
+                        if let Some(workspace) = self.state.active_workspace_mut() {
+                            workspace.extend_detail_selection(line, column);
+                        }
+                    }
+                    _ => {}
                 }
                 Vec::new()
             }

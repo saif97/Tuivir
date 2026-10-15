@@ -7,7 +7,9 @@ mod defaults;
 pub use defaults::NUMBERED_RESOURCE_PANEL_CAPACITY;
 use defaults::{BUILTIN_COMMANDS, CommandDefinition, RESOURCE_PANEL_FOCUS_COMMANDS, WORKSPACE};
 
-use super::{Key, KeybindingError, ResourceShellControls, keybinding::duplicate_keys};
+use super::{
+    DetailSelectionPoint, Key, KeybindingError, ResourceShellControls, keybinding::duplicate_keys,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ResourceCommand {
@@ -73,27 +75,15 @@ pub enum Command {
     ScrollDetailsUp,
     /// Copies the text selected in the visible detail view.
     CopyDetails,
-    /// Selects one read-only Settings value at an original source byte boundary.
-    SelectConfigurationValue {
-        field: usize,
-        offset: usize,
-    },
-    /// Extends the selection within that value; edge drags also scroll the view.
-    ExtendConfigurationSelection {
-        field: usize,
-        offset: usize,
-        scroll: i8,
-    },
-    ClearConfigurationSelection,
-    /// Starts a selection at a source-line character boundary in Details.
+    ClearDetailsSelection,
+    /// Starts a selection at a point resolved by the visible Details view.
     BeginDetailsSelection {
-        line: u16,
-        column: u16,
+        point: DetailSelectionPoint,
     },
-    /// Extends the active Details selection to a source-line character boundary.
+    /// Extends the same selection; dragging outside a viewport may scroll it.
     ExtendDetailsSelection {
-        line: u16,
-        column: u16,
+        point: DetailSelectionPoint,
+        scroll: i8,
     },
     /// Extends selection while the pointer is held above or below Details.
     ExtendDetailsSelectionAtEdge {

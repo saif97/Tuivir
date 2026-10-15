@@ -1,4 +1,4 @@
-use super::ProviderRequestId;
+use super::{ProviderRequestId, TextSelection};
 use crate::domain::ResourceState;
 
 /// An exact memory size displayed and edited in GiB.
@@ -95,17 +95,7 @@ pub struct ConfigurationDraft {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConfigurationSelection {
     pub field: usize,
-    pub anchor: usize,
-    /// A click selects the whole value; dragging defines a half-open source range.
-    pub cursor: Option<usize>,
-}
-
-impl ConfigurationSelection {
-    pub fn range(&self, length: usize) -> std::ops::Range<usize> {
-        self.cursor.map_or(0..length, |cursor| {
-            self.anchor.min(cursor)..self.anchor.max(cursor)
-        })
-    }
+    pub text: TextSelection<usize>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -275,8 +265,7 @@ impl ConfigurationDraft {
         self.editing = false;
         self.selection = Some(ConfigurationSelection {
             field,
-            anchor: offset,
-            cursor: None,
+            text: TextSelection::whole_value(offset, 0..value.value.len()),
         });
     }
 
@@ -297,7 +286,7 @@ impl ConfigurationDraft {
             std::cmp::Ordering::Equal => offset,
         };
         if value.value.is_char_boundary(cursor) {
-            selection.cursor = Some(cursor);
+            selection.text.extend(cursor);
         }
     }
 
@@ -309,7 +298,7 @@ impl ConfigurationDraft {
         }
         field
             .value
-            .get(selection.range(field.value.len()))
+            .get(selection.text.range())
             .filter(|text| !text.is_empty())
             .map(str::to_owned)
     }

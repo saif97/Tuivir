@@ -1219,7 +1219,9 @@ fn mouse_routing_resolves_each_region_without_a_terminal() {
     );
     assert_eq!(
         resolve_mouse(&layout, press(14, 3), None),
-        Some(Command::BeginDetailsSelection { line: 0, column: 3 })
+        Some(Command::BeginDetailsSelection {
+            point: tuivir::application::DetailSelectionPoint::Text { line: 0, column: 3 }
+        })
     );
     assert_eq!(
         resolve_mouse(
@@ -1231,7 +1233,10 @@ fn mouse_routing_resolves_each_region_without_a_terminal() {
             },
             None,
         ),
-        Some(Command::ExtendDetailsSelection { line: 1, column: 5 })
+        Some(Command::ExtendDetailsSelection {
+            point: tuivir::application::DetailSelectionPoint::Text { line: 1, column: 5 },
+            scroll: 0
+        })
     );
     assert_eq!(
         resolve_mouse(&layout, press(29, 5), None),
