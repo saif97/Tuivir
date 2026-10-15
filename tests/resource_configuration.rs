@@ -1109,6 +1109,11 @@ async fn apple_container_configuration_shows_read_only_values_and_explains_resiz
     assert!(!screen.contains("No unsaved changes"), "{screen}");
     assert!(!screen.contains("Edit field"), "{screen}");
     assert!(!screen.contains("Review changes"), "{screen}");
+    press(&mut app, "?");
+    let help = render_to_text(app.state(), 200, 36);
+    assert!(!help.contains("Edit field"), "{help}");
+    assert!(!help.contains("Review changes"), "{help}");
+    press(&mut app, "esc");
     assert!(screen.contains("CPU count: 2 (read-only)"), "{screen}");
     assert!(
         screen.contains("Memory (bytes): 1073741824 (read-only)"),

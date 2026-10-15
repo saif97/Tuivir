@@ -639,6 +639,25 @@ impl App {
         requests
     }
 
+    fn configuration_command_available(&self, command: Command) -> bool {
+        match command {
+            Command::EditConfigurationField
+            | Command::ApplyConfiguration
+            | Command::NextConfigurationField
+            | Command::PreviousConfigurationField => self
+                .state
+                .selected_configuration()
+                .and_then(|draft| draft.actual.as_ref())
+                .is_some_and(|actual| {
+                    actual
+                        .fields
+                        .iter()
+                        .any(super::ConfigurationField::editable)
+                }),
+            _ => true,
+        }
+    }
+
     fn update_command_bar(&mut self) {
         let scope = self.active_scope();
         let resource = self
@@ -651,21 +670,9 @@ impl App {
                 .filter(|entry| match entry.command {
                     Command::Resource(command) => resource
                         .is_some_and(|resource| resource.available_commands.contains(&command)),
-                    Command::EditConfigurationField
-                    | Command::ApplyConfiguration
-                    | Command::NextConfigurationField
-                    | Command::PreviousConfigurationField => self
-                        .state
-                        .selected_configuration()
-                        .and_then(|draft| draft.actual.as_ref())
-                        .is_some_and(|actual| {
-                            actual
-                                .fields
-                                .iter()
-                                .any(super::ConfigurationField::editable)
-                        }),
                     _ => true,
                 })
+                .filter(|entry| self.configuration_command_available(entry.command))
                 .filter(|entry| entry.command != Command::ToggleHelp)
                 .collect::<Vec<_>>();
         self.state.command_bar = commands
@@ -1557,6 +1564,7 @@ impl App {
             entries: self
                 .commands
                 .in_scope(scope)
+                .filter(|registered| self.configuration_command_available(registered.command))
                 .filter(|registered| {
                     !matches!(
                         registered.command,
