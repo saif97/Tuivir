@@ -160,6 +160,12 @@ Page Up/Page Down, Ctrl+U/Ctrl+D, or the mouse wheel scroll long read-only conte
 while editable controls remain visible. Read-only settings do not receive editing
 focus. Native field paths identify nested values; arrays retain their JSON values.
 
+Long values wrap inside their column; narrow layouts stack labels above values.
+Click a read-only value and press `y` to copy the whole value, or drag within it
+and press `y` to copy a portion. Esc clears the selection. Copying preserves the
+original text without labels, padding, or visual line breaks. Copy and clear hints
+follow customized Keybindings and use the existing terminal clipboard support.
+
 Use up/down to select a field and Enter to edit. Backspace removes a character;
 Ctrl+U clears the input. Enter or Esc keeps the draft without applying it.
 Ctrl+A opens **Review changes**, showing the selected Resource, old/new values,
