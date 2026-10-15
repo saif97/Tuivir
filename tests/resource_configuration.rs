@@ -1645,3 +1645,31 @@ async fn settings_scrolls_remaining_configuration_without_moving_editable_contro
     );
     cli.assert_exhausted();
 }
+
+#[tokio::test]
+async fn tart_settings_keeps_native_nulls_and_unknown_fields() {
+    let initial = r#"{"CPU":2,"Memory":4096,"State":"stopped","Disk":null,"Display":null,"DiskFormat":"asif","Size":"20.125"}"#;
+    let (app, _, cli) = tart_app(initial, vec![]).await;
+    let fields = &app
+        .state()
+        .selected_configuration()
+        .unwrap()
+        .actual
+        .as_ref()
+        .unwrap()
+        .fields;
+    for (label, value) in [
+        ("Disk", "null"),
+        ("Display", "null"),
+        ("DiskFormat", "asif"),
+        ("Size", "20.125"),
+    ] {
+        assert!(
+            fields
+                .iter()
+                .any(|field| field.label == label && field.value == value),
+            "Missing {label}: {value}"
+        );
+    }
+    cli.assert_exhausted();
+}

@@ -156,8 +156,6 @@ impl ProviderWorkspace for TartWorkspace {
                 os: Option<String>,
                 disk: Option<u64>,
                 display: Option<String>,
-                #[serde(flatten)]
-                additional_fields: serde_json::Map<String, serde_json::Value>,
             }
             let output = cli
                 .run(ProcessSpec::new(
@@ -172,7 +170,11 @@ impl ProviderWorkspace for TartWorkspace {
                         "Tart could not load VM configuration",
                     ))
                 })?;
-            let row: Configuration = serde_json::from_str(&output.stdout).map_err(|error| {
+            let native: serde_json::Value =
+                serde_json::from_str(&output.stdout).map_err(|error| {
+                    WorkspaceError::new(format!("Malformed Tart configuration: {error}"))
+                })?;
+            let row: Configuration = serde_json::from_value(native.clone()).map_err(|error| {
                 WorkspaceError::new(format!("Malformed Tart configuration: {error}"))
             })?;
             let state = row
@@ -193,12 +195,15 @@ impl ProviderWorkspace for TartWorkspace {
                 notice: "Tart CPU/memory changes require a stopped VM. Guest minimums are checked by Tart.".into(),
                 stop_preserves_resource: true,
             };
+            let mut excluded = vec!["/CPU", "/Memory", "/State", "/Running"];
             if let Some(os) = row.os {
+                excluded.push("/OS");
                 configuration
                     .fields
                     .push(ConfigurationField::read_only("os", "OS", os));
             }
             if let Some(disk) = row.disk {
+                excluded.push("/Disk");
                 configuration.fields.push(ConfigurationField::read_only(
                     "disk",
                     "Disk capacity (GB)",
@@ -206,14 +211,15 @@ impl ProviderWorkspace for TartWorkspace {
                 ));
             }
             if let Some(display) = row.display {
+                excluded.push("/Display");
                 configuration
                     .fields
                     .push(ConfigurationField::read_only("display", "Display", display));
             }
             super::configuration::append_native_fields(
                 &mut configuration.fields,
-                &serde_json::Value::Object(row.additional_fields),
-                &[],
+                &native,
+                &excluded,
             );
             Ok(configuration)
         })
