@@ -363,15 +363,16 @@ impl ProviderWorkspace for AppleContainerWorkspace {
                         "Apple Container could not load Container configuration",
                     ))
                 })?;
-            let rows: Vec<ContainerRow> =
+            let rows: Vec<serde_json::Value> =
                 serde_json::from_str(&output.stdout).map_err(malformed)?;
-            let row = rows
-                .into_iter()
-                .find(|row| row.configuration.id == target.resource_id().0)
+            let native = rows
+                .iter()
+                .find(|row| row["configuration"]["id"].as_str() == Some(&target.resource_id().0))
                 .ok_or_else(|| {
                     WorkspaceError::new("Apple Container did not report the selected Container")
                 })?;
-            Ok(ResourceConfiguration {
+            let row: ContainerRow = serde_json::from_value(native.clone()).map_err(malformed)?;
+            let mut configuration = ResourceConfiguration {
                 fields: vec![
                     ConfigurationField { id: "cpu".into(), label: "CPU count".into(), value: row.configuration.resources.cpus.to_string(), constraint: FieldConstraint::ReadOnly, update: ConfigurationUpdate::Live },
                     ConfigurationField { id: "memory".into(), label: "Memory (GiB)".into(), value: crate::application::MemoryGiB::from_bytes(row.configuration.resources.memory_in_bytes).to_string(), constraint: FieldConstraint::ReadOnly, update: ConfigurationUpdate::Live },
@@ -380,7 +381,20 @@ impl ProviderWorkspace for AppleContainerWorkspace {
                 state: container_state(&row.status.state),
                 notice: "Apple Container: in-place CPU/memory resize is unsupported by the CLI; values are read-only. Set resources when creating a Container outside Tuivir.".into(),
                 stop_preserves_resource: true,
-            })
+            };
+            super::configuration::append_native_fields(
+                &mut configuration.fields,
+                native,
+                &[
+                    "/id",
+                    "/configuration/id",
+                    "/status/state",
+                    "/configuration/resources/cpus",
+                    "/configuration/resources/memoryInBytes",
+                    "/configuration/image/reference",
+                ],
+            );
+            Ok(configuration)
         })
     }
 
@@ -697,7 +711,6 @@ async fn load_panel(
                 DetailView::new("logs", "Logs"),
                 DetailView::new("boot-logs", "Boot Logs"),
                 DetailView::new("stats", "Stats"),
-                DetailView::new("inspect", "Inspect"),
                 DetailView::configuration(),
             ]
         } else {

@@ -1112,7 +1112,7 @@ async fn apple_container_configuration_shows_read_only_values_and_explains_resiz
     let mut app = App::new();
     let requests = app.update(runtime.discover().await.remove(0).into_event());
     drive(&mut app, &runtime, requests).await;
-    let requests = app.invoke(Command::ActivateDetailView(5));
+    let requests = open_settings(&mut app);
     drive(&mut app, &runtime, requests).await;
     let screen = render_to_text(app.state(), 200, 36);
     let text = screen.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -1127,6 +1127,27 @@ async fn apple_container_configuration_shows_read_only_values_and_explains_resiz
     press(&mut app, "esc");
     assert!(text.contains("CPU count: 2"), "{screen}");
     assert!(text.contains("Memory (GiB): 1"), "{screen}");
+    let tabs = screen
+        .lines()
+        .find(|line| line.contains("Overview"))
+        .unwrap();
+    assert!(!tabs.contains("Inspect"), "{tabs}");
+    let fields = &app
+        .state()
+        .selected_configuration()
+        .unwrap()
+        .actual
+        .as_ref()
+        .unwrap()
+        .fields;
+    assert!(fields.iter().any(
+        |field| field.label == "configuration.initProcess.executable" && field.value == "/bin/sh"
+    ));
+    assert!(
+        !fields
+            .iter()
+            .any(|field| field.label == "configuration.resources.memoryInBytes")
+    );
     assert!(screen.contains("Read-only settings"), "{screen}");
     assert!(
         text.contains("Image: docker.io/library/alpine:3.23"),
