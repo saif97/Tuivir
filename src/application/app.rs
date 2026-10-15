@@ -962,7 +962,12 @@ impl App {
                 offset,
                 scroll,
             } => {
-                if self.state.configuration_selected() {
+                if self.state.configuration_selected()
+                    && self
+                        .state
+                        .selected_configuration()
+                        .is_some_and(|draft| draft.selection.is_some())
+                {
                     if let Some(draft) = self.selected_configuration_mut()
                         && let Some(selection) = &mut draft.selection
                         && let Some(value) = draft

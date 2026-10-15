@@ -1760,6 +1760,10 @@ fn settings_pointer(
         app.state(),
         ratatui::layout::Rect::new(0, 0, width, height),
     );
+    app.set_configuration_scroll_limit(tuivir::presentation::configuration_scroll_limit(
+        app.state(),
+        &layout,
+    ));
     if let Some(command) = tuivir::presentation::resolve_mouse(
         &layout,
         tuivir::presentation::MouseInput {
@@ -1841,6 +1845,52 @@ async fn dragging_back_across_wrapped_unicode_values_copies_only_source_text() {
     assert!(
         app.take_pending_details_copy().is_none(),
         "Cleared selection should not copy stale text"
+    );
+    cli.assert_exhausted();
+}
+
+#[tokio::test]
+async fn dragging_below_settings_scrolls_and_extends_the_original_value_selection() {
+    let value = format!("START-{}-END", "0123456789".repeat(300));
+    let initial =
+        serde_json::json!({"CPU":2,"Memory":4096,"State":"stopped","Token":value}).to_string();
+    let (mut app, _, cli) = tart_app(&initial, vec![]).await;
+    let screen = render_to_text(app.state(), 150, 20);
+    let (column, row) = point_at_text(&screen, "START-");
+    settings_pointer(
+        &mut app,
+        tuivir::presentation::MouseAction::Press,
+        column,
+        row,
+        150,
+        20,
+    );
+    for _ in 0..12 {
+        let layout = tuivir::presentation::ScreenLayout::measure(
+            app.state(),
+            ratatui::layout::Rect::new(0, 0, 150, 20),
+        );
+        let edge = layout.configuration.as_ref().unwrap().area.bottom();
+        settings_pointer(
+            &mut app,
+            tuivir::presentation::MouseAction::Drag,
+            column,
+            edge,
+            150,
+            20,
+        );
+    }
+    assert!(
+        !render_to_text(app.state(), 150, 20).contains("START-"),
+        "Drag should scroll the long value"
+    );
+    press(&mut app, "y");
+    let copied = app.take_pending_details_copy().unwrap();
+    assert!(value.starts_with(&copied));
+    assert!(copied.len() > 300 && copied.len() < value.len());
+    assert!(
+        !copied.contains('\n'),
+        "Visual wraps must not change copied source"
     );
     cli.assert_exhausted();
 }

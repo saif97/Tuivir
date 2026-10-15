@@ -275,7 +275,11 @@ pub struct ConfigurationValueRegion {
 impl ConfigurationValueRegion {
     pub fn source_offset(&self, column: u16) -> usize {
         let cell = usize::from(column.saturating_sub(self.area.x));
-        self.offsets[cell.min(self.offsets.len() - 1)]
+        self.offsets
+            .get(cell)
+            .or_else(|| self.offsets.last())
+            .copied()
+            .unwrap_or(0)
     }
 }
 

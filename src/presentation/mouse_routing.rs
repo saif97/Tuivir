@@ -52,18 +52,34 @@ fn drag(layout: &ScreenLayout, input: MouseInput, boundary_grab: Option<u16>) ->
         let panes = layout.panes.as_ref()?;
         let point = point(input);
         if let Some(configuration) = &layout.configuration {
-            if let Some(value) = configuration
-                .values
-                .iter()
-                .find(|value| value.area.contains(point))
-            {
-                return Some(Command::ExtendConfigurationSelection {
-                    field: value.field,
-                    offset: value.source_offset(point.x),
-                    scroll: 0,
-                });
+            if point.x < configuration.area.x || point.x >= configuration.area.right() {
+                return None;
             }
-            return None;
+            let (value, scroll) = if point.y < configuration.area.y {
+                (configuration.values.first()?, -1)
+            } else if point.y >= configuration.area.bottom() {
+                (configuration.values.last()?, 1)
+            } else {
+                (
+                    configuration
+                        .values
+                        .iter()
+                        .min_by_key(|value| value.area.y.abs_diff(point.y))?,
+                    0,
+                )
+            };
+            let offset = if scroll < 0 {
+                value.offsets.first().copied().unwrap_or(0)
+            } else if scroll > 0 {
+                value.offsets.last().copied().unwrap_or(0)
+            } else {
+                value.source_offset(point.x)
+            };
+            return Some(Command::ExtendConfigurationSelection {
+                field: value.field,
+                offset,
+                scroll,
+            });
         }
         if panes.detail_content.contains(point) {
             return Some(Command::ExtendDetailsSelection {
