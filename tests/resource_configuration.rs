@@ -1112,10 +1112,7 @@ async fn apple_container_configuration_shows_read_only_values_and_explains_resiz
     assert!(!help.contains("Review changes"), "{help}");
     press(&mut app, "esc");
     assert!(screen.contains("CPU count: 2 (read-only)"), "{screen}");
-    assert!(
-        screen.contains("Memory (bytes): 1073741824 (read-only)"),
-        "{screen}"
-    );
+    assert!(screen.contains("Memory (GiB): 1 (read-only)"), "{screen}");
     assert!(
         screen.contains("in-place CPU/memory resize is unsupported"),
         "{screen}"
