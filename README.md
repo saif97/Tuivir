@@ -140,6 +140,33 @@ tuivir
 The interface shows the available commands and their key bindings in the
 footer. Run `tuivir --help` for command-line options.
 
+### Apple Container
+
+The Apple Container Provider Workspace operates existing Containers, Images,
+Networks, and Volumes through the current user's local `container` CLI and its
+inherited settings. The targeted baseline is Apple Silicon, macOS 26, and CLI
+1.5.0. Other installed CLI versions attempt normal operations; older-version
+compatibility is not promised.
+
+Start the service explicitly outside Tuivir with `container system start`.
+An installed CLI remains visible when the service is unavailable; refresh the
+Workspace after starting the service to recover. Tuivir does not administer the
+service or create Resources.
+
+Running Containers offer Stop, composed Stop-then-Start Restart, Delete, and an
+embedded `/bin/sh` Shell. Stopped Containers offer Start and Delete. Delete uses
+the usual confirmation, forcing container deletion only when the last reported
+Resource State is not positively stopped. Built-in Networks are inspectable
+without Delete; dependency refusals are preserved. Image deletion verifies the
+requested reference rather than relying on exit status or filtered listings.
+
+Containers provide the latest 200 process Logs, separate VM Boot Logs, finite
+Stats, and Inspect. Images, Networks, and Volumes provide Inspect. Resource Shell
+Sessions use the existing navigation, input controls, and cleanup behavior.
+
+Automated fixture validation is separate from live Mac verification, which is
+pending the [supported-macOS smoke checklist](docs/apple-container-smoke.md).
+
 ## Provider roadmap
 - [x] Docker
 - [x] Incus

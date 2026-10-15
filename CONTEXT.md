@@ -48,6 +48,10 @@ _Avoid_: Resource pane, resource list
 An independently managed storage Resource, such as a Docker volume or an Incus custom storage volume. Storage owned as part of another Resource, a host path mounted into a Docker Sandbox, and a volume snapshot are not Volumes in Tuivir.
 _Avoid_: Disk, mount, instance storage
 
+**Network**:
+An independently managed networking Resource, such as an Apple Container network. A Resource's interface, address, or port mapping is not itself a Network in Tuivir.
+_Avoid_: Interface, address, port mapping
+
 **Target Environment**:
 The environment already selected through a Provider's CLI configuration, such as a Docker context or an Incus remote and project. Some Providers do not select one.
 _Avoid_: Cluster, server, connection

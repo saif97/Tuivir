@@ -20,6 +20,10 @@ const LIST: &[&str] = &["list", "--format", "json"];
 async fn builtin_runtime_discovers_tart_and_renders_its_empty_workspace() {
     let cli = FixtureCli::new([
         (
+            ProcessSpec::new("container", &["system", "version", "--format", "json"]),
+            Err(ProcessError::ExecutableNotFound),
+        ),
+        (
             ProcessSpec::new("docker", &["context", "show"]),
             Err(ProcessError::ExecutableNotFound),
         ),

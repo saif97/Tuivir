@@ -1,0 +1,34 @@
+[
+  {
+    "id": "system-renamed",
+    "configuration": {
+      "name": "system-renamed",
+      "mode": "nat",
+      "creationDate": "2026-10-01T12:00:00Z",
+      "labels": {
+        "com.apple.container.resource.role": "builtin"
+      },
+      "plugin": "container-network-vmnet",
+      "options": {}
+    },
+    "status": {
+      "ipv4Subnet": "192.168.64.0/24",
+      "ipv4Gateway": "192.168.64.1"
+    }
+  },
+  {
+    "id": "default",
+    "configuration": {
+      "name": "default",
+      "mode": "nat",
+      "creationDate": "2026-10-01T12:00:00Z",
+      "labels": {},
+      "plugin": "container-network-vmnet",
+      "options": {}
+    },
+    "status": {
+      "ipv4Subnet": "192.168.64.0/24",
+      "ipv4Gateway": "192.168.64.1"
+    }
+  }
+]

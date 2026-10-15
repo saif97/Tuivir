@@ -1,0 +1,32 @@
+[
+  {
+    "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "configuration": {
+      "name": "docker.io/library/alpine:3.23",
+      "descriptor": {
+        "mediaType": "application/vnd.oci.image.index.v1+json",
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "size": 512
+      },
+      "creationDate": "2026-10-01T12:00:00Z"
+    },
+    "variants": [
+      {
+        "platform": {
+          "os": "linux",
+          "architecture": "arm64"
+        },
+        "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "size": 8388608,
+        "config": {
+          "architecture": "arm64",
+          "os": "linux",
+          "rootfs": {
+            "type": "layers",
+            "diff_ids": []
+          }
+        }
+      }
+    ]
+  }
+]

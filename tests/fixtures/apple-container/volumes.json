@@ -1,0 +1,15 @@
+[
+  {
+    "id": "data",
+    "configuration": {
+      "name": "data",
+      "driver": "local",
+      "format": "ext4",
+      "source": "/Users/example/Library/Application Support/com.apple.container/volumes/data",
+      "creationDate": "2026-10-01T12:00:00Z",
+      "labels": {},
+      "options": {},
+      "sizeInBytes": 1073741824
+    }
+  }
+]
