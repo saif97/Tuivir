@@ -1665,6 +1665,12 @@ async fn settings_scrolls_remaining_configuration_without_moving_editable_contro
         !screen.contains("value-34"),
         "Scrolling up should respond immediately: {screen}"
     );
+    press(&mut app, "enter");
+    let editing = render_to_text(app.state(), 100, 20);
+    assert!(
+        !editing.contains("ctrl+u/ctrl+d scroll"),
+        "Scroll hints must not advertise input-clearing keys while editing: {editing}"
+    );
     cli.assert_exhausted();
 }
 

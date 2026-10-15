@@ -920,7 +920,7 @@ fn render_configuration(state: &AppState, focused: bool, frame: &mut Frame<'_>, 
             if changed == 1 { "" } else { "s" }
         )
     };
-    if draft.scroll_limit > 0 {
+    if draft.scroll_limit > 0 && !draft.editing {
         let keys = [
             state.hints.scroll_details_up.as_deref(),
             state.hints.scroll_details_down.as_deref(),
