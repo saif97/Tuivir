@@ -32,6 +32,10 @@ pub struct ConfigurationDraft {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FieldConstraint {
     ReadOnly,
+    Integer {
+        minimum: u64,
+        maximum: u64,
+    },
     CpuSelection {
         topology: bool,
     },
@@ -58,6 +62,12 @@ impl ConfigurationField {
             return true;
         }
         match self.constraint {
+            FieldConstraint::Integer { .. } => self
+                .value
+                .parse::<u64>()
+                .ok()
+                .zip(value.parse::<u64>().ok())
+                .is_some_and(|(a, b)| a == b),
             FieldConstraint::ReadOnly => false,
             FieldConstraint::CpuSelection { .. } => false,
             FieldConstraint::Quantity { .. } => quantity_bytes(&self.value)
@@ -80,6 +90,9 @@ impl ConfigurationField {
 
     pub fn validate(&self, value: &str) -> Result<(), String> {
         let valid = match self.constraint {
+            FieldConstraint::Integer { minimum, maximum } => value
+                .parse::<u64>()
+                .is_ok_and(|n| n >= minimum && n <= maximum),
             FieldConstraint::ReadOnly => false,
             FieldConstraint::CpuSelection { topology } => valid_cpu_selection(value, topology),
             FieldConstraint::Quantity { percent } => {
@@ -111,6 +124,10 @@ impl ConfigurationField {
             Ok(())
         } else {
             Err(match self.constraint {
+                FieldConstraint::Integer { minimum, maximum } => format!(
+                    "{} must be a whole number from {minimum} to {maximum}.",
+                    self.label
+                ),
                 FieldConstraint::ReadOnly => "This field is read-only.".into(),
                 FieldConstraint::CpuSelection { topology } => format!(
                     "CPU setting must be a positive count or CPU IDs (0-3,5){}.",

@@ -1006,3 +1006,60 @@ async fn tart_configuration_displays_cpu_count_and_memory_in_native_units() {
     assert!(screen.contains("Memory (MiB): 4096"), "{screen}");
     cli.assert_exhausted();
 }
+
+fn edit_selected_field(app: &mut App, value: &str) {
+    press(app, "enter");
+    press(app, "ctrl+u");
+    for character in value.chars() {
+        assert!(press(app, &character.to_string()).is_empty());
+    }
+    press(app, "enter");
+}
+
+#[tokio::test]
+async fn tart_apply_reviews_downtime_then_updates_and_restarts_the_same_vm() {
+    let updated = r#"{"CPU":4,"Memory":8192,"Running":true,"State":"running"}"#;
+    let (mut app, runtime, cli) = tart_app(
+        TART_INITIAL,
+        vec![
+            tart_read(TART_INITIAL),
+            (
+                ProcessSpec::new("tart", &["stop", "--", "mac"]),
+                success(""),
+            ),
+            (
+                ProcessSpec::new(
+                    "tart",
+                    &["set", "--cpu", "4", "--memory", "8192", "--", "mac"],
+                ),
+                success(""),
+            ),
+            (
+                ProcessSpec::background("tart", &["run", "--no-graphics", "--", "mac"]),
+                success(""),
+            ),
+            tart_read(updated),
+            (
+                ProcessSpec::new("tart", &["list", "--format", "json"]),
+                success(TART_LIST),
+            ),
+        ],
+    )
+    .await;
+    edit_selected_field(&mut app, "4");
+    press(&mut app, "down");
+    edit_selected_field(&mut app, "8192");
+    press(&mut app, "ctrl+a");
+    let screen = render_to_text(app.state(), 180, 36);
+    assert!(screen.contains("2 → 4"), "{screen}");
+    assert!(screen.contains("4096 → 8192"), "{screen}");
+    assert!(screen.contains("Downtime: stop/start"), "{screen}");
+    let requests = press(&mut app, "enter");
+    drive(&mut app, &runtime, requests).await;
+    let screen = render_to_text(app.state(), 180, 36);
+    assert!(screen.contains("CPU count: 4"), "{screen}");
+    assert!(screen.contains("Memory (MiB): 8192"), "{screen}");
+    assert!(screen.contains("Resource State: Running"), "{screen}");
+    assert!(!screen.contains('→'), "{screen}");
+    cli.assert_exhausted();
+}

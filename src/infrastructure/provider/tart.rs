@@ -56,6 +56,64 @@ fn listing_error(message: impl AsRef<str>) -> WorkspaceError {
 }
 
 impl ProviderWorkspace for TartWorkspace {
+    fn write_configuration<'a>(
+        &'a self,
+        cli: &'a dyn CliRunner,
+        target: &'a ResourceTarget,
+        actual: &'a ResourceConfiguration,
+        changes: &'a [crate::application::ConfigurationChange],
+    ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>> {
+        Box::pin(async move {
+            if target.panel_id().0 != "vms" {
+                return Err(WorkspaceError::new(
+                    "Tart configuration is only available for local VMs",
+                ));
+            }
+            let mut args = vec!["set"];
+            for change in changes {
+                args.push(match change.field.id.as_str() {
+                    "cpu" => "--cpu",
+                    "memory" => "--memory",
+                    _ => return Err(WorkspaceError::new("Unsupported Tart configuration field")),
+                });
+                args.push(&change.proposed);
+            }
+            args.extend(["--", &target.resource_id().0]);
+            let restart = actual.state == ResourceState::Running;
+            if restart {
+                self.execute_command(cli, target, ResourceCommand::Stop, Some(actual.state))
+                    .await?;
+            }
+            let result = cli
+                .run(ProcessSpec::new("tart", &args))
+                .await
+                .map(|_| ())
+                .map_err(|error| {
+                    WorkspaceError::new(provider_cli_error(
+                        "Tart",
+                        &error,
+                        "Tart could not update VM configuration",
+                    ))
+                });
+            if restart
+                && let Err(error) = self
+                    .execute_command(
+                        cli,
+                        target,
+                        ResourceCommand::Start,
+                        Some(ResourceState::Stopped),
+                    )
+                    .await
+            {
+                return Err(WorkspaceError::new(match result {
+                    Ok(()) => format!("Settings saved, but restart failed: {}", error.message),
+                    Err(write) => format!("{}; restart failed: {}", write.message, error.message),
+                }));
+            }
+            result
+        })
+    }
+
     fn load_configuration<'a>(
         &'a self,
         cli: &'a dyn CliRunner,
@@ -104,8 +162,8 @@ impl ProviderWorkspace for TartWorkspace {
                 });
             Ok(ResourceConfiguration {
                 fields: vec![
-                    ConfigurationField { id: "cpu".into(), label: "CPU count".into(), value: row.cpu.to_string(), constraint: FieldConstraint::ReadOnly, update: ConfigurationUpdate::Stopped },
-                    ConfigurationField { id: "memory".into(), label: "Memory (MiB)".into(), value: row.memory.to_string(), constraint: FieldConstraint::ReadOnly, update: ConfigurationUpdate::Stopped },
+                    ConfigurationField { id: "cpu".into(), label: "CPU count".into(), value: row.cpu.to_string(), constraint: FieldConstraint::Integer { minimum: 1, maximum: u16::MAX as u64 }, update: ConfigurationUpdate::Stopped },
+                    ConfigurationField { id: "memory".into(), label: "Memory (MiB)".into(), value: row.memory.to_string(), constraint: FieldConstraint::Integer { minimum: 1, maximum: u64::MAX / (1024 * 1024) }, update: ConfigurationUpdate::Stopped },
                 ],
                 state,
                 notice: "Tart CPU/memory changes require a stopped VM. Guest minimums are checked by Tart.".into(),
