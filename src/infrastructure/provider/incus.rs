@@ -153,6 +153,254 @@ async fn custom_volume_resources(
 }
 
 impl ProviderWorkspace for IncusWorkspace {
+    fn write_configuration<'a>(
+        &'a self,
+        cli: &'a dyn CliRunner,
+        target: &'a ResourceTarget,
+        actual: &'a crate::application::ResourceConfiguration,
+        changes: &'a [crate::application::ConfigurationChange],
+    ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>> {
+        Box::pin(async move {
+            let stop = actual.state == ResourceState::Running
+                && changes
+                    .iter()
+                    .any(|change| change.field.update.requires_stop(&change.proposed));
+            if stop {
+                self.execute_command(cli, target, ResourceCommand::Stop, Some(actual.state))
+                    .await?;
+            }
+            let result = async {
+                for change in changes {
+                    if !["limits.cpu", "limits.memory"].contains(&change.field.id.as_str()) {
+                        return Err(WorkspaceError::new("Unsupported Incus configuration field"));
+                    }
+                    let proposed =
+                        if change.field.id == "limits.memory" && !change.proposed.ends_with('%') {
+                            crate::application::MemoryGiB::parse(&change.proposed)
+                                .ok_or_else(|| WorkspaceError::new("Invalid memory size in GiB"))?
+                                .bytes()
+                                .to_string()
+                        } else {
+                            change.proposed.clone()
+                        };
+                    let assignment = format!("{}={proposed}", change.field.id);
+                    cli.run(ProcessSpec::new(
+                        "incus",
+                        &["config", "set", &target.resource_id().0, &assignment],
+                    ))
+                    .await
+                    .map_err(|error| {
+                        WorkspaceError::new(provider_cli_error(
+                            PROVIDER_NAME,
+                            &error,
+                            "Incus could not update instance configuration",
+                        ))
+                    })?;
+                }
+                Ok(())
+            }
+            .await;
+            if stop
+                && let Err(restart) = self
+                    .execute_command(
+                        cli,
+                        target,
+                        ResourceCommand::Start,
+                        Some(ResourceState::Stopped),
+                    )
+                    .await
+            {
+                return Err(WorkspaceError::new(match result {
+                    Ok(()) => {
+                        format!("Settings saved, but restart failed: {}", restart.message)
+                    }
+                    Err(error) => {
+                        format!("{}; restart failed: {}", error.message, restart.message)
+                    }
+                }));
+            }
+            result
+        })
+    }
+
+    fn load_configuration<'a>(
+        &'a self,
+        cli: &'a dyn CliRunner,
+        target: &'a ResourceTarget,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<crate::application::ResourceConfiguration, WorkspaceError>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            if target.panel_id().0 != INSTANCES_PANEL_ID {
+                return Err(WorkspaceError::new(
+                    "Incus configuration editing is only available for instances",
+                ));
+            }
+            let (output, server) = tokio::try_join!(
+                cli.run(ProcessSpec::new(
+                    "incus",
+                    &["list", &target.resource_id().0, "--format=json"]
+                )),
+                cli.run(ProcessSpec::new("incus", &["query", "/1.0"])),
+            )
+            .map_err(|error| {
+                WorkspaceError::new(provider_cli_error(
+                    PROVIDER_NAME,
+                    &error,
+                    "Could not load instance configuration and capabilities",
+                ))
+            })?;
+            let server: serde_json::Value =
+                serde_json::from_str(&server.stdout).map_err(|error| {
+                    WorkspaceError::new(format!("Malformed Incus capabilities: {error}"))
+                })?;
+            let extensions = server["api_extensions"]
+                .as_array()
+                .ok_or_else(|| WorkspaceError::new("Incus omitted server capabilities"))?;
+            let supports = |extension: &str| {
+                extensions
+                    .iter()
+                    .any(|value| value.as_str() == Some(extension))
+            };
+            let rows: Vec<serde_json::Value> =
+                serde_json::from_str(&output.stdout).map_err(|error| {
+                    WorkspaceError::new(format!("Malformed Incus configuration: {error}"))
+                })?;
+            let row = rows
+                .iter()
+                .find(|row| row["name"].as_str() == Some(&target.resource_id().0))
+                .ok_or_else(|| WorkspaceError::new("Incus instance no longer exists"))?;
+            let vm = row["type"].as_str() == Some("virtual-machine");
+            let config = row["expanded_config"]
+                .as_object()
+                .ok_or_else(|| WorkspaceError::new("Incus omitted effective configuration"))?;
+            use crate::application::{
+                ConfigurationField, ConfigurationUpdate, FieldConstraint, ResourceConfiguration,
+            };
+            let value = |key: &str, default: &str| {
+                config
+                    .get(key)
+                    .and_then(|value| value.as_str())
+                    .unwrap_or(default)
+                    .to_string()
+            };
+            let enabled =
+                |key: &str, default: bool| match value(key, "").to_ascii_lowercase().as_str() {
+                    "true" | "yes" | "1" | "on" => true,
+                    "false" | "no" | "0" | "off" => false,
+                    _ => default,
+                };
+            let cpu = value("limits.cpu", if vm { "1" } else { "" });
+            let cpu_update = if !vm {
+                ConfigurationUpdate::Live
+            } else if !supports("cpu_hotplug")
+                || cpu.parse::<u32>().ok().is_none_or(|count| count > 64)
+            {
+                ConfigurationUpdate::Stopped
+            } else {
+                ConfigurationUpdate::CpuHotplug { maximum: 64 }
+            };
+            let memory_update = if vm
+                && (!supports("memory_hotplug")
+                    || !enabled("limits.memory.hotplug", true)
+                    || enabled("limits.memory.hugepages", false))
+            {
+                ConfigurationUpdate::Stopped
+            } else {
+                ConfigurationUpdate::Live
+            };
+            let mut configuration = ResourceConfiguration {
+                stop_preserves_resource: row["ephemeral"].as_bool() != Some(true),
+                fields: vec![
+                    ConfigurationField {
+                        id: "limits.cpu".into(),
+                        update: cpu_update,
+                        label: if vm && supports("instance_limits_cpu_topology") {
+                            "CPU count, IDs or topology"
+                        } else {
+                            "CPU count or IDs"
+                        }
+                        .into(),
+                        value: value("limits.cpu", if vm { "1" } else { "" }),
+                        constraint: FieldConstraint::CpuSelection {
+                            topology: vm && supports("instance_limits_cpu_topology"),
+                        },
+                    },
+                    ConfigurationField {
+                        id: "limits.memory".into(),
+                        update: memory_update,
+                        label: "Memory limit (GiB or %)".into(),
+                        value: {
+                            let native = value("limits.memory", if vm { "1GiB" } else { "" });
+                            if native.is_empty() || native.ends_with('%') {
+                                native
+                            } else {
+                                crate::application::MemoryGiB::from_native_quantity(&native)
+                                    .ok_or_else(|| {
+                                        WorkspaceError::new(
+                                            "Incus returned an unsupported memory size",
+                                        )
+                                    })?
+                                    .to_string()
+                            }
+                        },
+                        constraint: FieldConstraint::MemoryGiB {
+                            minimum_bytes: 1,
+                            maximum_bytes: None,
+                            step_bytes: 1,
+                            unlimited: false,
+                            percent: true,
+                        },
+                    },
+                ],
+                state: incus_resource_state(row["status"].as_str().unwrap_or("unknown")),
+                notice:
+                    "Edits set overrides on the selected instance; shared profiles stay unchanged."
+                        .into(),
+            };
+            for (id, label, value) in [
+                ("kind", "Kind", row["type"].as_str()),
+                ("architecture", "Architecture", row["architecture"].as_str()),
+            ] {
+                if let Some(value) = value {
+                    configuration
+                        .fields
+                        .push(ConfigurationField::read_only(id, label, value));
+                }
+            }
+            if let Some(profiles) = row["profiles"].as_array() {
+                configuration.fields.push(ConfigurationField::read_only(
+                    "profiles",
+                    "Profiles",
+                    profiles
+                        .iter()
+                        .filter_map(serde_json::Value::as_str)
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ));
+            }
+            let mut excluded = vec![
+                "/name",
+                "/status",
+                "/type",
+                "/architecture",
+                "/profiles",
+                "/config",
+                "/expanded_config/limits.cpu",
+                "/expanded_config/limits.memory",
+            ];
+            if row.get("expanded_devices").is_some() {
+                excluded.push("/devices");
+            }
+            super::configuration::append_native_fields(&mut configuration.fields, row, &excluded);
+            Ok(configuration)
+        })
+    }
+
     fn id(&self) -> ProviderId {
         ProviderId::new(PROVIDER_ID)
     }
@@ -392,8 +640,8 @@ fn instance_detail_command<'a>(
 fn instance_detail_views() -> Vec<DetailView> {
     vec![
         DetailView::new(INFO_VIEW_ID, "Info"),
-        DetailView::new(CONFIG_VIEW_ID, "Config"),
         DetailView::new(CONSOLE_LOG_VIEW_ID, "Console Log"),
+        DetailView::configuration(),
     ]
 }
 

@@ -97,6 +97,13 @@ detail_view_previous = ["h", "left"]
 detail_scroll_down = ["ctrl+d", "pagedown"]
 detail_scroll_up = ["ctrl+u", "pageup"]
 details_copy = ["y"]
+configuration_apply = ["ctrl+a"]
+configuration_edit = ["enter"]
+configuration_next_field = ["down", "j"]
+configuration_previous_field = ["up", "k"]
+configuration_finish_field = ["enter", "esc"]
+configuration_backspace = ["backspace"]
+configuration_clear_field = ["ctrl+u"]
 layout_boundary_left = ["<"]
 layout_boundary_right = [">"]
 
@@ -140,6 +147,58 @@ tuivir
 The interface shows the available commands and their key bindings in the
 footer. Run `tuivir --help` for command-line options.
 
+### Resource CPU and memory
+
+Select a Docker container, Incus instance, or local Tart VM, focus Details,
+and move to the Settings tab with the left/right keys. Editable settings appear
+first. The same tab shows the remaining native configuration under read-only
+settings, including nested fields; CPU/memory controls are not repeated there.
+Settings replaces the separate Config/Inspect tab for these Resources and Apple
+Containers. Other Resource kinds keep their native inspection views.
+
+Page Up/Page Down, Ctrl+U/Ctrl+D, or the mouse wheel scroll long read-only content
+while editable controls remain visible. Read-only settings do not receive editing
+focus. Native field paths identify nested values; arrays retain their JSON values.
+
+Long values wrap inside their column; narrow layouts stack labels above values.
+Click a read-only value and press `y` to copy the whole value, or drag within it
+and press `y` to copy a portion. Esc clears the selection. Copying preserves the
+original text without labels, padding, or visual line breaks. Copy and clear hints
+follow customized Keybindings and use the existing terminal clipboard support.
+
+Use up/down to select a field and Enter to edit. Backspace removes a character;
+Ctrl+U clears the input. Enter or Esc keeps the draft without applying it.
+Ctrl+A opens **Review changes**, showing the selected Resource, old/new values,
+and any necessary downtime. Confirm Apply changes with Enter or y, or cancel
+with Esc or n. Hints follow customized Keybindings.
+
+Memory defaults to **GiB**: enter `0.5`, `1.5`, or `8`, for example. Tuivir
+converts to the Provider's native units. Tart changes must resolve to whole MiB;
+guest-specific minimums are checked by Tart. Docker memory can be `0` for
+unlimited; nonzero limits must be at least 6 MiB and fit the existing memory+swap
+limit. Incus also accepts whole percentages such as `50%`.
+
+Docker CPU limits accept decimal CPUs (`0` is unlimited). Tart accepts positive
+whole CPU counts. Incus accepts CPU counts or CPU IDs/ranges; supported servers
+also accept VM CPU topology syntax. Incus edits set instance overrides without
+changing shared profiles. Running Tart VMs stop/start for CPU/memory changes;
+stopped VMs stay stopped.
+
+Docker Sandbox limits are read-only where reported. Apple Container shows
+inspected CPU count and memory in GiB read-only: its CLI has no supported
+in-place CPU/memory resize operation for existing Containers. Configure those
+resources at creation outside Tuivir. Disk sizing is outside this feature.
+
+Drafts survive Resource and Provider Workspace navigation for the current
+session. Refresh with Ctrl+R to reload actual values while keeping edits.
+Apply re-reads edited fields and refuses external conflicts until you review
+again. After failures, actual values and Resource State are refreshed; saved
+fields become clean and remaining attempted values stay in the draft. Required
+stop/start operates on the same Resource and preserves its original running or
+stopped state on success. Restart failures remain visible even when settings
+were saved. Automatic rollback and draft persistence across restarts are not
+provided.
+
 ### Apple Container
 
 The Apple Container Provider Workspace operates existing Containers, Images,
@@ -161,7 +220,7 @@ without Delete; dependency refusals are preserved. Image deletion verifies the
 requested reference rather than relying on exit status or filtered listings.
 
 Containers provide the latest 200 process Logs, separate VM Boot Logs, finite
-Stats, and Inspect. Images, Networks, and Volumes provide Inspect. Resource Shell
+Stats, and Settings. Images, Networks, and Volumes provide Inspect. Resource Shell
 Sessions use the existing navigation, input controls, and cleanup behavior.
 
 Automated fixture validation is separate from live Mac verification, which is
@@ -175,7 +234,7 @@ pending the [supported-macOS smoke checklist](docs/apple-container-smoke.md).
 - [ ] Apple `container`
 - [ ] Podman
 
-- [ ] set resource size, ram, vCPU, etc
+- [x] Edit Resource CPU and memory configuration
 
 Tuivir is available under either the MIT License or the Apache License, Version
 2.0. See [LICENSE-MIT](LICENSE-MIT) and [LICENSE-APACHE](LICENSE-APACHE).

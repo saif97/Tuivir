@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use super::TextSelection;
 use crate::{
     application::{
         DetailView, ProviderRequestId, Resource, ResourceDetails, ResourcePanel, WorkspaceError,
@@ -57,11 +58,7 @@ struct ResourceDetailsState {
 }
 
 /// A half-open source range inside loaded Details text.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DetailSelection {
-    pub start: DetailPosition,
-    pub end: DetailPosition,
-}
+pub type DetailSelection = TextSelection<DetailPosition>;
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct DetailPosition {
@@ -494,6 +491,10 @@ impl ProviderWorkspaceState {
             self.details = None;
             return None;
         };
+        if view.is_configuration() {
+            self.details = None;
+            return None;
+        }
         let detail_target = DetailTarget {
             resource: target,
             view_id: view.id.clone(),
@@ -596,10 +597,7 @@ impl ProviderWorkspaceState {
         let Some(position) = detail_position(&details.content, line, column) else {
             return;
         };
-        details.selection = Some(DetailSelection {
-            start: position,
-            end: position,
-        });
+        details.selection = Some(TextSelection::begin(position));
     }
 
     pub fn extend_detail_selection(&mut self, line: u16, column: u16) {
@@ -611,7 +609,7 @@ impl ProviderWorkspaceState {
             return;
         };
         if let Some(selection) = &mut details.selection {
-            selection.end = position;
+            selection.extend(position);
         }
     }
 
@@ -998,11 +996,8 @@ fn character_at_terminal_column(text: &str, column: u16) -> u16 {
 }
 
 fn selected_text(lines: &[String], selection: &DetailSelection) -> Option<String> {
-    let (start, end) = if selection.start <= selection.end {
-        (selection.start, selection.end)
-    } else {
-        (selection.end, selection.start)
-    };
+    let range = selection.range();
+    let (start, end) = (range.start, range.end);
     if start == end || end.line as usize >= lines.len() {
         return None;
     }

@@ -6,7 +6,7 @@
 
 use super::input::{MouseAction, MouseInput};
 use super::screen_layout::ScreenLayout;
-use crate::application::Command;
+use crate::application::{Command, DetailSelectionPoint};
 
 /// Resolves one mouse event against the layout that drew the screen.
 ///
@@ -51,10 +51,45 @@ fn drag(layout: &ScreenLayout, input: MouseInput, boundary_grab: Option<u16>) ->
     if boundary_grab.is_none() {
         let panes = layout.panes.as_ref()?;
         let point = point(input);
+        if let Some(configuration) = &layout.configuration {
+            if point.x < configuration.area.x || point.x >= configuration.area.right() {
+                return None;
+            }
+            let (value, scroll) = if point.y < configuration.area.y {
+                (configuration.values.first()?, -1)
+            } else if point.y >= configuration.area.bottom() {
+                (configuration.values.last()?, 1)
+            } else {
+                (
+                    configuration
+                        .values
+                        .iter()
+                        .min_by_key(|value| value.area.y.abs_diff(point.y))?,
+                    0,
+                )
+            };
+            let offset = if scroll < 0 {
+                value.offsets.first().copied().unwrap_or(0)
+            } else if scroll > 0 {
+                value.offsets.last().copied().unwrap_or(0)
+            } else {
+                value.source_offset(point.x)
+            };
+            return Some(Command::ExtendDetailsSelection {
+                point: DetailSelectionPoint::ConfigurationValue {
+                    field: value.field,
+                    offset,
+                },
+                scroll,
+            });
+        }
         if panes.detail_content.contains(point) {
             return Some(Command::ExtendDetailsSelection {
-                line: point.y - panes.detail_content.y,
-                column: point.x - panes.detail_content.x,
+                point: DetailSelectionPoint::Text {
+                    line: point.y - panes.detail_content.y,
+                    column: point.x - panes.detail_content.x,
+                },
+                scroll: 0,
             });
         }
         if point.x >= panes.detail_content.x && point.x < panes.detail_content.right() {
@@ -114,10 +149,25 @@ fn press(layout: &ScreenLayout, input: MouseInput) -> Option<Command> {
     if let Some(index) = index_containing(&panes.detail_views, point) {
         return Some(Command::ActivateDetailView(index));
     }
+    if let Some(configuration) = &layout.configuration
+        && let Some(value) = configuration
+            .values
+            .iter()
+            .find(|value| value.area.contains(point))
+    {
+        return Some(Command::BeginDetailsSelection {
+            point: DetailSelectionPoint::ConfigurationValue {
+                field: value.field,
+                offset: value.source_offset(point.x),
+            },
+        });
+    }
     if panes.detail_content.contains(point) {
         return Some(Command::BeginDetailsSelection {
-            line: point.y - panes.detail_content.y,
-            column: point.x - panes.detail_content.x,
+            point: DetailSelectionPoint::Text {
+                line: point.y - panes.detail_content.y,
+                column: point.x - panes.detail_content.x,
+            },
         });
     }
     if let Some(panel) = index_containing(&panes.resource_panels, point) {

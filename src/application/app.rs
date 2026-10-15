@@ -1,3 +1,4 @@
+use super::{ConfigurationChange, ConfigurationDraft, ConfigurationReview, ResourceConfiguration};
 use std::collections::HashMap;
 
 use super::workspace::{DetailCompletion, ProviderWorkspaceState};
@@ -15,6 +16,18 @@ use crate::domain::{DetailViewId, Provider, ProviderId, ResourceState, ResourceT
 /// User intentions are [`Command`]s, resolved from keys, not events. Keeping
 /// the two separate means a keypress never looks like a completed refresh.
 pub enum AppEvent {
+    ResourceConfigurationApplied {
+        request_id: ProviderRequestId,
+        provider_id: ProviderId,
+        target: ResourceTarget,
+        outcome: super::ConfigurationOutcome,
+    },
+    ResourceConfigurationCompleted {
+        request_id: ProviderRequestId,
+        provider_id: ProviderId,
+        target: ResourceTarget,
+        result: Result<ResourceConfiguration, WorkspaceError>,
+    },
     ProviderDiscovered {
         provider: Provider,
         error: Option<WorkspaceError>,
@@ -97,6 +110,7 @@ fn operation_failure(
 
 #[derive(Default)]
 pub struct AppState {
+    pub configuration_drafts: HashMap<(ProviderId, ResourceTarget), ConfigurationDraft>,
     pub providers: Vec<ProviderWorkspaceState>,
     pub focused_pane: FocusedPane,
     /// Index into `providers` of the currently active provider — the one
@@ -143,6 +157,23 @@ pub struct AppState {
 }
 
 impl AppState {
+    pub fn selected_configuration(&self) -> Option<&ConfigurationDraft> {
+        let workspace = self.active_workspace()?;
+        let target = workspace.selected_resource_target()?;
+        self.configuration_drafts
+            .get(&(workspace.id().clone(), target))
+    }
+
+    pub fn configuration_selected(&self) -> bool {
+        self.active_workspace().is_some_and(|workspace| {
+            let super::WorkspacePresentation::Ready(view) = workspace.presentation() else {
+                return false;
+            };
+            view.selected_detail_view
+                .is_some_and(super::DetailView::is_configuration)
+        })
+    }
+
     /// Returns the single Provider Workspace currently visible to the user.
     pub fn active_workspace(&self) -> Option<&ProviderWorkspaceState> {
         self.active_provider
@@ -229,6 +260,12 @@ impl AppState {
 /// First effective bindings projected for inline display.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct KeyHints {
+    pub confirm: Option<String>,
+    pub cancel: Option<String>,
+    pub copy_details: Option<String>,
+    pub clear_configuration_selection: Option<String>,
+    pub scroll_details_up: Option<String>,
+    pub scroll_details_down: Option<String>,
     pub focus_providers: Option<String>,
     pub focus_resource_panels: Vec<Option<String>>,
     pub focus_details: Option<String>,
@@ -236,7 +273,34 @@ pub struct KeyHints {
 
 impl KeyHints {
     fn from_registry(registry: &CommandRegistry) -> Self {
+        let confirmation_keys = |command| {
+            registry
+                .in_scope(CommandScope::Confirmation)
+                .find(|entry| entry.command == command)
+                .map(|entry| {
+                    entry
+                        .keys
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join("/")
+                })
+        };
         Self {
+            confirm: confirmation_keys(Command::Confirm),
+            cancel: confirmation_keys(Command::Cancel),
+            copy_details: registry
+                .first_key(Command::CopyDetails)
+                .map(|key| key.to_string()),
+            clear_configuration_selection: registry
+                .first_key(Command::ClearDetailsSelection)
+                .map(|key| key.to_string()),
+            scroll_details_up: registry
+                .first_key(Command::ScrollDetailsUp)
+                .map(|key| key.to_string()),
+            scroll_details_down: registry
+                .first_key(Command::ScrollDetailsDown)
+                .map(|key| key.to_string()),
             focus_providers: registry
                 .first_key(Command::FocusProviders)
                 .map(|key| key.to_string()),
@@ -292,6 +356,7 @@ pub struct ResourceCommandInvocation {
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// The deliberate operation awaiting the user's confirmation.
 pub enum Confirmation {
+    ResourceConfiguration(ConfigurationReview),
     ResourceCommand(ResourceCommandInvocation),
     QuitResourceShellSessions,
 }
@@ -396,6 +461,53 @@ impl App {
 
     fn apply(&mut self, event: AppEvent) -> Vec<ProviderRequest> {
         match event {
+            AppEvent::ResourceConfigurationApplied {
+                request_id,
+                provider_id,
+                target,
+                outcome,
+            } => {
+                let Some(draft) = self
+                    .state
+                    .configuration_drafts
+                    .get_mut(&(provider_id.clone(), target))
+                else {
+                    return Vec::new();
+                };
+                if draft.request_id != Some(request_id) {
+                    return Vec::new();
+                }
+                draft.request_id = None;
+                draft.applying = false;
+                draft.error = outcome.error;
+                if let Some(actual) = outcome.actual {
+                    draft.reconcile(actual);
+                }
+                vec![self.start_refresh(provider_id)]
+            }
+            AppEvent::ResourceConfigurationCompleted {
+                request_id,
+                provider_id,
+                target,
+                result,
+            } => {
+                if let Some(draft) = self
+                    .state
+                    .configuration_drafts
+                    .get_mut(&(provider_id, target))
+                    && draft.request_id == Some(request_id)
+                {
+                    draft.request_id = None;
+                    match result {
+                        Ok(actual) => {
+                            draft.reconcile(actual);
+                            draft.error = None;
+                        }
+                        Err(error) => draft.error = Some(error.message),
+                    }
+                }
+                Vec::new()
+            }
             AppEvent::ProviderDiscovered { provider, error } => {
                 self.handle_provider_discovered(provider, error)
             }
@@ -449,6 +561,18 @@ impl App {
             CommandScope::CommandFailure
         } else if self.state.help_overlay.is_some() {
             CommandScope::HelpOverlay
+        } else if self.state.configuration_selected()
+            && self.state.focused_pane == FocusedPane::Details
+        {
+            if self
+                .state
+                .selected_configuration()
+                .is_some_and(|draft| draft.editing)
+            {
+                CommandScope::ConfigurationInput
+            } else {
+                CommandScope::ConfigurationForm
+            }
         } else {
             match &self.state.focused_pane {
                 FocusedPane::Providers => CommandScope::ProviderSelector,
@@ -466,6 +590,11 @@ impl App {
     /// scope. The caller normalizes the terminal event into the registry's
     /// [`Key`] type, so this never sees a crossterm event.
     pub fn resolve_command(&self, key: Key) -> Option<Command> {
+        if self.active_scope() == CommandScope::ConfigurationInput
+            && let Some(character) = key.text_character()
+        {
+            return Some(Command::ConfigurationCharacter(character));
+        }
         self.commands.resolve(self.active_scope(), key)
     }
 
@@ -516,6 +645,29 @@ impl App {
         requests
     }
 
+    fn configuration_command_available(&self, command: Command) -> bool {
+        match command {
+            Command::EditConfigurationField
+            | Command::ApplyConfiguration
+            | Command::NextConfigurationField
+            | Command::PreviousConfigurationField => self
+                .state
+                .selected_configuration()
+                .and_then(|draft| draft.actual.as_ref())
+                .is_some_and(|actual| {
+                    actual
+                        .fields
+                        .iter()
+                        .any(super::ConfigurationField::editable)
+                }),
+            Command::ClearDetailsSelection => self
+                .state
+                .selected_configuration()
+                .is_some_and(|draft| draft.selection.is_some()),
+            _ => true,
+        }
+    }
+
     fn update_command_bar(&mut self) {
         let scope = self.active_scope();
         let resource = self
@@ -530,6 +682,7 @@ impl App {
                         .is_some_and(|resource| resource.available_commands.contains(&command)),
                     _ => true,
                 })
+                .filter(|entry| self.configuration_command_available(entry.command))
                 .filter(|entry| entry.command != Command::ToggleHelp)
                 .collect::<Vec<_>>();
         self.state.command_bar = commands
@@ -602,6 +755,7 @@ impl App {
         if !matches!(
             command,
             Command::CopyDetails
+                | Command::ClearDetailsSelection
                 | Command::BeginDetailsSelection { .. }
                 | Command::ExtendDetailsSelection { .. }
                 | Command::ExtendDetailsSelectionAtEdge { .. }
@@ -610,12 +764,121 @@ impl App {
             workspace.clear_detail_selection();
         }
         match command {
+            Command::ApplyConfiguration => {
+                if !self.state.configuration_selected() {
+                    return Vec::new();
+                }
+                let workspace = self.state.active_workspace().unwrap();
+                let target = workspace.selected_resource_target().unwrap();
+                let Some(draft) = self.state.selected_configuration() else {
+                    return Vec::new();
+                };
+                if draft.request_id.is_some() || draft.validation_error().is_some() {
+                    return Vec::new();
+                }
+                let Some(actual) = &draft.actual else {
+                    return Vec::new();
+                };
+                let changes = actual
+                    .fields
+                    .iter()
+                    .zip(&draft.proposed)
+                    .filter(|(field, proposed)| !field.matches(proposed))
+                    .map(|(field, proposed)| ConfigurationChange {
+                        field: field.clone(),
+                        proposed: proposed.clone(),
+                    })
+                    .collect::<Vec<_>>();
+                if changes.is_empty() {
+                    return Vec::new();
+                }
+                self.state.confirmation =
+                    Some(Confirmation::ResourceConfiguration(ConfigurationReview {
+                        provider_id: workspace.id().clone(),
+                        resource_name: workspace.resource(&target).unwrap().name.clone(),
+                        target,
+                        actual: actual.clone(),
+                        changes,
+                    }));
+                Vec::new()
+            }
+            Command::EditConfigurationField
+            | Command::NextConfigurationField
+            | Command::PreviousConfigurationField
+            | Command::ConfigurationCharacter(_)
+            | Command::ConfigurationBackspace
+            | Command::ClearConfigurationField
+            | Command::FinishConfigurationField => {
+                if let Some(workspace) = self.state.active_workspace() {
+                    let key = (
+                        workspace.id().clone(),
+                        workspace.selected_resource_target().unwrap(),
+                    );
+                    if let Some(draft) = self.state.configuration_drafts.get_mut(&key) {
+                        if draft.request_id.is_some() {
+                            return Vec::new();
+                        }
+                        draft.scroll = 0;
+                        draft.selection = None;
+                        match command {
+                            Command::EditConfigurationField => {
+                                draft.editing = draft
+                                    .actual
+                                    .as_ref()
+                                    .and_then(|actual| actual.fields.get(draft.selected_field))
+                                    .is_some_and(super::ConfigurationField::editable)
+                            }
+                            Command::FinishConfigurationField => draft.editing = false,
+                            Command::NextConfigurationField => {
+                                if let Some(actual) = &draft.actual
+                                    && let Some(index) = (draft.selected_field + 1
+                                        ..actual.fields.len())
+                                        .find(|index| actual.fields[*index].editable())
+                                {
+                                    draft.selected_field = index;
+                                }
+                            }
+                            Command::PreviousConfigurationField => {
+                                if let Some(actual) = &draft.actual
+                                    && let Some(index) = (0..draft.selected_field)
+                                        .rev()
+                                        .find(|index| actual.fields[*index].editable())
+                                {
+                                    draft.selected_field = index;
+                                }
+                            }
+                            _ if draft.editing => {
+                                if let Some(value) = draft.proposed.get_mut(draft.selected_field) {
+                                    match command {
+                                        Command::ConfigurationCharacter(character) => {
+                                            value.push(character)
+                                        }
+                                        Command::ConfigurationBackspace => {
+                                            value.pop();
+                                        }
+                                        Command::ClearConfigurationField => value.clear(),
+                                        _ => {}
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                Vec::new()
+            }
             Command::Quit => self.request_quit(),
             Command::ToggleHelp => {
                 self.toggle_help();
                 Vec::new()
             }
-            Command::Refresh => self.refresh_active_provider(),
+            Command::Refresh => {
+                let mut requests = self.refresh_active_provider();
+                if let Some(request) = self.start_configuration_load(true) {
+                    requests.push(request);
+                }
+                requests
+            }
             Command::MovePaneBoundaryLeft => self.resize_pane_boundary(PaneBoundary::moved_left),
             Command::MovePaneBoundaryRight => self.resize_pane_boundary(PaneBoundary::moved_right),
             Command::GrabPaneBoundary(column) => {
@@ -684,25 +947,70 @@ impl App {
                 self.scroll_details(-DETAIL_SCROLL_LINES);
                 Vec::new()
             }
-            // A Details selection arrives through the mouse path. Until one is
-            // present, Copy deliberately has nothing to send to the host.
-            Command::CopyDetails => {
-                self.state.pending_details_copy = self
-                    .state
-                    .active_workspace()
-                    .and_then(ProviderWorkspaceState::selected_detail_text);
-                Vec::new()
-            }
-            Command::BeginDetailsSelection { line, column } => {
-                self.state.focused_pane = FocusedPane::Details;
+            Command::ClearDetailsSelection => {
                 if let Some(workspace) = self.state.active_workspace_mut() {
-                    workspace.begin_detail_selection(line, column);
+                    workspace.clear_detail_selection();
+                }
+                if let Some(draft) = self.selected_configuration_mut() {
+                    draft.selection = None;
                 }
                 Vec::new()
             }
-            Command::ExtendDetailsSelection { line, column } => {
-                if let Some(workspace) = self.state.active_workspace_mut() {
-                    workspace.extend_detail_selection(line, column);
+            Command::CopyDetails => {
+                self.state.pending_details_copy = if self.state.configuration_selected() {
+                    self.state
+                        .selected_configuration()
+                        .and_then(ConfigurationDraft::selected_value_text)
+                } else {
+                    self.state
+                        .active_workspace()
+                        .and_then(ProviderWorkspaceState::selected_detail_text)
+                };
+                Vec::new()
+            }
+            Command::BeginDetailsSelection { point } => {
+                self.state.focused_pane = FocusedPane::Details;
+                match point {
+                    super::DetailSelectionPoint::ConfigurationValue { field, offset }
+                        if self.state.configuration_selected() =>
+                    {
+                        if let Some(draft) = self.selected_configuration_mut() {
+                            draft.select_value(field, offset);
+                        }
+                    }
+                    super::DetailSelectionPoint::Text { line, column } => {
+                        if self.state.configuration_selected() {
+                            if let Some(draft) = self.selected_configuration_mut() {
+                                draft.selection = None;
+                            }
+                        } else if let Some(workspace) = self.state.active_workspace_mut() {
+                            workspace.begin_detail_selection(line, column);
+                        }
+                    }
+                    _ => {}
+                }
+                Vec::new()
+            }
+            Command::ExtendDetailsSelection { point, scroll } => {
+                match point {
+                    super::DetailSelectionPoint::ConfigurationValue { field, offset }
+                        if self.state.configuration_selected() =>
+                    {
+                        if let Some(draft) = self.selected_configuration_mut()
+                            && draft.selection.is_some()
+                        {
+                            draft.extend_selection(field, offset);
+                            self.scroll_details(isize::from(scroll));
+                        }
+                    }
+                    super::DetailSelectionPoint::Text { line, column }
+                        if !self.state.configuration_selected() =>
+                    {
+                        if let Some(workspace) = self.state.active_workspace_mut() {
+                            workspace.extend_detail_selection(line, column);
+                        }
+                    }
+                    _ => {}
                 }
                 Vec::new()
             }
@@ -792,6 +1100,27 @@ impl App {
     /// reported failure.
     fn confirm_or_dismiss(&mut self) -> Vec<ProviderRequest> {
         match self.state.confirmation.take() {
+            Some(Confirmation::ResourceConfiguration(review)) => {
+                let request_id = ProviderRequestId::new(self.next_request_id);
+                self.next_request_id += 1;
+                let Some(draft) = self
+                    .state
+                    .configuration_drafts
+                    .get_mut(&(review.provider_id.clone(), review.target.clone()))
+                else {
+                    return Vec::new();
+                };
+                if draft.request_id.is_some() {
+                    return Vec::new();
+                }
+                draft.request_id = Some(request_id);
+                draft.applying = true;
+                draft.editing = false;
+                draft.error = None;
+                self.pending_refreshes
+                    .retain(|_, id| id != &review.provider_id);
+                vec![ProviderRequest::ApplyResourceConfiguration { request_id, review }]
+            }
             Some(Confirmation::ResourceCommand(confirmation)) => {
                 self.dispatch_resource_command(confirmation)
             }
@@ -929,7 +1258,41 @@ impl App {
     /// load starts: a target that already matches asks for nothing, and a
     /// target that changed replaces the pending request, which is what makes
     /// the previous one's result unwelcome.
+    fn start_configuration_load(&mut self, reload: bool) -> Option<ProviderRequest> {
+        if !self.state.configuration_selected() {
+            return None;
+        }
+        let workspace = self.state.active_workspace()?;
+        let key = (
+            workspace.id().clone(),
+            workspace.selected_resource_target()?,
+        );
+        if !reload && self.state.configuration_drafts.contains_key(&key) {
+            return None;
+        }
+        let draft = self
+            .state
+            .configuration_drafts
+            .entry(key.clone())
+            .or_default();
+        if draft.request_id.is_some() {
+            return None;
+        }
+        let request_id = ProviderRequestId::new(self.next_request_id);
+        self.next_request_id += 1;
+        draft.request_id = Some(request_id);
+        draft.editing = false;
+        Some(ProviderRequest::LoadResourceConfiguration {
+            request_id,
+            provider_id: key.0,
+            target: key.1,
+        })
+    }
+
     fn sync_details(&mut self) -> Vec<ProviderRequest> {
+        if self.state.configuration_selected() {
+            return self.start_configuration_load(false).into_iter().collect();
+        }
         let request_id = ProviderRequestId::new(self.next_request_id);
         let Some(provider) = self.state.active_workspace_mut() else {
             return Vec::new();
@@ -1251,7 +1614,7 @@ impl App {
         }
         let scope = match &self.state.focused_pane {
             FocusedPane::Resources => CommandScope::ResourceView,
-            FocusedPane::Details => CommandScope::Details,
+            FocusedPane::Details => self.active_scope(),
             FocusedPane::Providers => return,
         };
         let Some(resource) = self.selected_resource() else {
@@ -1270,6 +1633,7 @@ impl App {
             entries: self
                 .commands
                 .in_scope(scope)
+                .filter(|registered| self.configuration_command_available(registered.command))
                 .filter(|registered| {
                     !matches!(
                         registered.command,
@@ -1355,14 +1719,28 @@ impl App {
         }
     }
 
-    /// Moves the detail view's first visible line, keeping at least the last
-    /// line on screen.
-    ///
-    /// Rendering owns the layout, so the application cannot know how tall the
-    /// panel is; clamping to the last line is the strongest promise it can keep
-    /// without one, and it is enough that scrolling never runs into blank space.
+    /// Accepts the host's measured Settings content limit and clamps scrolling after resize.
+    pub fn set_configuration_scroll_limit(&mut self, limit: u16) {
+        if let Some(draft) = self.selected_configuration_mut() {
+            draft.scroll_limit = limit;
+            draft.scroll = draft.scroll.min(limit);
+        }
+    }
+
+    fn selected_configuration_mut(&mut self) -> Option<&mut ConfigurationDraft> {
+        let workspace = self.state.active_workspace()?;
+        let target = workspace.selected_resource_target()?;
+        let key = (workspace.id().clone(), target);
+        self.state.configuration_drafts.get_mut(&key)
+    }
+
     fn scroll_details(&mut self, delta: isize) {
-        if let Some(provider) = self.state.active_workspace_mut() {
+        if self.state.configuration_selected() {
+            if let Some(draft) = self.selected_configuration_mut() {
+                draft.scroll = (usize::from(draft.scroll).saturating_add_signed(delta))
+                    .min(usize::from(draft.scroll_limit)) as u16;
+            }
+        } else if let Some(provider) = self.state.active_workspace_mut() {
             provider.scroll_details(delta);
         }
     }

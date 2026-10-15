@@ -506,7 +506,11 @@ async fn every_resource_kind_offers_its_own_native_inspection() {
             resource_panel
                 .detail_views
                 .iter()
-                .any(|v| v.id.0 == "inspect" && v.title == "Inspect")
+                .any(|v| if panel == "containers" {
+                    v.is_configuration() && v.title == "Settings"
+                } else {
+                    v.id.0 == "inspect" && v.title == "Inspect"
+                })
         );
         let name = "--literal name";
         let target = common::resource_target(panel, name);
@@ -590,7 +594,7 @@ async fn finite_stats_preserve_native_metrics_and_explain_empty_samples() {
             .iter()
             .map(|v| v.title.as_str())
             .collect::<Vec<_>>(),
-        ["Logs", "Boot Logs", "Stats", "Inspect"]
+        ["Logs", "Boot Logs", "Stats", "Settings"]
     );
     let target = common::resource_target("containers", "web");
     let spec = ProcessSpec::new(

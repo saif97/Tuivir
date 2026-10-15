@@ -9,7 +9,10 @@ use super::{
     provider_cli_error, require_resource_state,
 };
 use crate::{
-    application::ResourceShellProcess,
+    application::{
+        ConfigurationField, ConfigurationUpdate, FieldConstraint, ResourceConfiguration,
+        ResourceShellProcess,
+    },
     infrastructure::process::{CliRunner, ProcessError, ProcessSpec},
 };
 
@@ -53,6 +56,175 @@ fn listing_error(message: impl AsRef<str>) -> WorkspaceError {
 }
 
 impl ProviderWorkspace for TartWorkspace {
+    fn write_configuration<'a>(
+        &'a self,
+        cli: &'a dyn CliRunner,
+        target: &'a ResourceTarget,
+        actual: &'a ResourceConfiguration,
+        changes: &'a [crate::application::ConfigurationChange],
+    ) -> Pin<Box<dyn Future<Output = Result<(), WorkspaceError>> + Send + 'a>> {
+        Box::pin(async move {
+            if target.panel_id().0 != "vms" {
+                return Err(WorkspaceError::new(
+                    "Tart configuration is only available for local VMs",
+                ));
+            }
+            let mut args = vec!["set".to_owned()];
+            for change in changes {
+                args.push(
+                    match change.field.id.as_str() {
+                        "cpu" => "--cpu",
+                        "memory" => "--memory",
+                        _ => {
+                            return Err(WorkspaceError::new(
+                                "Unsupported Tart configuration field",
+                            ));
+                        }
+                    }
+                    .to_owned(),
+                );
+                args.push(if change.field.id == "memory" {
+                    (crate::application::MemoryGiB::parse(&change.proposed)
+                        .ok_or_else(|| WorkspaceError::new("Invalid memory size in GiB"))?
+                        .bytes()
+                        / (1024 * 1024))
+                        .to_string()
+                } else {
+                    change.proposed.clone()
+                });
+            }
+            args.extend(["--".to_owned(), target.resource_id().0.clone()]);
+            let restart = actual.state == ResourceState::Running;
+            if restart {
+                self.execute_command(cli, target, ResourceCommand::Stop, Some(actual.state))
+                    .await?;
+            }
+            let result = cli
+                .run(ProcessSpec::new(
+                    "tart",
+                    &args.iter().map(String::as_str).collect::<Vec<_>>(),
+                ))
+                .await
+                .map(|_| ())
+                .map_err(|error| {
+                    WorkspaceError::new(provider_cli_error(
+                        "Tart",
+                        &error,
+                        "Tart could not update VM configuration",
+                    ))
+                });
+            if restart
+                && let Err(error) = self
+                    .execute_command(
+                        cli,
+                        target,
+                        ResourceCommand::Start,
+                        Some(ResourceState::Stopped),
+                    )
+                    .await
+            {
+                return Err(WorkspaceError::new(match result {
+                    Ok(()) => format!("Settings saved, but restart failed: {}", error.message),
+                    Err(write) => format!("{}; restart failed: {}", write.message, error.message),
+                }));
+            }
+            result
+        })
+    }
+
+    fn load_configuration<'a>(
+        &'a self,
+        cli: &'a dyn CliRunner,
+        target: &'a ResourceTarget,
+    ) -> Pin<Box<dyn Future<Output = Result<ResourceConfiguration, WorkspaceError>> + Send + 'a>>
+    {
+        Box::pin(async move {
+            if target.panel_id().0 != "vms" {
+                return Err(WorkspaceError::new(
+                    "Tart configuration is only available for local VMs",
+                ));
+            }
+            #[derive(Deserialize)]
+            #[serde(rename_all = "PascalCase")]
+            struct Configuration {
+                #[serde(rename = "CPU")]
+                cpu: u16,
+                memory: u64,
+                state: Option<String>,
+                running: Option<bool>,
+                #[serde(rename = "OS")]
+                os: Option<String>,
+                disk: Option<u64>,
+                display: Option<String>,
+            }
+            let output = cli
+                .run(ProcessSpec::new(
+                    "tart",
+                    &["get", "--format", "json", "--", &target.resource_id().0],
+                ))
+                .await
+                .map_err(|error| {
+                    WorkspaceError::new(provider_cli_error(
+                        "Tart",
+                        &error,
+                        "Tart could not load VM configuration",
+                    ))
+                })?;
+            let native: serde_json::Value =
+                serde_json::from_str(&output.stdout).map_err(|error| {
+                    WorkspaceError::new(format!("Malformed Tart configuration: {error}"))
+                })?;
+            let row: Configuration = Configuration::deserialize(&native).map_err(|error| {
+                WorkspaceError::new(format!("Malformed Tart configuration: {error}"))
+            })?;
+            let state = row
+                .state
+                .as_deref()
+                .map(resource_state)
+                .unwrap_or(match row.running {
+                    Some(true) => ResourceState::Running,
+                    Some(false) => ResourceState::Stopped,
+                    None => ResourceState::Unknown,
+                });
+            let mut configuration = ResourceConfiguration {
+                fields: vec![
+                    ConfigurationField { id: "cpu".into(), label: "CPU count".into(), value: row.cpu.to_string(), constraint: FieldConstraint::Integer { minimum: 1, maximum: u16::MAX as u64 }, update: ConfigurationUpdate::Stopped },
+                    ConfigurationField { id: "memory".into(), label: "Memory (GiB)".into(), value: crate::application::MemoryGiB::from_bytes(row.memory.checked_mul(1024 * 1024).ok_or_else(|| WorkspaceError::new("Tart memory size is too large"))?).to_string(), constraint: FieldConstraint::MemoryGiB { minimum_bytes: 1024 * 1024, maximum_bytes: None, step_bytes: 1024 * 1024, unlimited: false, percent: false }, update: ConfigurationUpdate::Stopped },
+                ],
+                state,
+                notice: "Tart CPU/memory changes require a stopped VM. Guest minimums are checked by Tart.".into(),
+                stop_preserves_resource: true,
+            };
+            let mut excluded = vec!["/CPU", "/Memory", "/State", "/Running"];
+            if let Some(os) = row.os {
+                excluded.push("/OS");
+                configuration
+                    .fields
+                    .push(ConfigurationField::read_only("os", "OS", os));
+            }
+            if let Some(disk) = row.disk {
+                excluded.push("/Disk");
+                configuration.fields.push(ConfigurationField::read_only(
+                    "disk",
+                    "Disk capacity (GB)",
+                    disk.to_string(),
+                ));
+            }
+            if let Some(display) = row.display {
+                excluded.push("/Display");
+                configuration
+                    .fields
+                    .push(ConfigurationField::read_only("display", "Display", display));
+            }
+            super::configuration::append_native_fields(
+                &mut configuration.fields,
+                &native,
+                &excluded,
+            );
+            Ok(configuration)
+        })
+    }
+
     fn id(&self) -> ProviderId {
         ProviderId::new("tart")
     }
@@ -100,7 +272,7 @@ impl ProviderWorkspace for TartWorkspace {
             let mut vms = ResourcePanel {
                 id: ResourcePanelId::new("vms"),
                 title: "VMs".into(),
-                detail_views: vec![DetailView::new("config", "Config")],
+                detail_views: vec![DetailView::configuration()],
                 resources: vec![],
             };
             let mut images = ResourcePanel {

@@ -41,7 +41,7 @@ use super::screen_layout::{
 /// The default presentation palette names colours by their purpose so render
 /// sites never choose unrelated terminal colours for the same meaning.
 #[derive(Clone, Copy)]
-enum ThemeRole {
+pub(super) enum ThemeRole {
     Primary,
     Success,
     Muted,
@@ -74,7 +74,7 @@ fn theme_colour(role: ThemeRole) -> Color {
     }
 }
 
-fn themed_style(role: ThemeRole) -> Style {
+pub(super) fn themed_style(role: ThemeRole) -> Style {
     Style::default().fg(theme_colour(role))
 }
 
@@ -145,6 +145,7 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
     );
     render_details_panel(
         provider.name(),
+        state,
         workspace_view,
         state.visible_resource_shell_session(),
         &state.running_commands,
@@ -152,6 +153,7 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
         state.hints.focus_details.as_deref(),
         frame,
         columns[1],
+        layout.configuration.as_ref(),
     );
 
     if let (Some(help), Some(area)) = (&state.help_overlay, help_overlay_area(state, frame.area()))
@@ -221,12 +223,69 @@ fn resource_shell_header(state: &AppState, identity: String) -> Line<'static> {
     Line::from(spans)
 }
 
+pub(super) fn configuration_review_paragraph<'a>(
+    state: &AppState,
+    review: &'a crate::application::ConfigurationReview,
+) -> Paragraph<'a> {
+    let mut lines = vec![
+        Line::styled(
+            format!("Resource: {}", review.resource_name),
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+        Line::default(),
+    ];
+    lines.extend(review.changes.iter().map(|change| {
+        Line::from(vec![
+            Span::raw(format!("{}: ", change.field.label)),
+            Span::styled(change.field.value.as_str(), themed_style(ThemeRole::Muted)),
+            Span::styled(" → ", themed_style(ThemeRole::Muted)),
+            Span::styled(
+                change.proposed.as_str(),
+                themed_style(ThemeRole::Warning).add_modifier(Modifier::BOLD),
+            ),
+        ])
+    }));
+    lines.push(Line::default());
+    lines.push(Line::styled(
+        review.downtime(),
+        themed_style(ThemeRole::Warning),
+    ));
+    let apply = state.hints.confirm.as_deref().unwrap_or("unbound");
+    let cancel = state.hints.cancel.as_deref().unwrap_or("unbound");
+    lines.push(Line::default());
+    lines.push(Line::styled(
+        format!("Apply changes [{apply}]"),
+        themed_style(ThemeRole::Primary).add_modifier(Modifier::BOLD),
+    ));
+    lines.push(Line::styled(
+        format!("Cancel [{cancel}]"),
+        themed_style(ThemeRole::Muted),
+    ));
+    Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: true })
+}
+
+fn render_configuration_review(
+    state: &AppState,
+    review: &crate::application::ConfigurationReview,
+    frame: &mut Frame<'_>,
+    area: Rect,
+) {
+    let block = modal_block(" Review changes ", ThemeRole::Warning);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    frame.render_widget(configuration_review_paragraph(state, review), inner);
+}
+
 fn render_confirmation(state: &AppState, frame: &mut Frame<'_>) {
     if let (Some(confirmation), Some(area)) =
         (&state.confirmation, confirmation_area(state, frame.area()))
     {
         frame.render_widget(Clear, area);
         let (title, lines) = match confirmation {
+            Confirmation::ResourceConfiguration(review) => {
+                render_configuration_review(state, review, frame, area);
+                return;
+            }
             Confirmation::ResourceCommand(confirmation) => {
                 let mut lines = vec![Line::from(format!(
                     "Delete {} resource {} ({})?",
@@ -272,6 +331,30 @@ fn render_confirmation(state: &AppState, frame: &mut Frame<'_>) {
 /// so the status identifies its target even while another Provider Workspace
 /// is active.
 fn render_command_bar(state: &AppState, frame: &mut Frame<'_>, area: Rect) {
+    let applying = state
+        .configuration_drafts
+        .iter()
+        .filter(|(_, draft)| draft.applying)
+        .map(|((provider_id, target), _)| {
+            let workspace = state
+                .providers
+                .iter()
+                .find(|workspace| workspace.id() == provider_id);
+            let provider = workspace.map_or("Provider", |workspace| workspace.name());
+            let name = workspace
+                .and_then(|workspace| workspace.resource(target))
+                .map(|resource| resource.name.clone())
+                .unwrap_or_else(|| target.to_string());
+            format!("Applying configuration to {provider} / {name}…")
+        })
+        .collect::<Vec<_>>();
+    if !applying.is_empty() {
+        frame.render_widget(
+            Paragraph::new(applying.join("; ")).style(themed_style(ThemeRole::Warning)),
+            area,
+        );
+        return;
+    }
     let mut spans = state
         .command_bar
         .iter()
@@ -616,6 +699,7 @@ pub(super) fn pane_block(title: String, focused: bool, chrome: PaneChrome) -> Bl
 #[allow(clippy::too_many_arguments)] // Rendering receives the already-measured host frame.
 fn render_details_panel(
     provider_name: &str,
+    state: &AppState,
     view: Option<&WorkspaceView<'_>>,
     resource_shell_session: Option<&ResourceShellSession>,
     running_commands: &[crate::application::RunningResourceCommand],
@@ -623,6 +707,7 @@ fn render_details_panel(
     details_hint: Option<&str>,
     frame: &mut Frame<'_>,
     area: Rect,
+    configuration: Option<&super::configuration_text::ConfigurationTextLayout>,
 ) {
     let summary = view
         .and_then(|view| view.selected_resource)
@@ -692,6 +777,8 @@ fn render_details_panel(
             .style(themed_style(ThemeRole::Warning).add_modifier(Modifier::BOLD)),
             rows[1],
         );
+    } else if state.configuration_selected() {
+        render_configuration(state, focused, frame, rows[1], configuration);
     } else if view.is_some_and(|view| view.shell_selected) {
         render_resource_shell_state(resource_shell_session, frame, rows[1]);
     } else if let Some(details) = view.and_then(|view| view.details) {
@@ -714,6 +801,228 @@ fn render_details_panel(
         ));
     }
     frame.render_widget(Paragraph::new(Line::from(spans)), rows[0]);
+}
+
+fn render_configuration(
+    state: &AppState,
+    focused: bool,
+    frame: &mut Frame<'_>,
+    area: Rect,
+    configuration: Option<&super::configuration_text::ConfigurationTextLayout>,
+) {
+    let Some(draft) = state.selected_configuration() else {
+        return;
+    };
+    let Some(actual) = &draft.actual else {
+        frame.render_widget(
+            Paragraph::new(draft.error.as_deref().unwrap_or("Loading Configuration…")),
+            area,
+        );
+        return;
+    };
+    let editable_count = actual
+        .fields
+        .iter()
+        .filter(|field| field.editable())
+        .count();
+    let (rows, field_height) = configuration_rows(editable_count, area);
+    frame.render_widget(
+        Paragraph::new(format!("Resource State: {:?}", actual.state))
+            .style(resource_state_style(actual.state)),
+        rows[0],
+    );
+    if editable_count > 0 {
+        frame.render_widget(
+            Paragraph::new("Editable settings").style(themed_style(ThemeRole::Muted)),
+            rows[1],
+        );
+    }
+    for (position, (index, field)) in actual
+        .fields
+        .iter()
+        .enumerate()
+        .filter(|(_, field)| field.editable())
+        .enumerate()
+    {
+        let proposed = draft.proposed.get(index).unwrap_or(&field.value);
+        let changed = !field.matches(proposed);
+        let selected = focused && index == draft.selected_field;
+        let editing = selected && draft.editing;
+        let role = if selected {
+            ThemeRole::Primary
+        } else {
+            ThemeRole::Muted
+        };
+        let mut border = Block::default()
+            .borders(if field_height == 1 {
+                Borders::NONE
+            } else {
+                Borders::ALL
+            })
+            .border_style(themed_style(role));
+        let field_area = Rect::new(
+            rows[2].x,
+            rows[2].y.saturating_add((position * field_height) as u16),
+            rows[2].width,
+            field_height as u16,
+        )
+        .intersection(rows[2]);
+        let content = border.inner(field_area);
+        let mut spans = vec![Span::styled(format!("{}: ", field.label), Style::default())];
+        if changed {
+            spans.push(Span::styled(
+                format!("{} → ", field.value),
+                themed_style(ThemeRole::Muted),
+            ));
+        }
+        spans.push(Span::styled(
+            proposed,
+            if changed {
+                themed_style(ThemeRole::Warning).add_modifier(Modifier::BOLD)
+            } else if selected {
+                Style::default().add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            },
+        ));
+        if editing {
+            spans.push(Span::styled("▏", themed_style(ThemeRole::Primary)));
+        }
+        let mut line = Line::from(spans);
+        if line.width() > usize::from(content.width) {
+            line.spans.remove(0);
+            border = border.title(if editing {
+                format!(" Editing · {} ", field.label)
+            } else {
+                format!(" {} ", field.label)
+            });
+        } else if editing {
+            border = border.title(" Editing ");
+        }
+        let scroll = line.width().saturating_sub(usize::from(content.width));
+        frame.render_widget(border, field_area);
+        frame.render_widget(
+            Paragraph::new(line).scroll((0, scroll.min(u16::MAX as usize) as u16)),
+            content,
+        );
+    }
+    let changed = actual
+        .fields
+        .iter()
+        .zip(&draft.proposed)
+        .filter(|(field, proposed)| !field.matches(proposed))
+        .count();
+    let mut status = if draft.applying {
+        "Applying changes…".into()
+    } else if !actual
+        .fields
+        .iter()
+        .any(crate::application::ConfigurationField::editable)
+    {
+        "Read only · Resizing is unavailable".into()
+    } else if changed == 0 {
+        "No unsaved changes".into()
+    } else {
+        format!(
+            "{changed} unsaved change{} · Review before applying",
+            if changed == 1 { "" } else { "s" }
+        )
+    };
+    if draft.selection.is_some() && !draft.editing {
+        if changed == 0 {
+            status = "Value selected".into();
+        }
+        if let Some(key) = &state.hints.copy_details {
+            status.push_str(&format!(" · {key} copy value"));
+        }
+        if let Some(key) = &state.hints.clear_configuration_selection {
+            status.push_str(&format!(" · {key} clear"));
+        }
+    }
+    if draft.scroll_limit > 0 && !draft.editing && draft.selection.is_none() {
+        let keys = [
+            state.hints.scroll_details_up.as_deref(),
+            state.hints.scroll_details_down.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join("/");
+        if !keys.is_empty() {
+            status.push_str(&format!(" · {keys} scroll"));
+        }
+    }
+    frame.render_widget(
+        Paragraph::new(status).style(themed_style(if changed > 0 {
+            ThemeRole::Warning
+        } else {
+            ThemeRole::Muted
+        })),
+        rows[3],
+    );
+    if let Some(text) = configuration {
+        for (row, line) in text
+            .lines
+            .iter()
+            .skip(usize::from(text.scroll))
+            .take(usize::from(text.area.height))
+            .enumerate()
+        {
+            frame.render_widget(
+                line,
+                Rect::new(text.area.x, text.area.y + row as u16, text.area.width, 1),
+            );
+        }
+    }
+}
+
+fn configuration_rows(editable_count: usize, area: Rect) -> ([Rect; 5], usize) {
+    let area = Rect::new(
+        area.x.saturating_add(1),
+        area.y.saturating_add(1),
+        area.width.saturating_sub(2),
+        area.height.saturating_sub(1),
+    );
+    let field_height = if usize::from(area.height) < editable_count * 3 + 6 {
+        1
+    } else {
+        3
+    };
+    let rows = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(u16::from(editable_count > 0)),
+        Constraint::Length((editable_count * field_height) as u16),
+        Constraint::Length(1),
+        Constraint::Min(0),
+    ])
+    .split(area);
+    ([rows[0], rows[1], rows[2], rows[3], rows[4]], field_height)
+}
+
+pub(super) fn configuration_layout(
+    state: &AppState,
+    area: Rect,
+) -> Option<super::configuration_text::ConfigurationTextLayout> {
+    if !state.configuration_selected() {
+        return None;
+    }
+    let draft = state.selected_configuration()?;
+    let actual = draft.actual.as_ref()?;
+    let count = actual
+        .fields
+        .iter()
+        .filter(|field| field.editable())
+        .count();
+    let (rows, _) = configuration_rows(count, area);
+    Some(super::configuration_text::layout(draft, rows[4]))
+}
+
+/// Report the measured content limit to the application without putting terminal layout in it.
+pub fn configuration_scroll_limit(_state: &AppState, layout: &ScreenLayout) -> u16 {
+    layout
+        .configuration
+        .as_ref()
+        .map_or(0, |text| text.scroll_limit)
 }
 
 fn render_resource_shell_state(
@@ -829,15 +1138,16 @@ fn render_detail_content(
     frame.render_widget(Paragraph::new(lines), area);
 }
 
+pub(super) fn selection_style() -> Style {
+    Style::default().fg(Color::White).bg(Color::Blue)
+}
+
 fn detail_line(text: &str, line: u16, selection: Option<&DetailSelection>) -> Line<'static> {
     let Some(selection) = selection else {
         return Line::from(text.to_owned());
     };
-    let (start, end) = if selection.start <= selection.end {
-        (selection.start, selection.end)
-    } else {
-        (selection.end, selection.start)
-    };
+    let range = selection.range();
+    let (start, end) = (range.start, range.end);
     if start == end || line < start.line || line > end.line {
         return Line::from(text.to_owned());
     }
@@ -860,7 +1170,7 @@ fn detail_line(text: &str, line: u16, selection: Option<&DetailSelection>) -> Li
     let after = text.chars().skip(last).collect::<String>();
     Line::from(vec![
         Span::raw(before),
-        Span::styled(selected, Style::default().fg(Color::White).bg(Color::Blue)),
+        Span::styled(selected, selection_style()),
         Span::raw(after),
     ])
 }

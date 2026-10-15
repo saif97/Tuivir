@@ -7,7 +7,9 @@ mod defaults;
 pub use defaults::NUMBERED_RESOURCE_PANEL_CAPACITY;
 use defaults::{BUILTIN_COMMANDS, CommandDefinition, RESOURCE_PANEL_FOCUS_COMMANDS, WORKSPACE};
 
-use super::{Key, KeybindingError, ResourceShellControls, keybinding::duplicate_keys};
+use super::{
+    DetailSelectionPoint, Key, KeybindingError, ResourceShellControls, keybinding::duplicate_keys,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ResourceCommand {
@@ -39,6 +41,14 @@ impl fmt::Display for ResourceCommand {
 /// completions stay in [`crate::application::AppEvent`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Command {
+    ApplyConfiguration,
+    EditConfigurationField,
+    NextConfigurationField,
+    PreviousConfigurationField,
+    ConfigurationCharacter(char),
+    ConfigurationBackspace,
+    ClearConfigurationField,
+    FinishConfigurationField,
     Quit,
     ToggleHelp,
     /// Refreshes the Active Workspace now rather than waiting for the clock.
@@ -65,15 +75,15 @@ pub enum Command {
     ScrollDetailsUp,
     /// Copies the text selected in the visible detail view.
     CopyDetails,
-    /// Starts a selection at a source-line character boundary in Details.
+    ClearDetailsSelection,
+    /// Starts a selection at a point resolved by the visible Details view.
     BeginDetailsSelection {
-        line: u16,
-        column: u16,
+        point: DetailSelectionPoint,
     },
-    /// Extends the active Details selection to a source-line character boundary.
+    /// Extends the same selection; dragging outside a viewport may scroll it.
     ExtendDetailsSelection {
-        line: u16,
-        column: u16,
+        point: DetailSelectionPoint,
+        scroll: i8,
     },
     /// Extends selection while the pointer is held above or below Details.
     ExtendDetailsSelectionAtEdge {
@@ -136,6 +146,8 @@ pub enum Command {
 /// unavailable Command is rejected when it is invoked, not hidden by scope.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum CommandScope {
+    ConfigurationForm,
+    ConfigurationInput,
     /// The provider selector has focus.
     ProviderSelector,
     /// The Provider Workspace's resource view has focus.
