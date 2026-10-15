@@ -95,7 +95,7 @@ const MODAL: &[CommandScope] = &[
 pub(super) const BUILTIN_COMMANDS: &[CommandDefinition] = &[
     CommandDefinition {
         id: "configuration_apply",
-        description: "Review changes",
+        description: "Review & apply",
         command: Command::ApplyConfiguration,
         scopes: &[CommandScope::ConfigurationForm],
         default_keys: &["ctrl+a"],
@@ -123,7 +123,7 @@ pub(super) const BUILTIN_COMMANDS: &[CommandDefinition] = &[
     },
     CommandDefinition {
         id: "configuration_finish_field",
-        description: "Done",
+        description: "Keep draft",
         command: Command::FinishConfigurationField,
         scopes: &[CommandScope::ConfigurationInput],
         default_keys: &["enter", "esc"],

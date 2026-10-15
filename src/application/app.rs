@@ -260,6 +260,8 @@ impl AppState {
 /// First effective bindings projected for inline display.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct KeyHints {
+    pub confirm: Option<String>,
+    pub cancel: Option<String>,
     pub focus_providers: Option<String>,
     pub focus_resource_panels: Vec<Option<String>>,
     pub focus_details: Option<String>,
@@ -267,7 +269,22 @@ pub struct KeyHints {
 
 impl KeyHints {
     fn from_registry(registry: &CommandRegistry) -> Self {
+        let confirmation_keys = |command| {
+            registry
+                .in_scope(CommandScope::Confirmation)
+                .find(|entry| entry.command == command)
+                .map(|entry| {
+                    entry
+                        .keys
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join("/")
+                })
+        };
         Self {
+            confirm: confirmation_keys(Command::Confirm),
+            cancel: confirmation_keys(Command::Cancel),
             focus_providers: registry
                 .first_key(Command::FocusProviders)
                 .map(|key| key.to_string()),

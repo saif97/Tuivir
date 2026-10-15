@@ -176,7 +176,7 @@ async fn apply_requires_review_of_old_and_new_values_and_can_be_cancelled() {
     press(&mut app, "enter");
     assert!(press(&mut app, "ctrl+a").is_empty());
     let screen = render_to_text(app.state(), 160, 32);
-    assert!(screen.contains("Confirm configuration"), "{screen}");
+    assert!(screen.contains("Review changes"), "{screen}");
     assert!(screen.contains("CPU limit (CPUs): 1.5 → 2"), "{screen}");
     assert!(screen.contains("no restart required"), "{screen}");
     assert!(press(&mut app, "esc").is_empty());
@@ -756,7 +756,7 @@ async fn configuration_form_keeps_contextual_help_and_detail_tab_navigation() {
     drive(&mut app, &runtime, requests).await;
     press(&mut app, "?");
     let screen = render_to_text(app.state(), 180, 36);
-    assert!(screen.contains("Review changes"), "{screen}");
+    assert!(screen.contains("Review & apply"), "{screen}");
     assert!(screen.contains("Edit field"), "{screen}");
     press(&mut app, "esc");
     assert!(press(&mut app, "right").is_empty());
@@ -1105,11 +1105,11 @@ async fn apple_container_configuration_shows_read_only_values_and_explains_resiz
     assert!(screen.contains("Read only"), "{screen}");
     assert!(!screen.contains("No unsaved changes"), "{screen}");
     assert!(!screen.contains("Edit field"), "{screen}");
-    assert!(!screen.contains("Review changes"), "{screen}");
+    assert!(!screen.contains("Review & apply"), "{screen}");
     press(&mut app, "?");
     let help = render_to_text(app.state(), 200, 36);
     assert!(!help.contains("Edit field"), "{help}");
-    assert!(!help.contains("Review changes"), "{help}");
+    assert!(!help.contains("Review & apply"), "{help}");
     press(&mut app, "esc");
     assert!(screen.contains("CPU count: 2 (read-only)"), "{screen}");
     assert!(screen.contains("Memory (GiB): 1 (read-only)"), "{screen}");
@@ -1287,9 +1287,9 @@ async fn configuration_form_distinguishes_unsaved_values_and_shows_compact_contr
     assert!(screen.contains("Editing"), "{screen}");
     assert!(screen.contains("4▏"), "{screen}");
     assert!(
-        screen
-            .lines()
-            .any(|line| line.contains("enter") && line.contains("Done") && line.contains("ctrl+u")),
+        screen.lines().any(|line| line.contains("enter")
+            && line.contains("Keep draft")
+            && line.contains("ctrl+u")),
         "{screen}"
     );
     cli.assert_exhausted();
@@ -1354,5 +1354,23 @@ async fn tart_fractional_gib_memory_is_reviewed_then_converted_to_native_mib() {
     let screen = render_to_text(app.state(), 160, 28);
     assert!(screen.contains("Memory (GiB): 1.5"), "{screen}");
     assert!(!screen.contains('→'), "{screen}");
+    cli.assert_exhausted();
+}
+
+#[tokio::test]
+async fn configuration_review_explains_the_target_downtime_and_apply_controls() {
+    let (mut app, _, cli) = tart_app(TART_INITIAL, vec![]).await;
+    edit_selected_field(&mut app, "4");
+    press(&mut app, "ctrl+a");
+    let screen = render_to_text(app.state(), 100, 22);
+    assert!(screen.contains("Review changes"), "{screen}");
+    assert!(screen.contains("mac"), "{screen}");
+    assert!(screen.contains("CPU count: 2 → 4"), "{screen}");
+    assert!(screen.contains("Downtime: stop/start"), "{screen}");
+    assert!(screen.contains("Apply changes"), "{screen}");
+    assert!(screen.contains("Cancel"), "{screen}");
+    press(&mut app, "esc");
+    assert!(app.state().confirmation.is_none());
+    assert!(render_to_text(app.state(), 100, 22).contains("2 → 4"));
     cli.assert_exhausted();
 }

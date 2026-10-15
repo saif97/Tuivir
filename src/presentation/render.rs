@@ -222,6 +222,62 @@ fn resource_shell_header(state: &AppState, identity: String) -> Line<'static> {
     Line::from(spans)
 }
 
+fn render_configuration_review(
+    state: &AppState,
+    review: &crate::application::ConfigurationReview,
+    frame: &mut Frame<'_>,
+    area: Rect,
+) {
+    let block = modal_block(" Review changes ", ThemeRole::Warning);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let rows = Layout::vertical([Constraint::Min(0), Constraint::Length(2)]).split(inner);
+    let mut lines = vec![
+        Line::styled(
+            format!("Resource: {}", review.resource_name),
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+        Line::default(),
+    ];
+    lines.extend(review.changes.iter().map(|change| {
+        Line::from(vec![
+            Span::raw(format!("{}: ", change.field.label)),
+            Span::styled(change.field.value.as_str(), themed_style(ThemeRole::Muted)),
+            Span::styled(" → ", themed_style(ThemeRole::Muted)),
+            Span::styled(
+                change.proposed.as_str(),
+                themed_style(ThemeRole::Warning).add_modifier(Modifier::BOLD),
+            ),
+        ])
+    }));
+    lines.push(Line::default());
+    lines.push(Line::styled(
+        review.downtime(),
+        themed_style(ThemeRole::Warning),
+    ));
+    frame.render_widget(
+        Paragraph::new(lines).wrap(ratatui::widgets::Wrap { trim: true }),
+        rows[0],
+    );
+    let apply = state.hints.confirm.as_deref().unwrap_or("unbound");
+    let cancel = state.hints.cancel.as_deref().unwrap_or("unbound");
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(
+                format!("[ {apply} Apply changes ]"),
+                themed_style(ThemeRole::Primary).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("   "),
+            Span::styled(
+                format!("[ {cancel} Cancel ]"),
+                themed_style(ThemeRole::Muted),
+            ),
+        ]))
+        .wrap(ratatui::widgets::Wrap { trim: true }),
+        rows[1],
+    );
+}
+
 fn render_confirmation(state: &AppState, frame: &mut Frame<'_>) {
     if let (Some(confirmation), Some(area)) =
         (&state.confirmation, confirmation_area(state, frame.area()))
@@ -229,19 +285,8 @@ fn render_confirmation(state: &AppState, frame: &mut Frame<'_>) {
         frame.render_widget(Clear, area);
         let (title, lines) = match confirmation {
             Confirmation::ResourceConfiguration(review) => {
-                let mut lines = vec![Line::from(format!(
-                    "Apply changes to {}?",
-                    review.resource_name
-                ))];
-                lines.extend(review.changes.iter().map(|change| {
-                    Line::from(format!(
-                        "{}: {} → {}",
-                        change.field.label, change.field.value, change.proposed
-                    ))
-                }));
-                lines.push(Line::from(review.downtime()));
-                lines.push(Line::from(review.actual.notice.as_str()));
-                (" Confirm configuration ", lines)
+                render_configuration_review(state, review, frame, area);
+                return;
             }
             Confirmation::ResourceCommand(confirmation) => {
                 let mut lines = vec![Line::from(format!(
