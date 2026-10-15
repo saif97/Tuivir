@@ -1551,3 +1551,41 @@ async fn incus_settings_includes_remaining_effective_config_and_devices() {
     );
     cli.assert_exhausted();
 }
+
+#[tokio::test]
+async fn docker_settings_preserves_nested_native_settings_and_hides_duplicate_inspect() {
+    let initial = r#"[{"Config":{"Image":"alpine:3.23","Env":["MODE=dev"],"Labels":{"team":"tools"}},"HostConfig":{"NanoCpus":1000000000,"Memory":1073741824,"RestartPolicy":{"Name":"always"},"ReadonlyRootfs":true},"State":{"Status":"running"}}]"#;
+    let (mut app, runtime, cli) = docker_app_with(initial, vec![]).await;
+    let requests = open_settings(&mut app);
+    drive(&mut app, &runtime, requests).await;
+    let screen = render_to_text(app.state(), 200, 40);
+    let tabs = screen
+        .lines()
+        .find(|line| line.contains("Overview"))
+        .unwrap();
+    assert!(!tabs.contains("Inspect"), "{tabs}");
+    assert!(
+        screen.contains("Config.Env:") && screen.contains("MODE=dev"),
+        "{screen}"
+    );
+    assert!(
+        screen.contains("Config.Labels.team:") && screen.contains("tools"),
+        "{screen}"
+    );
+    assert!(
+        screen.contains("HostConfig.ReadonlyRootfs:") && screen.contains("true"),
+        "{screen}"
+    );
+    let fields = &app
+        .state()
+        .selected_configuration()
+        .unwrap()
+        .actual
+        .as_ref()
+        .unwrap()
+        .fields;
+    assert!(!fields.iter().any(|field| field.label.contains("NanoCpus")
+        || field.label == "HostConfig.Memory"
+        || field.label == "Config.Image"));
+    cli.assert_exhausted();
+}

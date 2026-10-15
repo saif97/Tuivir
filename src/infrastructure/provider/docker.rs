@@ -238,6 +238,20 @@ impl ProviderWorkspace for DockerWorkspace {
                         .push(ConfigurationField::read_only(id, label, value));
                 }
             }
+            super::configuration::append_native_fields(
+                &mut configuration.fields,
+                row,
+                &[
+                    "/Name",
+                    "/State/Status",
+                    "/Config/Image",
+                    "/HostConfig/RestartPolicy/Name",
+                    "/HostConfig/NanoCpus",
+                    "/HostConfig/CpuQuota",
+                    "/HostConfig/CpuPeriod",
+                    "/HostConfig/Memory",
+                ],
+            );
             Ok(configuration)
         })
     }
@@ -582,7 +596,6 @@ fn container_detail_views() -> Vec<DetailView> {
     vec![
         DetailView::new(LOGS_VIEW_ID, "Logs"),
         DetailView::new(STATS_VIEW_ID, "Stats"),
-        DetailView::new(INSPECT_VIEW_ID, "Inspect"),
         DetailView::configuration(),
     ]
 }
