@@ -584,10 +584,7 @@ async fn sandbox_configuration_explains_read_only_limits_without_writes() {
         screen.contains("in-place CPU/memory resize is unsupported"),
         "{screen}"
     );
-    assert!(
-        screen.contains("CPU count: not reported"),
-        "{screen}"
-    );
+    assert!(screen.contains("CPU count: not reported"), "{screen}");
     assert!(press(&mut app, "enter").is_empty());
     assert!(press(&mut app, "ctrl+a").is_empty());
     assert!(app.state().confirmation.is_none());
@@ -1391,4 +1388,19 @@ async fn tart_separates_editable_settings_from_read_only_details_and_skips_their
     assert!(screen.contains("Memory (GiB): 4 → 8"), "{screen}");
     assert!(screen.contains("Disk capacity (GB): 80"), "{screen}");
     cli.assert_exhausted();
+}
+
+#[tokio::test]
+async fn docker_configuration_includes_read_only_image_and_restart_policy() {
+    let initial = r#"[{"Config":{"Image":"alpine:3.23"},"HostConfig":{"NanoCpus":1500000000,"Memory":536870912,"RestartPolicy":{"Name":"unless-stopped"}},"State":{"Status":"running"}}]"#;
+    let (mut app, runtime) = docker_app(initial).await;
+    let requests = app.invoke(Command::ActivateDetailView(4));
+    drive(&mut app, &runtime, requests).await;
+    let screen = render_to_text(app.state(), 160, 32);
+    assert!(screen.contains("Read-only settings"), "{screen}");
+    assert!(screen.contains("Image: alpine:3.23"), "{screen}");
+    assert!(
+        screen.contains("Restart policy: unless-stopped"),
+        "{screen}"
+    );
 }

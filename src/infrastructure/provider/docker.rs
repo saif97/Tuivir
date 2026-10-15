@@ -194,7 +194,7 @@ impl ProviderWorkspace for DockerWorkspace {
                 } else {
                     (nano_cpus as f64 / 1_000_000_000.0, 1_000_000_000, 1)
                 };
-            Ok(ResourceConfiguration {
+            let mut configuration = ResourceConfiguration {
                 stop_preserves_resource: true,
                 fields: vec![
                     ConfigurationField {
@@ -223,7 +223,22 @@ impl ProviderWorkspace for DockerWorkspace {
                 ],
                 state: docker_resource_state(row["State"]["Status"].as_str().unwrap_or("unknown")),
                 notice: "Live updates; no restart required. Memory: 0 is unlimited; the existing memory+swap limit still applies.".into(),
-            })
+            };
+            for (id, label, value) in [
+                ("image", "Image", row["Config"]["Image"].as_str()),
+                (
+                    "restart-policy",
+                    "Restart policy",
+                    host["RestartPolicy"]["Name"].as_str(),
+                ),
+            ] {
+                if let Some(value) = value {
+                    configuration
+                        .fields
+                        .push(ConfigurationField::read_only(id, label, value));
+                }
+            }
+            Ok(configuration)
         })
     }
 
