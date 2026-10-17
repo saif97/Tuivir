@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+
+# Commits all changes in the current checkout to a new branch, pushes it, and
+# opens a pull request into BASE. The title is also the commit message.
+
+set -euo pipefail
+
+[[ $# -eq 4 ]] || {
+  echo 'usage: open-pull-request BASE BRANCH TITLE BODY' >&2
+  exit 2
+}
+
+base="$1"
+branch="$2"
+title="$3"
+body="$4"
+
+git config user.name 'github-actions[bot]'
+git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+git switch --create "$branch"
+git commit --all --message "$title"
+git push origin "$branch"
+gh pr create --base "$base" --head "$branch" --title "$title" --body "$body"

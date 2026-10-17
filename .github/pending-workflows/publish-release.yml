@@ -1,0 +1,116 @@
+name: Publish release
+
+# Publishes the Cargo package version when it reaches master untagged. The
+# release tag is created on the exact commit the artifacts were built from.
+"on":
+  push:
+    branches:
+      - master
+    paths:
+      - Cargo.toml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Find an unreleased version
+        id: release
+        run: |
+          set -euo pipefail
+          version="$(bash scripts/release-version)"
+          latest="$(gh release view --json tagName --jq '.tagName | ltrimstr("v")')"
+          status="$(bash scripts/release-status "$version" "$latest")"
+          if [[ "$status" = new ]]; then
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+          else
+            echo "v$version is already released"
+          fi
+
+  artifacts:
+    needs: validate
+    if: needs.validate.outputs.version != ''
+    permissions:
+      contents: read
+    uses: ./.github/workflows/build-release-artifacts.yml
+    with:
+      version: ${{ needs.validate.outputs.version }}
+
+  publish:
+    needs:
+      - validate
+      - artifacts
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.validate.outputs.version }}
+    steps:
+      - name: Download verified release artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: tuivir-v${{ needs.validate.outputs.version }}-release-artifacts
+          path: release-artifacts
+
+      - name: Publish the GitHub Release
+        run: |
+          set -euo pipefail
+          gh release create "v$VERSION" release-artifacts/* \
+            --generate-notes \
+            --latest \
+            --target "$GITHUB_SHA" \
+            --title "Tuivir v$VERSION"
+
+  # HOMEBREW_TAP_TOKEN is a fine-grained token limited to saif97/homebrew-tap
+  # with Contents and Pull requests write access.
+  homebrew:
+    needs:
+      - validate
+      - publish
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.validate.outputs.version }}
+      GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Download verified release artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: tuivir-v${{ needs.validate.outputs.version }}-release-artifacts
+          path: release-artifacts
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: saif97/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Render the Homebrew formula
+        run: bash scripts/homebrew-formula "$VERSION" release-artifacts/SHA256SUMS > homebrew-tap/Formula/tuivir.rb
+
+      - name: Open the Homebrew tap pull request
+        working-directory: homebrew-tap
+        run: |
+          bash ../scripts/open-pull-request main "tuivir-v$VERSION" \
+            "Update Tuivir to $VERSION" \
+            "Updates the formula to the published Tuivir v$VERSION release."
