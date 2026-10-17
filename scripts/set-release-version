@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+# Sets the tuivir package version in Cargo.toml and Cargo.lock.
+
+set -euo pipefail
+
+[[ $# -eq 1 ]] || {
+  echo 'usage: set-release-version VERSION' >&2
+  exit 2
+}
+
+version="$1"
+awk -v version="$version" '!done && /^version = / { $0 = "version = \"" version "\""; done = 1 } 1' Cargo.toml > Cargo.toml.new
+awk -v version="$version" 'package && /^version = / { $0 = "version = \"" version "\""; package = 0 } $0 == "name = \"tuivir\"" { package = 1 } 1' Cargo.lock > Cargo.lock.new
+mv Cargo.toml.new Cargo.toml
+mv Cargo.lock.new Cargo.lock
+bash "$(dirname "$0")/release-version" "v$version" >/dev/null
