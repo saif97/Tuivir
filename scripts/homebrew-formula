@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+
+# Prints the saif97/homebrew-tap formula for one release from its verified
+# SHA256SUMS manifest.
+
+set -euo pipefail
+
+[[ $# -eq 2 ]] || {
+  echo 'usage: homebrew-formula VERSION SHA256SUMS' >&2
+  exit 2
+}
+
+version="$1"
+checksums="$2"
+
+archive() {
+  printf 'tuivir-v%s-%s.tar.gz\n' "$version" "$1"
+}
+
+checksum() {
+  local sum
+  sum="$(awk -v archive="$1" '$2 == archive { print $1 }' "$checksums")"
+  [[ "$sum" =~ ^[0-9a-f]{64}$ ]] || {
+    echo "SHA256SUMS has no checksum for $1" >&2
+    exit 1
+  }
+  printf '%s\n' "$sum"
+}
+
+apple_silicon_archive="$(archive aarch64-apple-darwin)"
+intel_archive="$(archive x86_64-apple-darwin)"
+apple_silicon_checksum="$(checksum "$apple_silicon_archive")"
+intel_checksum="$(checksum "$intel_archive")"
+download="https://github.com/saif97/Tuivir/releases/download/v$version"
+
+cat <<EOF
+class Tuivir < Formula
+  desc "Inspect and operate local virtualization and container providers"
+  homepage "https://github.com/saif97/Tuivir"
+  version "$version"
+  license "MIT OR Apache-2.0"
+
+  on_macos do
+    on_arm do
+      url "$download/$apple_silicon_archive"
+      sha256 "$apple_silicon_checksum"
+    end
+
+    on_intel do
+      url "$download/$intel_archive"
+      sha256 "$intel_checksum"
+    end
+  end
+
+  def install
+    bin.install "tuivir"
+  end
+
+  test do
+    assert_equal "$version\n", shell_output("#{bin}/tuivir --version")
+  end
+end
+EOF
