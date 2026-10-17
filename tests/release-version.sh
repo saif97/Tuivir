@@ -7,6 +7,7 @@ cd "$repository_root"
 
 cargo_version="$(cargo metadata --locked --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "tuivir") | .version')"
 test "$(bash scripts/release-version "v$cargo_version")" = "$cargo_version"
+test "$(bash scripts/release-version)" = "$cargo_version"
 
 mismatched_tag='v9.9.9'
 [[ "$cargo_version" != '9.9.9' ]] || mismatched_tag='v8.8.8'

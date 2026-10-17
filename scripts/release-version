@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 
+# Prints the stable release version. A given vX.Y.Z tag must match the Cargo
+# package version; without a tag, the Cargo package version is used.
+
 set -euo pipefail
 
-tag="${1:-}"
-[[ $# -eq 1 && "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
+cargo_version="$(awk -F '"' '$1 ~ /^version = / { print $2; exit }' Cargo.toml)"
+tag="${1-v$cargo_version}"
+[[ $# -le 1 && "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
   echo 'release tag must be a stable vX.Y.Z version' >&2
   exit 1
 }
 
 version="${tag#v}"
-cargo_version="$(awk -F '"' '$1 ~ /^version = / { print $2; exit }' Cargo.toml)"
 [[ "$cargo_version" = "$version" ]] || {
   echo "release tag $tag does not match Cargo version $cargo_version" >&2
   exit 1
