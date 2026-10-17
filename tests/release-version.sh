@@ -18,3 +18,22 @@ for tag in 0.1.0 v0.1 v01.0.0 v0.1.0-beta "$mismatched_tag"; do
     exit 1
   fi
 done
+
+while read -r version latest expected; do
+  status="$(bash scripts/release-status "$version" "$latest" 2>/dev/null || echo failed)"
+  [[ "$status" = "$expected" ]] || {
+    echo "release status of $version against $latest is $status, expected $expected" >&2
+    exit 1
+  }
+done <<'EOF'
+0.2.1 0.2.0 new
+0.3.0 0.2.9 new
+1.0.0 0.9.9 new
+0.10.0 0.9.0 new
+0.2.0 0.2.0 released
+0.1.9 0.2.0 failed
+0.9.0 0.10.0 failed
+0.3 0.2.0 failed
+v0.3.0 0.2.0 failed
+0.3.0 v0.2.0 failed
+EOF
