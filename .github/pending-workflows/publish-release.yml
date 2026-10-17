@@ -78,3 +78,39 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "Tuivir v$VERSION"
 
+  # HOMEBREW_TAP_TOKEN is a fine-grained token limited to saif97/homebrew-tap
+  # with Contents and Pull requests write access.
+  homebrew:
+    needs:
+      - validate
+      - publish
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.validate.outputs.version }}
+      GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Download verified release artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: tuivir-v${{ needs.validate.outputs.version }}-release-artifacts
+          path: release-artifacts
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: saif97/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Render the Homebrew formula
+        run: bash scripts/homebrew-formula "$VERSION" release-artifacts/SHA256SUMS > homebrew-tap/Formula/tuivir.rb
+
+      - name: Open the Homebrew tap pull request
+        working-directory: homebrew-tap
+        run: |
+          bash ../scripts/open-pull-request main "tuivir-v$VERSION" \
+            "Update Tuivir to $VERSION" \
+            "Updates the formula to the published Tuivir v$VERSION release."
