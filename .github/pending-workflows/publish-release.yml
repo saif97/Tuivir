@@ -1,7 +1,8 @@
 name: Publish release
 
-# Publishes the Cargo package version when it reaches master untagged. The
-# release tag is created on the exact commit the artifacts were built from.
+# Publishes a release when a Cargo.toml version change reaches master and that
+# version is newer than the latest GitHub release. The release tag is created
+# on the exact commit the artifacts were built from.
 "on":
   push:
     branches:
@@ -29,7 +30,9 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Find an unreleased version
+      # Compares the Cargo.toml version with the latest GitHub release:
+      # newer publishes it, equal skips the release, older fails the run.
+      - name: Check that the Cargo version is newer than the latest release
         id: release
         run: |
           set -euo pipefail
