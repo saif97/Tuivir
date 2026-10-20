@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+
+# Reads tag names on stdin and prints the highest stable vX.Y.Z tag as X.Y.Z.
+# Fails when there is no stable release tag.
+
+set -euo pipefail
+
+latest="$(grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' | sort -V | tail -n 1)" || true
+[[ -n "$latest" ]] || {
+  echo 'no stable vX.Y.Z release tag found' >&2
+  exit 1
+}
+printf '%s\n' "${latest#v}"

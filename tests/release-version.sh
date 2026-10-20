@@ -37,3 +37,10 @@ done <<'EOF'
 v0.3.0 0.2.0 failed
 0.3.0 v0.2.0 failed
 EOF
+
+test "$(printf '%s\n' v0.1.0 v0.10.0 v0.9.0 v1.0.0-beta v2.0 nightly | bash scripts/latest-release)" = 0.10.0
+test "$(printf '%s\n' v0.2.0 v0.1.0 | bash scripts/latest-release)" = 0.2.0
+if printf '%s\n' nightly v1.0.0-beta | bash scripts/latest-release >/dev/null 2>&1; then
+  echo 'latest release unexpectedly found without a stable vX.Y.Z tag' >&2
+  exit 1
+fi
