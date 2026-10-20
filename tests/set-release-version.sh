@@ -27,3 +27,10 @@ for version in 9.8 v9.8.7 '9.8.7"' '9.8.7\n[evil]' --9.8.7; do
     exit 1
   }
 done
+
+cp "$repository_root/Cargo.toml" .
+sed 's/^name = "tuivir"$/name = "other"/' "$repository_root/Cargo.lock" > Cargo.lock
+if bash "$repository_root/scripts/set-release-version" 9.8.7 >/dev/null 2>&1; then
+  echo 'release version unexpectedly set without a tuivir package in Cargo.lock' >&2
+  exit 1
+fi
