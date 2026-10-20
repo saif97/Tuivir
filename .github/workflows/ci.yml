@@ -28,5 +28,9 @@ jobs:
         run: cargo test --all-targets --all-features --locked
       - name: Test release version validation
         run: bash tests/release-version.sh
+      - name: Test release version updates
+        run: bash tests/set-release-version.sh
       - name: Test static ELF verification
         run: bash tests/static-elf.sh
+      - name: Test Homebrew formula rendering
+        run: bash tests/homebrew-formula.sh
