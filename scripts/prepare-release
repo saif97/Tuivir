@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+
+# Opens the pull request that releases VERSION. It sets the Cargo version on a
+# release/vVERSION branch from origin/master in a temporary worktree, so the
+# current checkout does not change. Uses the caller's git and gh login.
+
+set -euo pipefail
+
+[[ $# -eq 1 ]] || {
+  echo 'usage: prepare-release VERSION' >&2
+  exit 2
+}
+
+version="$1"
+branch="release/v$version"
+scripts="$(cd "$(dirname "$0")" && pwd)"
+
+latest="$(git ls-remote --tags origin 'v*' | awk '{ sub("refs/tags/", "", $2); print $2 }' | bash "$scripts/latest-release")"
+status="$(bash "$scripts/release-status" "$version" "$latest")"
+[[ "$status" = new ]] || {
+  echo "v$version is already released" >&2
+  exit 1
+}
+
+git fetch --quiet origin master
+worktree="$(mktemp -d)"
+trap 'git worktree remove --force "$worktree"' EXIT
+git worktree add --quiet --no-track -b "$branch" "$worktree" origin/master
+(
+  cd "$worktree"
+  bash "$scripts/set-release-version" "$version"
+  git commit --quiet --all --message "Release v$version"
+  git push --quiet --set-upstream origin "HEAD:refs/heads/$branch"
+)
+gh pr create --base master --head "$branch" --title "Release v$version" \
+  --body "Merging this pull request publishes Tuivir v$version."
