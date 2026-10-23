@@ -1,22 +1,20 @@
 # Releasing Tuivir
 
-A release has three steps. Only step 2 is automatic.
+A release has three steps. Only step 2 is automatic. Steps 1 and 3 use your
+own `git` and `gh` login, so CI needs no token other than the built-in one.
 
 ## 1. Open the version pull request
 
 Use a stable `X.Y.Z` version that is newer than the latest `vX.Y.Z` tag.
 
 ```sh
-git switch master && git pull --ff-only
-git switch --create release/v0.2.1
-bash scripts/set-release-version 0.2.1
-git commit --all --message "Release v0.2.1"
-git push --set-upstream origin release/v0.2.1
-gh pr create --base master --title "Release v0.2.1" --body "Merging this pull request publishes Tuivir v0.2.1."
+bash scripts/prepare-release 0.2.1
 ```
 
-`set-release-version` changes the `tuivir` version in `Cargo.toml` and
-`Cargo.lock`. It rejects a version that is not a stable `X.Y.Z`.
+`prepare-release` fails if the version is not newer than the highest release
+tag. It then creates `release/v0.2.1` from `origin/master` in a temporary
+worktree, sets the `tuivir` version in `Cargo.toml` and `Cargo.lock`, pushes the
+branch, and opens the pull request. Your current checkout does not change.
 
 ## 2. Merge the pull request
 
@@ -31,17 +29,17 @@ with the highest stable `vX.Y.Z` tag:
 
 ## 3. Update the Homebrew tap
 
-After the release is published, run these commands in a checkout of
-`saif97/homebrew-tap`. Set `TUIVIR` to your Tuivir checkout.
+After the release is published, run:
 
 ```sh
-git switch main && git pull --ff-only
-gh release download v0.2.1 --repo saif97/Tuivir --pattern SHA256SUMS --output /tmp/SHA256SUMS --clobber
-bash "$TUIVIR/scripts/homebrew-formula" 0.2.1 /tmp/SHA256SUMS > Formula/tuivir.rb
-git commit --all --message "Update Tuivir to 0.2.1"
-git push
+bash scripts/update-homebrew-tap 0.2.1
 ```
 
-`homebrew-formula` fails if `SHA256SUMS` has no checksum for one of the macOS
-archives. To check the result, run `brew upgrade saif97/tap/tuivir` and
+`update-homebrew-tap` clones `saif97/homebrew-tap` to a temporary directory. It
+fails if the version is older than the formula version, and it does nothing if
+the version is the same. Otherwise it writes `Formula/tuivir.rb` from the
+release `SHA256SUMS`, commits, and pushes to the tap's `main` branch. It fails
+if the release has no `SHA256SUMS` or no checksum for a macOS archive.
+
+To check the result, run `brew upgrade saif97/tap/tuivir` and
 `tuivir --version`.
