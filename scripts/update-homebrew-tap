@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+
+# Sets the saif97/homebrew-tap formula to the published Tuivir VERSION and
+# pushes it to the tap's main branch. The tap is cloned to a temporary
+# directory. Uses the caller's gh login.
+
+set -euo pipefail
+
+[[ $# -eq 1 ]] || {
+  echo 'usage: update-homebrew-tap VERSION' >&2
+  exit 2
+}
+
+version="$1"
+scripts="$(cd "$(dirname "$0")" && pwd)"
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+
+gh repo clone saif97/homebrew-tap "$work/tap" -- --quiet
+formula="$work/tap/Formula/tuivir.rb"
+current="$(awk -F '"' '$1 == "  version " { print $2; exit }' "$formula")"
+status="$(bash "$scripts/release-status" "$version" "$current")"
+[[ "$status" = new ]] || {
+  echo "The tap already has Tuivir $version"
+  exit 0
+}
+
+gh release download "v$version" --repo saif97/Tuivir --pattern SHA256SUMS --output "$work/SHA256SUMS"
+bash "$scripts/homebrew-formula" "$version" "$work/SHA256SUMS" > "$formula"
+git -C "$work/tap" commit --quiet --all --message "Update Tuivir to $version"
+git -C "$work/tap" push --quiet origin HEAD:refs/heads/main
+echo "The tap now has Tuivir $version"
