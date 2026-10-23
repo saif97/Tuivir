@@ -1,8 +1,8 @@
 name: Publish release
 
 # Publishes a release when a Cargo.toml version change reaches master and that
-# version is newer than the latest GitHub release. The release tag is created
-# on the exact commit the artifacts were built from.
+# version is newer than the highest stable vX.Y.Z tag. The release tag is
+# created on the exact commit the artifacts were built from.
 "on":
   push:
     branches:
@@ -30,14 +30,16 @@ jobs:
         with:
           persist-credentials: false
 
-      # Compares the Cargo.toml version with the latest GitHub release:
+      # Compares the Cargo.toml version with the highest stable vX.Y.Z tag:
       # newer publishes it, equal skips the release, older fails the run.
-      - name: Check that the Cargo version is newer than the latest release
+      # Tags are used, not the latest release, so that a tag pushed before the
+      # merge stops the release instead of moving it to another commit.
+      - name: Check that the Cargo version is newer than the latest release tag
         id: release
         run: |
           set -euo pipefail
           version="$(bash scripts/release-version)"
-          latest="$(gh release view --json tagName --jq '.tagName | ltrimstr("v")')"
+          latest="$(gh api "repos/$GH_REPO/git/matching-refs/tags/v" --paginate --jq '.[].ref | ltrimstr("refs/tags/")' | bash scripts/latest-release)"
           status="$(bash scripts/release-status "$version" "$latest")"
           if [[ "$status" = new ]]; then
             echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -82,15 +84,16 @@ jobs:
             --title "Tuivir v$VERSION"
 
   # HOMEBREW_TAP_TOKEN is a fine-grained token limited to saif97/homebrew-tap
-  # with Contents and Pull requests write access.
+  # with Contents and Pull requests write access. It is a secret of the
+  # release environment, which only master can use.
   homebrew:
     needs:
       - validate
       - publish
     runs-on: ubuntu-latest
+    environment: release
     env:
       VERSION: ${{ needs.validate.outputs.version }}
-      GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -107,13 +110,17 @@ jobs:
           repository: saif97/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: homebrew-tap
+          persist-credentials: false
 
       - name: Render the Homebrew formula
         run: bash scripts/homebrew-formula "$VERSION" release-artifacts/SHA256SUMS > homebrew-tap/Formula/tuivir.rb
 
       - name: Open the Homebrew tap pull request
         working-directory: homebrew-tap
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
+          gh auth setup-git
           bash ../scripts/open-pull-request main "tuivir-v$VERSION" \
             "Update Tuivir to $VERSION" \
             "Updates the formula to the published Tuivir v$VERSION release."

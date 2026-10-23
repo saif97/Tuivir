@@ -3,8 +3,10 @@ name: Prepare release
 # Opens a pull request that sets the Cargo package version. Merging it makes
 # the Publish release workflow tag and publish that version. RELEASE_PR_TOKEN is
 # a fine-grained token limited to this repository with Contents and Pull
-# requests write access. The built-in token keeps read access only, so the
-# "Allow GitHub Actions to create and approve pull requests" setting stays off.
+# requests write access. It is a secret of the release environment, which only
+# master can use, and only the step that pushes gets it. The built-in token
+# keeps read access only, so the "Allow GitHub Actions to create and approve
+# pull requests" setting stays off.
 "on":
   workflow_dispatch:
     inputs:
@@ -16,22 +18,28 @@ name: Prepare release
 permissions:
   contents: read
 
+concurrency:
+  group: prepare-release
+  cancel-in-progress: false
+
 jobs:
   prepare:
     if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
+    environment: release
     env:
       VERSION: ${{ inputs.version }}
-      GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          token: ${{ secrets.RELEASE_PR_TOKEN }}
+          persist-credentials: false
 
-      - name: Verify the version is newer than the latest release
+      - name: Verify the version is newer than the latest release tag
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          latest="$(gh release view --json tagName --jq '.tagName | ltrimstr("v")')"
+          latest="$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v" --paginate --jq '.[].ref | ltrimstr("refs/tags/")' | bash scripts/latest-release)"
           status="$(bash scripts/release-status "$VERSION" "$latest")"
           [[ "$status" = new ]] || {
             echo "v$VERSION is already released" >&2
@@ -42,7 +50,10 @@ jobs:
         run: bash scripts/set-release-version "$VERSION"
 
       - name: Open the release pull request
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PR_TOKEN }}
         run: |
+          gh auth setup-git
           bash scripts/open-pull-request master "release/v$VERSION" \
             "Release v$VERSION" \
             "Merging this pull request publishes Tuivir v$VERSION."
