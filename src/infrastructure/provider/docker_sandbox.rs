@@ -1,6 +1,6 @@
 use std::{future::Future, pin::Pin};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     application::{LifecycleCommandPolicy, ResourceShellProcess, lifecycle_commands},
@@ -30,13 +30,17 @@ struct SandboxListing {
     sandboxes: Vec<SandboxRow>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct SandboxRow {
     name: String,
     /// The UUID sbx assigns. It addresses no sbx command, so it is shown but
     /// never used as the Resource identity.
     id: String,
     agent: String,
+    #[serde(default)]
+    cpus: Option<serde_json::Value>,
+    #[serde(default)]
+    memory: Option<serde_json::Value>,
     status: String,
     /// Host paths mounted into the sandbox.
     #[serde(default, rename = "workspaces")]
@@ -45,14 +49,18 @@ struct SandboxRow {
     /// stopped row omits the key entirely.
     #[serde(default)]
     ports: Vec<SandboxPort>,
+    #[serde(flatten)]
+    additional_fields: serde_json::Map<String, serde_json::Value>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct SandboxPort {
     host_ip: String,
     host_port: u16,
     sandbox_port: u16,
     protocol: String,
+    #[serde(flatten)]
+    additional_fields: serde_json::Map<String, serde_json::Value>,
 }
 
 /// The summary fields shown beside a selected sandbox.
@@ -113,7 +121,10 @@ async fn list_sandboxes(cli: &dyn CliRunner) -> Result<SandboxListing, Workspace
 /// answer — and borrowing Docker's names for diagnostics sbx does not have
 /// would promise the user something that does not exist.
 fn sandbox_detail_views() -> Vec<DetailView> {
-    vec![DetailView::from_snapshot(INFO_VIEW, "Info")]
+    vec![
+        DetailView::from_snapshot(INFO_VIEW, "Info"),
+        DetailView::configuration(),
+    ]
 }
 
 /// Maps an sbx sandbox status onto the shared vocabulary.
@@ -226,6 +237,53 @@ fn sbx_version(output: &str) -> ProviderVersion {
 }
 
 impl ProviderWorkspace for DockerSandboxWorkspace {
+    fn load_configuration<'a>(
+        &'a self,
+        cli: &'a dyn CliRunner,
+        target: &'a ResourceTarget,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<crate::application::ResourceConfiguration, WorkspaceError>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            let listing = list_sandboxes(cli).await?;
+            let row = listing
+                .sandboxes
+                .into_iter()
+                .find(|row| row.name == target.resource_id().0)
+                .ok_or_else(|| WorkspaceError::new("Sandbox no longer exists"))?;
+            use crate::application::{
+                ConfigurationField, ConfigurationUpdate, FieldConstraint, ResourceConfiguration,
+            };
+            let native = serde_json::to_value(&row)
+                .map_err(|error| WorkspaceError::new(error.to_string()))?;
+            let reported = |value: Option<serde_json::Value>| {
+                value
+                    .map(|value| {
+                        value
+                            .as_str()
+                            .map(str::to_owned)
+                            .unwrap_or_else(|| value.to_string())
+                    })
+                    .unwrap_or_else(|| "not reported".into())
+            };
+            let mut configuration = ResourceConfiguration {
+                stop_preserves_resource: false, fields: vec![
+                ConfigurationField { id: "cpu".into(), label: "CPU count".into(), value: reported(row.cpus), constraint: FieldConstraint::ReadOnly, update: ConfigurationUpdate::Live },
+                ConfigurationField { id: "memory".into(), label: "Memory (Provider units)".into(), value: reported(row.memory), constraint: FieldConstraint::ReadOnly, update: ConfigurationUpdate::Live },
+            ], state: sandbox_resource_state(&row.status), notice: "Docker Sandbox in-place CPU/memory resize is unsupported; values are read-only. Tuivir will not recreate the Resource.".into() };
+            super::configuration::append_native_fields(
+                &mut configuration.fields,
+                &native,
+                &["/name", "/status", "/cpus", "/memory"],
+            );
+            Ok(configuration)
+        })
+    }
+
     fn id(&self) -> ProviderId {
         ProviderId::new(PROVIDER_ID)
     }

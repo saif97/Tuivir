@@ -3499,8 +3499,13 @@ fn copying_a_details_selection_returns_exact_source_text() {
         Ok(ResourceDetails::from_lines(["hello", "world"])),
     ));
 
-    app.invoke(Command::BeginDetailsSelection { line: 0, column: 1 });
-    app.invoke(Command::ExtendDetailsSelection { line: 1, column: 3 });
+    app.invoke(Command::BeginDetailsSelection {
+        point: tuivir::application::DetailSelectionPoint::Text { line: 0, column: 1 },
+    });
+    app.invoke(Command::ExtendDetailsSelection {
+        point: tuivir::application::DetailSelectionPoint::Text { line: 1, column: 3 },
+        scroll: 0,
+    });
     app.invoke(Command::CopyDetails);
 
     assert_eq!(
@@ -3522,8 +3527,13 @@ fn selected_details_text_is_visibly_highlighted() {
         details,
         Ok(ResourceDetails::from_lines(["hello"])),
     ));
-    app.invoke(Command::BeginDetailsSelection { line: 0, column: 1 });
-    app.invoke(Command::ExtendDetailsSelection { line: 0, column: 4 });
+    app.invoke(Command::BeginDetailsSelection {
+        point: tuivir::application::DetailSelectionPoint::Text { line: 0, column: 1 },
+    });
+    app.invoke(Command::ExtendDetailsSelection {
+        point: tuivir::application::DetailSelectionPoint::Text { line: 0, column: 4 },
+        scroll: 0,
+    });
 
     let screen = render_to_text(app.state(), 100, 24);
     let backgrounds = render_background_colours(app.state(), 100, 24);
@@ -3559,8 +3569,13 @@ fn changing_the_selected_resource_clears_details_selection() {
         details,
         Ok(ResourceDetails::from_lines(["hello"])),
     ));
-    app.invoke(Command::BeginDetailsSelection { line: 0, column: 0 });
-    app.invoke(Command::ExtendDetailsSelection { line: 0, column: 5 });
+    app.invoke(Command::BeginDetailsSelection {
+        point: tuivir::application::DetailSelectionPoint::Text { line: 0, column: 0 },
+    });
+    app.invoke(Command::ExtendDetailsSelection {
+        point: tuivir::application::DetailSelectionPoint::Text { line: 0, column: 5 },
+        scroll: 0,
+    });
     app.invoke(Command::SelectNext);
     app.invoke(Command::CopyDetails);
 
@@ -3582,7 +3597,9 @@ fn dragging_below_details_autoscrolls_and_extends_the_selection() {
             (0..20).map(|line| format!("line-{line}")),
         )),
     ));
-    app.invoke(Command::BeginDetailsSelection { line: 0, column: 0 });
+    app.invoke(Command::BeginDetailsSelection {
+        point: tuivir::application::DetailSelectionPoint::Text { line: 0, column: 0 },
+    });
     for _ in 0..3 {
         app.invoke(Command::ExtendDetailsSelectionAtEdge {
             above: false,

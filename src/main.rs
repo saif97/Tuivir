@@ -685,6 +685,10 @@ async fn run(
         if redraw_needed {
             if let Err(error) = terminal.draw(|frame| {
                 let measured = presentation::ScreenLayout::measure(app.state(), frame.area());
+                app.set_configuration_scroll_limit(presentation::configuration_scroll_limit(
+                    app.state(),
+                    &measured,
+                ));
                 presentation::render_with_layout(app.state(), frame, &measured);
                 if let (Some(session), Some(shell)) = (
                     app.state().visible_running_resource_shell_session(),

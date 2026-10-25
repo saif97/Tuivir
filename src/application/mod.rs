@@ -1,3 +1,9 @@
+mod configuration;
+pub use configuration::{
+    ConfigurationChange, ConfigurationDraft, ConfigurationField, ConfigurationOutcome,
+    ConfigurationReview, ConfigurationSelection, ConfigurationUpdate, FieldConstraint, MemoryGiB,
+    ResourceConfiguration,
+};
 mod app;
 mod command;
 mod key;
@@ -6,7 +12,9 @@ mod pane_boundary;
 mod provider;
 mod resource_shell_controls;
 mod shell;
+mod text_selection;
 mod workspace;
+pub use text_selection::{DetailSelectionPoint, TextSelection};
 
 pub use app::{
     App, AppEvent, AppState, Confirmation, FocusedPane, HelpEntry, HelpOverlay, KeyHints,
