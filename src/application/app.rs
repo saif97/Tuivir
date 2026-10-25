@@ -1640,21 +1640,18 @@ impl App {
                         Command::FocusResourcePanel(index) if index >= panel_count
                     )
                 })
+                .filter(|registered| match registered.command {
+                    Command::Resource(command) => available_commands.contains(&command),
+                    Command::OpenShell | Command::OpenShellInDetails => offers_a_shell,
+                    _ => true,
+                })
                 .map(|registered| HelpEntry {
                     key: registered
                         .keys
                         .first()
                         .expect("a Command in scope is bound")
                         .to_string(),
-                    description: match registered.command {
-                        Command::Resource(command) if !available_commands.contains(&command) => {
-                            format!("{} (unavailable)", registered.description)
-                        }
-                        Command::OpenShell | Command::OpenShellInDetails if !offers_a_shell => {
-                            format!("{} (unavailable)", registered.description)
-                        }
-                        _ => registered.description.to_owned(),
-                    },
+                    description: registered.description.to_owned(),
                 })
                 .collect(),
         });

@@ -1213,13 +1213,20 @@ fn switching_providers_invalidates_a_refresh_but_not_a_running_resource_command(
 }
 
 #[test]
-fn question_mark_shows_registered_commands_for_the_focused_resource() {
+fn help_and_command_bar_show_available_commands_for_the_focused_resource() {
     let mut app = App::new();
     ready_workspace(
         &mut app,
         docker_discovery(),
         snapshot(&[("container-a", "api", "nginx:1.27")]),
     );
+
+    let screen = render_to_text(app.state(), 100, 24);
+    assert!(!screen.contains("S  Start"), "rendered screen:\n{screen}");
+    assert!(!screen.contains("p  Resume"), "rendered screen:\n{screen}");
+    assert!(screen.contains("s  Stop"), "rendered screen:\n{screen}");
+    assert!(screen.contains("r  Restart"), "rendered screen:\n{screen}");
+    assert!(screen.contains("d  Delete"), "rendered screen:\n{screen}");
 
     let (_, requests) = handle_key(
         &mut app,
@@ -1232,7 +1239,8 @@ fn question_mark_shows_registered_commands_for_the_focused_resource() {
         screen.contains("Commands for api"),
         "rendered screen:\n{screen}"
     );
-    assert!(screen.contains("S  Start"), "rendered screen:\n{screen}");
+    assert!(!screen.contains("S  Start"), "rendered screen:\n{screen}");
+    assert!(!screen.contains("p  Resume"), "rendered screen:\n{screen}");
     assert!(screen.contains("s  Stop"), "rendered screen:\n{screen}");
     assert!(screen.contains("r  Restart"), "rendered screen:\n{screen}");
     assert!(screen.contains("d  Delete"), "rendered screen:\n{screen}");
@@ -1246,6 +1254,11 @@ fn help_offers_resume_only_while_the_resource_is_suspended() {
         initial,
         Ok(paused_snapshot(&[("container-a", "api", "nginx:1.27")])),
     ));
+    let screen = render_to_text(paused.state(), 100, 24);
+    assert!(screen.contains("p  Resume"), "rendered screen:\n{screen}");
+    assert!(!screen.contains("S  Start"), "rendered screen:\n{screen}");
+    assert!(!screen.contains("s  Stop"), "rendered screen:\n{screen}");
+    assert!(!screen.contains("r  Restart"), "rendered screen:\n{screen}");
     handle_key(
         &mut paused,
         KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
@@ -1268,15 +1281,12 @@ fn help_offers_resume_only_while_the_resource_is_suspended() {
         KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
     );
     let screen = render_to_text(running.state(), 100, 24);
-    assert!(
-        screen.contains("p  Resume (unavailable)"),
-        "rendered screen:\n{screen}"
-    );
+    assert!(!screen.contains("p  Resume"), "rendered screen:\n{screen}");
 }
 
 /// A Resource whose Provider offers no Resource Shell Session must not look as
 /// though pressing the key would do something. Nothing is asked for, and help
-/// says why the key is there but idle.
+/// omits both shell Commands.
 #[test]
 fn help_offers_a_shell_only_while_the_resource_can_host_one() {
     let mut stopped = App::new();
@@ -1295,15 +1305,19 @@ fn help_offers_a_shell_only_while_the_resource_can_host_one() {
         "a stopped container has no shell to open"
     );
 
+    let screen = render_to_text(stopped.state(), 100, 24);
+    assert!(screen.contains("S  Start"), "rendered screen:\n{screen}");
+    assert!(screen.contains("d  Delete"), "rendered screen:\n{screen}");
+    assert!(!screen.contains("s  Stop"), "rendered screen:\n{screen}");
+    assert!(!screen.contains("r  Restart"), "rendered screen:\n{screen}");
+    assert!(!screen.contains("p  Resume"), "rendered screen:\n{screen}");
+
     handle_key(
         &mut stopped,
         KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
     );
     let screen = render_to_text(stopped.state(), 100, 24);
-    assert!(
-        screen.contains("E  Open Shell Detail View (unavailable)"),
-        "rendered screen:\n{screen}"
-    );
+    assert!(!screen.contains("Open Shell"), "rendered screen:\n{screen}");
 
     let mut running = App::new();
     let initial = refresh_request(running.update(docker_discovery().into_event()));
@@ -1318,6 +1332,10 @@ fn help_offers_a_shell_only_while_the_resource_can_host_one() {
     let screen = render_to_text(running.state(), 100, 24);
     assert!(
         screen.contains("E  Open Shell Detail View"),
+        "rendered screen:\n{screen}"
+    );
+    assert!(
+        screen.contains("e  Open Shell in Details"),
         "rendered screen:\n{screen}"
     );
     assert!(
@@ -1819,7 +1837,7 @@ fn accepted_resource_removal_restores_details_after_forgetting_its_shell() {
 }
 
 #[test]
-fn unavailable_resource_command_is_disabled_in_help_and_does_not_dispatch() {
+fn unavailable_resource_command_is_hidden_in_help_and_does_not_dispatch() {
     let mut app = App::new();
     ready_workspace(
         &mut app,
@@ -1838,10 +1856,7 @@ fn unavailable_resource_command_is_disabled_in_help_and_does_not_dispatch() {
         KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
     );
     let screen = render_to_text(app.state(), 100, 24);
-    assert!(
-        screen.contains("S  Start (unavailable)"),
-        "rendered screen:\n{screen}"
-    );
+    assert!(!screen.contains("S  Start"), "rendered screen:\n{screen}");
 }
 
 #[test]
