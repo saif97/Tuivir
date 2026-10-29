@@ -11,6 +11,8 @@ from pathlib import Path
 path = Path(os.environ["RELEASE_GITHUB_STATE"])
 state = json.loads(path.read_text())
 args = sys.argv[1:]
+if "--slurp" in args:
+    sys.exit("unknown flag: --slurp")
 if args[0] == "api" and state.get("api_error"):
     sys.exit(state["api_error"])
 if args[0] == "release":
@@ -52,7 +54,7 @@ if args[0] == "release":
     sys.exit(0)
 if args[0] == "api" and args[1].startswith("repos/saif97/Tuivir/releases"):
     if "/releases?" in args[1]:
-        print(json.dumps([[state["release"]] if state.get("release") else []]))
+        print(json.dumps([state["release"]] if state.get("release") else []))
         sys.exit(0)
     release = state.get("latest") if args[1].endswith("/latest") else state.get("release")
     # GitHub's tag endpoint finds published releases; drafts need a list lookup.

@@ -175,7 +175,7 @@ end
 def api(endpoint, data=None, method="GET", missing=False, paginate=False):
     command = ["gh", "api", endpoint, "--method", method]
     if paginate:
-        command += ["--paginate", "--slurp"]
+        command += ["--paginate"]
     if data is not None:
         command += ["--input", "-"]
     result = subprocess.run(command, input=json.dumps(data) if data is not None else None,
@@ -184,6 +184,13 @@ def api(endpoint, data=None, method="GET", missing=False, paginate=False):
         if missing and "(HTTP 404)" in result.stderr:
             return None
         raise ValueError(result.stderr.strip())
+    if paginate:
+        pages, remaining = [], result.stdout.strip()
+        while remaining:
+            page, end = json.JSONDecoder().raw_decode(remaining)
+            pages.append(page)
+            remaining = remaining[end:].lstrip()
+        return pages
     return json.loads(result.stdout)
 
 
