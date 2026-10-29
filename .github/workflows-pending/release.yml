@@ -1,0 +1,83 @@
+name: Prepare release
+
+"on":
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version increment
+        required: true
+        type: choice
+        options: [patch, minor, major]
+  push:
+    branches: [master]
+    paths: [Cargo.toml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prepare-release-${{ github.event_name }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: master
+          persist-credentials: false
+      - name: Bump the package version
+        id: version
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          version=$(python3 scripts/bump-version.py "$BUMP")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: peter-evans/create-pull-request@271a8d0340265f705b14b6d32b9829c1cb33d45e # v7.0.8
+        id: pr
+        with:
+          branch: release/next
+          add-paths: |
+            Cargo.toml
+            Cargo.lock
+          title: Release v${{ steps.version.outputs.version }}
+          commit-message: Release v${{ steps.version.outputs.version }}
+          body: Bumps the package version. Merge after CI passes to create the tag, publish binaries, and update Homebrew.
+      - name: Start CI for the release PR
+        if: steps.pr.outputs.pull-request-number
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        # GITHUB_TOKEN pushes do not trigger another push workflow.
+        run: gh workflow run ci.yml --ref release/next
+
+  tag:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Tag a merged version bump and start publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          gh auth setup-git
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          tag=$(bash scripts/tag-release "$BEFORE" "$GITHUB_SHA")
+          if [[ -n "$tag" ]]; then
+            gh workflow run publish-release.yml --ref "$tag"
+          fi
