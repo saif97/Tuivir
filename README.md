@@ -47,6 +47,9 @@ tuivir --version
 
 Contributors can run the locked test suite with `cargo test --locked`.
 
+Maintainers can use the [release workflow](docs/releasing.md) to prepare a
+version-bump PR, publish its merged tag, and update the Homebrew tap.
+
 ## Configuration
 
 Tuivir currently supports keybinding configuration. It does not create a
