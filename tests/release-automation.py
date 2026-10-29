@@ -3,6 +3,9 @@
 
 import json
 import copy
+import hashlib
+import base64
+import os
 import subprocess
 import tempfile
 import unittest
@@ -55,10 +58,10 @@ class ReleaseCommands(unittest.TestCase):
         self.git("commit", "-m", message)
         return self.git("rev-parse", "HEAD")
 
-    def release(self, *args, success=True):
+    def release(self, *args, success=True, env=None):
         result = subprocess.run(
             ["python3", str(SCRIPT), *args], cwd=self.root,
-            text=True, capture_output=True,
+            text=True, capture_output=True, env=env,
         )
         if success:
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -194,6 +197,158 @@ dependencies = ["example"]
         event["pull_request"]["merge_commit_sha"] = self.git("rev-parse", "HEAD")
         self.git("update-ref", "refs/remotes/origin/master", "HEAD")
         self.check_event(event, success=False)
+
+    def artifacts(self, version="0.3.0"):
+        directory = self.root / "artifacts"
+        directory.mkdir(exist_ok=True)
+        sums = []
+        for target in ("aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-musl"):
+            filename = f"tuivir-v{version}-{target}.tar.gz"
+            content = f"archive for {target}".encode()
+            (directory / filename).write_bytes(content)
+            sums.append(f"{hashlib.sha256(content).hexdigest()}  {filename}\n")
+        (directory / "SHA256SUMS").write_text("".join(sums))
+        return directory
+
+    def test_formula_uses_verified_release_archives_for_both_mac_architectures(self):
+        artifacts = self.artifacts()
+        output = self.root / "tuivir.rb"
+        self.release("formula", "v0.3.0", str(artifacts), str(output))
+        formula = output.read_text()
+        self.assertIn('version "0.3.0"', formula)
+        self.assertIn('assert_equal "0.3.0\\n", shell_output("#{bin}/tuivir --version")', formula)
+        for target in ("aarch64-apple-darwin", "x86_64-apple-darwin"):
+            self.assertIn(f'https://github.com/saif97/Tuivir/releases/download/v0.3.0/tuivir-v0.3.0-{target}.tar.gz', formula)
+            digest = hashlib.sha256(f"archive for {target}".encode()).hexdigest()
+            self.assertIn(f'sha256 "{digest}"', formula)
+
+    def github(self, content):
+        binary = self.root / "bin"
+        binary.mkdir()
+        fake = binary / "gh"
+        fake.write_text((Path(__file__).parent / "fixtures/release-gh.py").read_text())
+        fake.chmod(0o755)
+        state = self.root / "github.json"
+        state.write_text(json.dumps({"content": base64.b64encode(content.encode()).decode(), "revision": 1}))
+        return {**os.environ, "PATH": str(binary) + os.pathsep + os.environ["PATH"],
+                "RELEASE_GITHUB_STATE": str(state)}
+
+    def generated_formula(self, version):
+        output = self.root / f"tuivir-{version}.rb"
+        self.release("formula", f"v{version}", str(self.artifacts(version)), str(output))
+        return output
+
+    def test_tap_update_commits_once_and_retry_is_a_no_op(self):
+        env = self.github(self.generated_formula("0.2.7").read_text())
+        candidate = self.generated_formula("0.3.0")
+        self.release("update-tap", str(candidate), env=env)
+        self.release("update-tap", str(candidate), env=env)
+        state = json.loads(Path(env["RELEASE_GITHUB_STATE"]).read_text())
+        self.assertEqual(base64.b64decode(state["content"]).decode(), candidate.read_text())
+        self.assertEqual(state["revision"], 2)
+
+    def test_tap_rejects_downgrade_and_same_version_with_different_hashes(self):
+        candidate = self.generated_formula("0.3.0")
+        original = candidate.read_text()
+        env = self.github(original)
+        self.release("update-tap", str(self.generated_formula("0.2.7")), env=env, success=False)
+        digest = hashlib.sha256(b"archive for aarch64-apple-darwin").hexdigest()
+        candidate.write_text(original.replace(digest, "a" * 64))
+        self.release("update-tap", str(candidate), env=env, success=False)
+        state = json.loads(Path(env["RELEASE_GITHUB_STATE"]).read_text())
+        self.assertEqual(state["revision"], 1)
+        self.assertEqual(base64.b64decode(state["content"]).decode(), original)
+
+    def test_tap_does_not_overwrite_hand_edited_formula(self):
+        env = self.github(self.generated_formula("0.2.7").read_text() + "# maintained manually\n")
+        self.release("update-tap", str(self.generated_formula("0.3.0")), env=env, success=False)
+        self.assertEqual(json.loads(Path(env["RELEASE_GITHUB_STATE"]).read_text())["revision"], 1)
+
+    def test_formula_rejects_corrupt_missing_and_unexpected_artifacts(self):
+        directory = self.artifacts()
+        archive = directory / "tuivir-v0.3.0-aarch64-apple-darwin.tar.gz"
+        output = self.root / "formula.rb"
+        archive.write_text("corrupt")
+        self.release("formula", "v0.3.0", str(directory), str(output), success=False)
+        archive.unlink()
+        self.release("formula", "v0.3.0", str(directory), str(output), success=False)
+        self.artifacts()
+        manifest = directory / "SHA256SUMS"
+        manifest.write_text(manifest.read_text() + "a" * 64 + "  ../untrusted.tar.gz\n")
+        self.release("formula", "v0.3.0", str(directory), str(output), success=False)
+        self.assertFalse(output.exists())
+
+    def test_publish_can_finish_a_draft_and_retry_a_published_release(self):
+        env = self.github("")
+        artifacts = self.artifacts()
+        self.release("publish", "v0.3.0", str(artifacts), env=env)
+        first = Path(env["RELEASE_GITHUB_STATE"]).read_text()
+        self.release("publish", "v0.3.0", str(artifacts), env=env)
+        self.assertEqual(Path(env["RELEASE_GITHUB_STATE"]).read_text(), first)
+        release = json.loads(first)["release"]
+        self.assertFalse(release["draft"])
+        self.assertTrue(release["immutable"])
+        self.assertEqual(len(release["assets"]), 4)
+
+    def test_published_assets_are_downloaded_and_verified_without_rebuilding(self):
+        env = self.github("")
+        artifacts = self.artifacts()
+        self.release("publish", "v0.3.0", str(artifacts), env=env)
+        destination = self.root / "downloaded"
+        self.release("download", "v0.3.0", str(destination), env=env)
+        self.assertEqual({p.name: p.read_bytes() for p in destination.iterdir()},
+                         {p.name: p.read_bytes() for p in artifacts.iterdir()})
+
+    def github_settings(self, env, **settings):
+        path = Path(env["RELEASE_GITHUB_STATE"])
+        state = json.loads(path.read_text())
+        state.update(settings)
+        path.write_text(json.dumps(state))
+
+    def test_failed_upload_leaves_draft_and_retry_finishes_it(self):
+        env = self.github("")
+        self.github_settings(env, fail_upload_once=True)
+        artifacts = self.artifacts()
+        self.release("publish", "v0.3.0", str(artifacts), env=env, success=False)
+        state = json.loads(Path(env["RELEASE_GITHUB_STATE"]).read_text())
+        self.assertTrue(state["release"]["draft"])
+        self.assertEqual(len(state["release"]["assets"]), 1)
+        self.release("publish", "v0.3.0", str(artifacts), env=env)
+        self.assertEqual(self.release("published", "v0.3.0", env=env).stdout.strip(), "true")
+
+    def test_old_release_is_not_marked_latest(self):
+        env = self.github("")
+        self.github_settings(env, latest={"tag_name": "v1.0.0"})
+        self.release("publish", "v0.3.0", str(self.artifacts()), env=env)
+        self.assertFalse(json.loads(Path(env["RELEASE_GITHUB_STATE"]).read_text())["marked_latest"])
+
+    def test_different_bytes_cannot_replace_published_assets(self):
+        env = self.github("")
+        directory = self.artifacts()
+        self.release("publish", "v0.3.0", str(directory), env=env)
+        state = Path(env["RELEASE_GITHUB_STATE"]).read_text()
+        target = "aarch64-apple-darwin"
+        (directory / f"tuivir-v0.3.0-{target}.tar.gz").write_bytes(b"replacement")
+        manifest = directory / "SHA256SUMS"
+        manifest.write_text(manifest.read_text().replace(
+            hashlib.sha256(f"archive for {target}".encode()).hexdigest(),
+            hashlib.sha256(b"replacement").hexdigest()))
+        self.release("publish", "v0.3.0", str(directory), env=env, success=False)
+        self.assertEqual(Path(env["RELEASE_GITHUB_STATE"]).read_text(), state)
+
+    def test_mutable_release_blocks_downstream_delivery(self):
+        env = self.github("")
+        self.github_settings(env, immutability_enabled=False)
+        self.release("publish", "v0.3.0", str(self.artifacts()), env=env, success=False)
+        self.release("download", "v0.3.0", str(self.root / "downloaded"), env=env, success=False)
+        self.assertFalse((self.root / "downloaded").exists())
+
+    def test_authentication_failure_does_not_start_a_new_release(self):
+        env = self.github("")
+        self.github_settings(env, api_error="gh: Resource not accessible (HTTP 403)")
+        self.release("published", "v0.3.0", env=env, success=False)
+        self.release("publish", "v0.3.0", str(self.artifacts()), env=env, success=False)
+        self.assertNotIn("release", json.loads(Path(env["RELEASE_GITHUB_STATE"]).read_text()))
 
 
 if __name__ == "__main__":
