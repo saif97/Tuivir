@@ -124,6 +124,18 @@ dependencies = ["example"]
             "commit": event["pull_request"]["merge_commit_sha"],
         })
 
+    def test_merge_commit_is_valid_when_other_changes_landed_on_master(self):
+        self.git("switch", "-c", "release/v0.3.0")
+        event = self.release_event()
+        self.git("switch", "master")
+        (self.root / "README.md").write_text("Merged independently\n")
+        self.commit("Another PR")
+        self.git("merge", "--no-ff", "release/v0.3.0", "-m", "Merge release PR")
+        merged = self.git("rev-parse", "HEAD")
+        event["pull_request"]["merge_commit_sha"] = merged
+        self.git("update-ref", "refs/remotes/origin/master", "HEAD")
+        self.assertEqual(json.loads(self.check_event(event).stdout)["commit"], merged)
+
     def test_release_pr_cannot_smuggle_source_changes_into_automatic_tagging(self):
         event = self.release_event()
         (self.root / "source.rs").write_text("unreviewed release machinery\n")
@@ -159,6 +171,11 @@ dependencies = ["example"]
         other = self.commit("Different commit")
         self.release("tag", "v0.2.7", other, success=False)
         self.assertEqual(self.git("ls-remote", "--tags", "origin"), original)
+
+    def test_tag_must_match_the_version_in_its_commit(self):
+        self.remote()
+        self.release("tag", "v0.3.0", self.git("rev-parse", "HEAD"), success=False)
+        self.assertEqual(self.git("ls-remote", "--tags", "origin"), "")
 
     def test_patch_and_major_bumps(self):
         for kind, expected in (("patch", "0.2.8"), ("major", "1.0.0")):
