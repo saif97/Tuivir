@@ -1,0 +1,83 @@
+name: Prepare release
+
+"on":
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version increment
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prepare-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      BUMP: ${{ inputs.bump }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Prepare the version branch and pull request
+        run: |
+          set -euo pipefail
+          version=$(python3 scripts/release.py bump "$BUMP")
+          branch="release/v$version"
+
+          # Keep one release decision in flight. A retry may reuse its own PR.
+          other=$(gh pr list --base "$DEFAULT_BRANCH" --state open --json headRefName \
+            --jq '.[] | .headRefName | select(startswith("release/v"))' | \
+            awk -v branch="$branch" '$0 != branch')
+          if [[ -n "$other" ]]; then
+            echo "::error::Finish or close the existing release PR: $other"
+            exit 1
+          fi
+
+          gh auth setup-git
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if [[ -n "$(git ls-remote --heads origin "refs/heads/$branch")" ]]; then
+            git fetch origin "refs/heads/$branch"
+            # Never overwrite a changed or stale release branch on a retry.
+            git diff --exit-code FETCH_HEAD --
+          else
+            git switch -c "$branch"
+            git add Cargo.toml Cargo.lock
+            git commit -m "Release v$version"
+            git push origin "HEAD:refs/heads/$branch"
+          fi
+
+          pr=$(gh pr list --base "$DEFAULT_BRANCH" --head "$branch" --state open --json url --jq '.[0].url // empty')
+          if [[ -z "$pr" ]]; then
+            cat > .git/release-pr.md <<'BODY'
+          Bump the Tuivir package version in Cargo.toml and Cargo.lock without changing dependencies.
+
+          Merge after CI passes to tag this exact merged commit and start publication. The release workflow checks the version-only diff again before creating the tag.
+          BODY
+            pr=$(gh pr create --base "$DEFAULT_BRANCH" --head "$branch" \
+              --title "Release v$version" --body-file .git/release-pr.md)
+          fi
+
+          # GITHUB_TOKEN pushes do not start push CI. Dispatch on the PR head.
+          gh workflow run ci.yml --ref "$branch"
+          printf 'Release PR: %s\n\nCI was explicitly requested for `%s`.\n' "$pr" "$branch" >> "$GITHUB_STEP_SUMMARY"

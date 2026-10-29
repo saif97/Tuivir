@@ -1,12 +1,17 @@
 name: Publish release
 
 "on":
+  workflow_dispatch:
   push:
     tags:
       - "v*.*.*"
 
 permissions:
   contents: read
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   validate:
@@ -16,14 +21,24 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Validate the release tag
         id: release
-        run: echo "version=$(bash scripts/release-version "$GITHUB_REF_NAME")" >> "$GITHUB_OUTPUT"
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_TYPE" = tag
+          version=$(bash scripts/release-version "$GITHUB_REF_NAME")
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/master
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  checks:
+    needs: validate
+    uses: ./.github/workflows/ci.yml
 
   artifacts:
-    needs: validate
+    needs: [validate, checks]
     permissions:
       contents: read
     uses: ./.github/workflows/build-release-artifacts.yml
