@@ -50,9 +50,13 @@ if args[0] == "release":
         sys.exit(f"unexpected release operation: {operation}")
     path.write_text(json.dumps(state))
     sys.exit(0)
-if args[0] == "api" and args[1].startswith("repos/saif97/Tuivir/releases/"):
+if args[0] == "api" and args[1].startswith("repos/saif97/Tuivir/releases"):
+    if "/releases?" in args[1]:
+        print(json.dumps([[state["release"]] if state.get("release") else []]))
+        sys.exit(0)
     release = state.get("latest") if args[1].endswith("/latest") else state.get("release")
-    if not release:
+    # GitHub's tag endpoint finds published releases; drafts need a list lookup.
+    if not release or release.get("draft"):
         sys.exit("gh: Not Found (HTTP 404)")
     print(json.dumps(release))
     sys.exit(0)

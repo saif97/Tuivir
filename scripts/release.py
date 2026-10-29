@@ -172,8 +172,10 @@ end
 '''
 
 
-def api(endpoint, data=None, method="GET", missing=False):
+def api(endpoint, data=None, method="GET", missing=False, paginate=False):
     command = ["gh", "api", endpoint, "--method", method]
+    if paginate:
+        command += ["--paginate", "--slurp"]
     if data is not None:
         command += ["--input", "-"]
     result = subprocess.run(command, input=json.dumps(data) if data is not None else None,
@@ -217,6 +219,14 @@ def release_record(tag):
         raise ValueError("expected a vX.Y.Z tag")
     version_parts(tag[1:])
     release = api(f"repos/{UPSTREAM}/releases/tags/{tag}", missing=True)
+    if release is None:
+        # The tag endpoint cannot find drafts. List releases using the same
+        # authenticated token, retaining failures instead of treating them as 404.
+        pages = api(f"repos/{UPSTREAM}/releases?per_page=100", paginate=True)
+        matches = [item for page in pages for item in page if item["tag_name"] == tag]
+        if len(matches) > 1:
+            raise ValueError("multiple releases have this tag; inspect the drafts before retrying")
+        release = matches[0] if matches else None
     if release and (release["tag_name"] != tag or release["prerelease"]):
         raise ValueError("expected the matching stable release")
     return release
