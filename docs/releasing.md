@@ -33,7 +33,12 @@ There is no separate tap service or release-state database.
 - Allow GitHub Actions to create PRs in Tuivir's Actions settings.
 - Require CI before merging to `master`; protect release tags from changes and
   deletion while allowing the release workflow to create them.
-- Add the repository Actions secret `HOMEBREW_TAP_TOKEN` to Tuivir. Use an expiring
+- Use Tuivir's `release` environment for the final Homebrew job. Set deployment
+  access to selected branches and tags, with only a **Tag** rule for `v*.*.*`
+  and no branch rules. Required reviewers pause the Homebrew update for approval
+  after the GitHub release is published; omit reviewers for automatic delivery.
+- Add `HOMEBREW_TAP_TOKEN` as an environment secret in `release`, and remove any
+  repository copy. Use an expiring
   fine-grained PAT restricted to `saif97/homebrew-tap`, **Contents: read and write**
   only. Enter it directly in GitHub's secret UI and arrange its renewal. It needs
   no PR, workflow, or administration permissions. The tap must permit direct
