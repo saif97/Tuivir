@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+before=${1:?Expected the previous commit}
+commit=$(git rev-parse "${2:?Expected a commit}^{commit}")
+old=$(git show "$before:Cargo.toml" | awk -F '"' '$1 ~ /^version = / { print $2; exit }')
+version=$(git show "$commit:Cargo.toml" | awk -F '"' '$1 ~ /^version = / { print $2; exit }')
+[[ "$old" != "$version" ]] || exit 0
+tag="v$version"
+[[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+
+if git rev-parse --verify "refs/tags/$tag" >/dev/null 2>&1; then
+  test "$(git rev-parse "refs/tags/$tag^{commit}")" = "$commit"
+else
+  git tag -a "$tag" "$commit" -m "Release $tag"
+fi
+# A normal push cannot replace a different tag already present on GitHub.
+git push origin "refs/tags/$tag" >&2
+printf '%s\n' "$tag"
