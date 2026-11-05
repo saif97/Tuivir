@@ -218,6 +218,7 @@ async fn the_instances_panel_declares_incuss_native_detail_views() {
             success(include_str!("fixtures/incus/instances.json")),
         ),
         empty_storage_ls(),
+        (image_ls(), success("[]")),
     ]);
 
     let snapshot = IncusWorkspace
@@ -244,6 +245,7 @@ async fn the_instances_panel_declares_incuss_native_detail_views() {
 async fn incus_declares_custom_volumes_from_every_pool_after_instances() {
     let cli = FixtureCli::new([
         (instance_ls(), success("[]")),
+        (image_ls(), success("[]")),
         (
             storage_ls(),
             success(include_str!("fixtures/incus/storage-pools.json")),
@@ -269,7 +271,11 @@ async fn incus_declares_custom_volumes_from_every_pool_after_instances() {
             .iter()
             .map(|panel| (panel.id.0.as_str(), panel.title.as_str()))
             .collect::<Vec<_>>(),
-        [("instances", "Instances"), ("volumes", "Volumes")]
+        [
+            ("instances", "Instances"),
+            ("volumes", "Volumes"),
+            ("images", "Images")
+        ]
     );
     let volumes = &snapshot.panels[1];
     assert_eq!(
@@ -396,6 +402,7 @@ async fn deleting_an_incus_volume_confirms_pool_and_refreshes_the_workspace() {
             success("default\n"),
         ),
         (instance_ls(), success("[]")),
+        (image_ls(), success("[]")),
         (
             storage_ls(),
             success(include_str!("fixtures/incus/storage-pools.json")),
@@ -416,6 +423,7 @@ async fn deleting_an_incus_volume_confirms_pool_and_refreshes_the_workspace() {
             success(""),
         ),
         (instance_ls(), success("[]")),
+        (image_ls(), success("[]")),
         (
             storage_ls(),
             success(include_str!("fixtures/incus/storage-pools.json")),
@@ -670,6 +678,7 @@ async fn incus_maps_every_instance_status_into_the_shared_vocabulary() {
             success(include_str!("fixtures/incus/mixed-state-instances.json")),
         ),
         empty_storage_ls(),
+        (image_ls(), success("[]")),
     ]);
 
     let snapshot = IncusWorkspace
@@ -716,6 +725,7 @@ async fn only_a_running_instance_carries_an_interactive_shell() {
             success(include_str!("fixtures/incus/mixed-state-instances.json")),
         ),
         empty_storage_ls(),
+        (image_ls(), success("[]")),
     ]);
 
     let snapshot = IncusWorkspace
@@ -751,6 +761,7 @@ async fn only_a_frozen_instance_offers_the_resume_command() {
             success(include_str!("fixtures/incus/mixed-state-instances.json")),
         ),
         empty_storage_ls(),
+        (image_ls(), success("[]")),
     ]);
 
     let snapshot = IncusWorkspace
@@ -818,6 +829,7 @@ async fn discovered_incus_workspace_renders_target_environment_and_instances() {
             success(include_str!("fixtures/incus/instances.json")),
         ),
         empty_storage_ls(),
+        (image_ls(), success("[]")),
     ]);
     let incus = IncusWorkspace;
 
@@ -858,6 +870,7 @@ async fn reachable_incus_without_instances_renders_a_distinct_empty_state() {
         ),
         (instance_ls(), success("[]")),
         empty_storage_ls(),
+        (image_ls(), success("[]")),
     ]);
     let incus = IncusWorkspace;
     let discovered = incus.discover(&cli).await.expect("Incus is installed");
@@ -1161,5 +1174,166 @@ async fn runtime_with_builtin_providers_discovers_installed_incus() {
     assert_eq!(
         discovered[0].provider().target_environment(),
         Some(&TargetEnvironment::new("local / default"))
+    );
+}
+
+fn image_ls() -> ProcessSpec {
+    ProcessSpec::new("incus", &["image", "list", "--format=json"])
+}
+
+#[tokio::test]
+async fn incus_lists_images_with_native_metadata_and_fingerprint_identity() {
+    let cli = FixtureCli::new([
+        (instance_ls(), success("[]")),
+        empty_storage_ls(),
+        (
+            image_ls(),
+            success(
+                r#"[{
+            "fingerprint":"abcdef0123456789", "aliases":[{"name":"ubuntu"},{"name":"noble"}],
+            "properties":{"description":"Ubuntu 24.04"}, "architecture":"x86_64",
+            "type":"virtual-machine", "size":104857600, "public":false,
+            "uploaded_at":"2026-11-05T12:00:00Z"
+        }]"#,
+            ),
+        ),
+    ]);
+    let snapshot = IncusWorkspace.refresh(&cli).await.unwrap();
+    let panel = snapshot
+        .panels
+        .iter()
+        .find(|p| p.id.0 == "images")
+        .expect("Images panel");
+    assert_eq!(panel.title, "Images");
+    let image = &panel.resources[0];
+    assert_eq!(image.id.0, "abcdef0123456789");
+    assert_eq!(image.name, "ubuntu, noble");
+    assert_eq!(image.state, None);
+    assert_eq!(image.status, None);
+    assert!(image.available_commands.is_empty());
+    assert!(image.shell.is_none());
+    for field in [
+        ("Fingerprint", "abcdef0123456789"),
+        ("Description", "Ubuntu 24.04"),
+        ("Architecture", "x86_64"),
+        ("Type", "virtual-machine"),
+        ("Size", "100.0 MiB"),
+        ("Public", "no"),
+        ("Uploaded", "2026-11-05T12:00:00Z"),
+    ] {
+        assert!(
+            image
+                .fields
+                .iter()
+                .any(|(key, value)| *key == field.0 && value == field.1),
+            "missing {field:?}"
+        );
+    }
+    assert_eq!(panel.detail_views[0].id.0, "info");
+}
+
+#[tokio::test]
+async fn incus_image_info_uses_the_full_fingerprint() {
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("incus", &["image", "info", "abcdef0123456789"]),
+        success("Fingerprint: abcdef0123456789\nType: virtual-machine\n"),
+    )]);
+    let details = IncusWorkspace
+        .load_details(
+            &cli,
+            &resource_target("images", "abcdef0123456789"),
+            &DetailViewId::new("info"),
+        )
+        .await
+        .expect("image information");
+    assert_eq!(
+        details,
+        tuivir::application::ResourceDetails::from_output(
+            "Fingerprint: abcdef0123456789\nType: virtual-machine\n"
+        )
+    );
+    cli.assert_exhausted();
+}
+
+#[tokio::test]
+async fn incus_keeps_an_empty_images_panel_when_no_images_are_stored() {
+    let cli = FixtureCli::new([
+        (instance_ls(), success("[]")),
+        empty_storage_ls(),
+        (image_ls(), success("[]")),
+    ]);
+    let snapshot = IncusWorkspace.refresh(&cli).await.unwrap();
+    let panel = snapshot.panels.iter().find(|p| p.id.0 == "images").unwrap();
+    assert!(panel.resources.is_empty());
+}
+
+#[tokio::test]
+async fn incus_images_without_aliases_or_description_remain_identifiable() {
+    let cli = FixtureCli::new([
+        (instance_ls(), success("[]")),
+        empty_storage_ls(),
+        (
+            image_ls(),
+            success(
+                r#"[{
+            "fingerprint":"fedcba9876543210", "aliases":[], "properties":{},
+            "architecture":"aarch64", "type":"container", "size":0,
+            "public":true, "uploaded_at":"2026-11-05T12:00:00Z"
+        }]"#,
+            ),
+        ),
+    ]);
+    let snapshot = IncusWorkspace.refresh(&cli).await.unwrap();
+    let image = &snapshot
+        .panels
+        .iter()
+        .find(|p| p.id.0 == "images")
+        .unwrap()
+        .resources[0];
+    assert_eq!(image.name, "fedcba9876543210");
+    assert!(image.fields.contains(&("Description", String::new())));
+    assert!(image.fields.contains(&("Public", "yes".into())));
+}
+
+#[tokio::test]
+async fn incus_image_listing_failures_explain_how_to_check_the_selected_environment() {
+    for response in [failure("image access denied"), success("invalid json")] {
+        let cli = FixtureCli::new([
+            (instance_ls(), success("[]")),
+            empty_storage_ls(),
+            (image_ls(), response),
+        ]);
+        let error = IncusWorkspace
+            .refresh(&cli)
+            .await
+            .expect_err("failed image refresh is atomic");
+        assert!(error.message.contains("incus image list"), "{error:?}");
+    }
+}
+
+#[tokio::test]
+async fn incus_image_info_errors_are_visible_and_unsupported_views_do_not_run_commands() {
+    let target = resource_target("images", "abcdef0123456789");
+    let cli = FixtureCli::new([(
+        ProcessSpec::new("incus", &["image", "info", "abcdef0123456789"]),
+        failure("Image not found"),
+    )]);
+    let error = IncusWorkspace
+        .load_details(&cli, &target, &DetailViewId::new("info"))
+        .await
+        .unwrap_err();
+    assert!(error.message.contains("Image not found"));
+    let cli = FixtureCli::new([]);
+    assert!(
+        IncusWorkspace
+            .load_details(&cli, &target, &DetailViewId::new("config"))
+            .await
+            .is_err()
+    );
+    assert!(
+        IncusWorkspace
+            .execute_command(&cli, &target, ResourceCommand::Start, None)
+            .await
+            .is_err()
     );
 }

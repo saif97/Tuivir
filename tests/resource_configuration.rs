@@ -421,6 +421,10 @@ async fn incus_app_with_capabilities(
             success(include_str!("fixtures/incus/instances.json")),
         ),
         (
+            ProcessSpec::new("incus", &["image", "list", "--format=json"]),
+            success("[]"),
+        ),
+        (
             ProcessSpec::new("incus", &["storage", "list", "--format=json"]),
             success("[]"),
         ),
@@ -494,6 +498,10 @@ fn incus_refresh() -> Vec<(
         (
             ProcessSpec::new("incus", &["list", "--format=json"]),
             success(include_str!("fixtures/incus/instances.json")),
+        ),
+        (
+            ProcessSpec::new("incus", &["image", "list", "--format=json"]),
+            success("[]"),
         ),
         (
             ProcessSpec::new("incus", &["storage", "list", "--format=json"]),
