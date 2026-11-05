@@ -21,6 +21,9 @@ const STORAGE_POOL_REFRESH_HELP: &str =
     "Run `incus storage list` to verify access to storage pools.";
 const VOLUME_REFRESH_HELP: &str =
     "Run `incus storage volume list <pool>` to verify access to custom Volumes.";
+const IMAGE_REFRESH_HELP: &str =
+    "Run `incus image list` to verify access to images in the current Target Environment.";
+const IMAGES_PANEL_ID: &str = "images";
 const INSTANCES_PANEL_ID: &str = "instances";
 const VOLUMES_PANEL_ID: &str = "volumes";
 const INFO_VIEW_ID: &str = "info";
@@ -53,6 +56,73 @@ struct StorageVolumeRow {
     description: String,
     project: String,
     location: String,
+}
+
+#[derive(Deserialize)]
+struct ImageAlias {
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct ImageRow {
+    fingerprint: String,
+    aliases: Vec<ImageAlias>,
+    properties: std::collections::BTreeMap<String, String>,
+    architecture: String,
+    #[serde(rename = "type")]
+    image_type: String,
+    size: u64,
+    public: bool,
+    uploaded_at: String,
+}
+
+fn image_resources(output: &str) -> Result<Vec<Resource>, WorkspaceError> {
+    let rows: Vec<ImageRow> = serde_json::from_str(output).map_err(|error| {
+        WorkspaceError::with_help(
+            format!("Incus returned malformed image data: {error}"),
+            IMAGE_REFRESH_HELP,
+        )
+    })?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let aliases = row
+                .aliases
+                .into_iter()
+                .map(|alias| alias.name)
+                .collect::<Vec<_>>()
+                .join(", ");
+            Resource {
+                id: ResourceId::new(&row.fingerprint),
+                name: if aliases.is_empty() {
+                    row.fingerprint.clone()
+                } else {
+                    aliases
+                },
+                secondary_text: None,
+                status: None,
+                state: None,
+                fields: vec![
+                    ("Fingerprint", row.fingerprint),
+                    (
+                        "Description",
+                        row.properties
+                            .get("description")
+                            .cloned()
+                            .unwrap_or_default(),
+                    ),
+                    ("Architecture", row.architecture),
+                    ("Type", row.image_type),
+                    ("Size", format!("{:.1} MiB", row.size as f64 / 1_048_576.0)),
+                    ("Public", if row.public { "yes" } else { "no" }.into()),
+                    ("Uploaded", row.uploaded_at),
+                ],
+                snapshot_details: Vec::new(),
+                available_commands: &[],
+                shell: None,
+            }
+        })
+        .collect())
 }
 
 fn instance_resources(output: &str) -> Result<Vec<Resource>, WorkspaceError> {
@@ -476,6 +546,23 @@ impl ProviderWorkspace for IncusWorkspace {
             )?;
             let resources = instance_resources(&output.stdout)?;
             let volume_resources = custom_volume_resources(cli, &pools_output.stdout).await?;
+            let images_output = cli
+                .run(ProcessSpec::new(
+                    "incus",
+                    &["image", "list", "--format=json"],
+                ))
+                .await
+                .map_err(|error| {
+                    let message =
+                        provider_cli_error(PROVIDER_NAME, &error, "Incus could not list images");
+                    match error {
+                        ProcessError::Exited(_) => {
+                            WorkspaceError::with_help(message, IMAGE_REFRESH_HELP)
+                        }
+                        _ => WorkspaceError::new(message),
+                    }
+                })?;
+            let images = image_resources(&images_output.stdout)?;
 
             Ok(WorkspaceSnapshot {
                 panels: vec![
@@ -493,6 +580,12 @@ impl ProviderWorkspace for IncusWorkspace {
                             DetailView::new(CONFIG_VIEW_ID, "Config"),
                         ],
                         resources: volume_resources,
+                    },
+                    ResourcePanel {
+                        id: ResourcePanelId::new(IMAGES_PANEL_ID),
+                        title: "Images".to_owned(),
+                        detail_views: vec![DetailView::new(INFO_VIEW_ID, "Info")],
+                        resources: images,
                     },
                 ],
             })
@@ -568,6 +661,22 @@ impl ProviderWorkspace for IncusWorkspace {
         Box::pin(async move {
             let panel_id = target.panel_id();
             let resource_id = target.resource_id();
+            if panel_id.0 == IMAGES_PANEL_ID && view_id.0 == INFO_VIEW_ID {
+                let output = cli
+                    .run(ProcessSpec::new(
+                        "incus",
+                        &["image", "info", resource_id.0.as_str()],
+                    ))
+                    .await
+                    .map_err(|error| {
+                        WorkspaceError::new(provider_cli_error(
+                            PROVIDER_NAME,
+                            &error,
+                            &format!("Incus could not load image information for {resource_id}"),
+                        ))
+                    })?;
+                return Ok(ResourceDetails::from_output(&output.stdout));
+            }
             if panel_id.0 == VOLUMES_PANEL_ID {
                 let (pool, name) = volume_address(resource_id)?;
                 let operation = match view_id.0.as_str() {

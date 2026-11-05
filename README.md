@@ -202,6 +202,17 @@ stopped state on success. Restart failures remain visible even when settings
 were saved. Automatic rollback and draft persistence across restarts are not
 provided.
 
+### Incus images
+
+The Incus Provider Workspace includes an Images panel for images stored in the
+CLI's current remote and project, using `incus image list`. It displays aliases
+(or the fingerprint when no alias exists), fingerprint, description,
+architecture, type, size, visibility, and upload date. Select an image to view
+its native `incus image info` output in the Info tab. The panel remains visible
+when the image store is empty.
+
+Image browsing is read-only; creating instances from images is not yet supported.
+
 ### Apple Container
 
 The Apple Container Provider Workspace operates existing Containers, Images,
