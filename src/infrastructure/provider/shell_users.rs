@@ -31,3 +31,31 @@ pub(super) async fn discover(
     accounts.dedup();
     Ok(Some(accounts))
 }
+
+pub(super) const VERIFY: &str = "printf TUIVIR_SHELL_VERIFIED";
+pub(super) const READY: &str = "tuivir-shell-ready";
+pub(super) const START_SH: &str = "printf '\\033]2;tuivir-shell-ready\\007'; exec /bin/sh -i";
+
+pub(super) async fn verify(
+    cli: &dyn CliRunner,
+    process: ProcessSpec,
+) -> Result<(), WorkspaceError> {
+    let output = tokio::time::timeout(std::time::Duration::from_secs(10), cli.run(process))
+        .await
+        .map_err(|_| WorkspaceError::new("Shell account verification timed out"))?
+        .map_err(|error| {
+            WorkspaceError::new(super::provider_cli_error(
+                "Provider",
+                &error,
+                "Shell account verification failed",
+            ))
+        })?;
+    if !output.stdout.contains("TUIVIR_SHELL_VERIFIED") {
+        return Err(WorkspaceError::new(if output.stderr.trim().is_empty() {
+            "Provider did not confirm execution as the selected account".to_owned()
+        } else {
+            output.stderr.trim().to_owned()
+        }));
+    }
+    Ok(())
+}

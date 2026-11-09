@@ -9,6 +9,8 @@ use crate::domain::{ProviderId, ResourceTarget};
 pub struct ResourceShellProcess {
     program: String,
     args: Vec<String>,
+    startup_marker: Option<String>,
+    supports_user_selection: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -77,8 +79,29 @@ impl ResourceShellProcess {
     pub fn new(program: &str, args: &[&str]) -> Self {
         Self {
             program: program.to_owned(),
+            startup_marker: None,
+            supports_user_selection: false,
             args: args.iter().map(|arg| (*arg).to_owned()).collect(),
         }
+    }
+
+    pub fn with_user_selection(mut self) -> Self {
+        self.supports_user_selection = true;
+        self
+    }
+
+    pub fn supports_user_selection(&self) -> bool {
+        self.supports_user_selection
+    }
+
+    /// The guest shell acknowledges target execution using this terminal title.
+    pub fn with_startup_marker(mut self, marker: &str) -> Self {
+        self.startup_marker = Some(marker.to_owned());
+        self
+    }
+
+    pub fn startup_marker(&self) -> Option<&str> {
+        self.startup_marker.as_deref()
     }
 
     pub fn program(&self) -> &str {

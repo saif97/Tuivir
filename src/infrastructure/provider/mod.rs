@@ -94,6 +94,22 @@ impl ProviderDiscovery {
 /// Implementations own CLI commands and parsing. They never render Ratatui
 /// widgets, keeping provider knowledge out of the shared shell.
 pub trait ProviderWorkspace: Send + Sync {
+    /// Checks only the submitted account, then describes its interactive launch.
+    fn shell_as<'a>(
+        &'a self,
+        _cli: &'a dyn CliRunner,
+        _target: &'a ResourceTarget,
+        _username: &'a str,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<crate::application::ResourceShellProcess, WorkspaceError>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async { Err(WorkspaceError::new("Account selection is unsupported")) })
+    }
+
     /// `None` means the guest proved getent is unavailable; errors retain
     /// Provider execution diagnostics. Candidates never imply validity.
     fn shell_accounts<'a>(

@@ -71,6 +71,48 @@ struct VolumeRow {
 }
 
 impl ProviderWorkspace for DockerWorkspace {
+    fn shell_as<'a>(
+        &'a self,
+        cli: &'a dyn CliRunner,
+        target: &'a ResourceTarget,
+        username: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<ResourceShellProcess, WorkspaceError>> + Send + 'a>>
+    {
+        Box::pin(async move {
+            use super::shell_users::{READY, START_SH, VERIFY, verify};
+            verify(
+                cli,
+                ProcessSpec::new(
+                    "docker",
+                    &[
+                        "exec",
+                        "--user",
+                        username,
+                        &target.resource_id().0,
+                        "/bin/sh",
+                        "-c",
+                        VERIFY,
+                    ],
+                ),
+            )
+            .await?;
+            Ok(ResourceShellProcess::new(
+                "docker",
+                &[
+                    "exec",
+                    "-it",
+                    "--user",
+                    username,
+                    &target.resource_id().0,
+                    "/bin/sh",
+                    "-c",
+                    START_SH,
+                ],
+            )
+            .with_startup_marker(READY))
+        })
+    }
+
     fn shell_accounts<'a>(
         &'a self,
         cli: &'a dyn CliRunner,
