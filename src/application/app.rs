@@ -1080,8 +1080,17 @@ impl App {
                 Vec::new()
             }
             Command::OpenShell => self.request_resource_shell(true, false),
-            Command::OpenShellInDetails | Command::StartResourceShell => {
-                self.request_resource_shell(false, false)
+            Command::OpenShellInDetails => self.request_resource_shell(false, false),
+            Command::StartResourceShell => {
+                if self
+                    .state
+                    .active_workspace()
+                    .is_some_and(ProviderWorkspaceState::selected_resource_shell_tab)
+                {
+                    self.request_resource_shell(false, false)
+                } else {
+                    Vec::new()
+                }
             }
             Command::OpenShellAs => self.request_resource_shell(true, true),
             Command::ShellUserCharacter(c) => {

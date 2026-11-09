@@ -316,3 +316,13 @@ fn cancelling_verification_refuses_its_late_success() {
     assert!(app.state().default_shell_users.is_empty());
     assert!(app.take_resource_shell_effects().is_empty());
 }
+
+#[test]
+fn enter_in_an_unrelated_details_tab_does_not_start_account_selection() {
+    let mut app = app_with_shell(true);
+    app.invoke(Command::FocusDetails);
+    let requests = app.invoke(Command::StartResourceShell);
+    assert!(requests.is_empty());
+    assert!(app.state().shell_user_picker.is_none());
+    assert!(app.take_resource_shell_effects().is_empty());
+}
