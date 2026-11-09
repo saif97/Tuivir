@@ -1318,3 +1318,35 @@ fn guest_acknowledgement_distinguishes_launch_failure_from_a_nonzero_shell_exit(
         runtime.stop(session_id);
     }
 }
+
+#[test]
+fn shell_account_picker_is_rendered_above_live_terminal_output() {
+    use ratatui::{Terminal, backend::TestBackend};
+    let mut snapshot = two_containers();
+    snapshot.panels[0].resources[0].shell =
+        Some(ResourceShellProcess::new("fixture", &["shell"]).with_user_selection());
+    let mut app = app_on_workspace(snapshot);
+    app.invoke(Command::OpenShellAs);
+    let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+    terminal
+        .draw(|frame| {
+            let layout = ScreenLayout::measure(app.state(), frame.area());
+            tuivir::presentation::render_with_layout(app.state(), frame, &layout);
+            // The host paints the actual PTY after the application frame.
+            frame.render_widget(
+                ratatui::widgets::Paragraph::new("terminal output"),
+                frame.area(),
+            );
+            tuivir::presentation::render_resource_shell_overlays(app.state(), frame);
+        })
+        .unwrap();
+    let screen: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(screen.contains("Shell account"));
+    assert!(screen.contains("Listing accounts"));
+}

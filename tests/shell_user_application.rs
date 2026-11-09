@@ -213,3 +213,106 @@ fn a_separate_launch_failure_reopens_the_picker_without_replacing_the_default() 
     assert_eq!(app.state().default_shell_users, saved);
     assert!(app.take_pending_shell_user_save().is_none());
 }
+
+#[test]
+fn failed_checks_preserve_input_default_and_live_session_without_fallback() {
+    let mut app = app_with_shell(true);
+    let request = pick_worker(&mut app);
+    app.update(verified(
+        request,
+        Ok(ResourceShellProcess::new("fixture", &["worker"])),
+    ));
+    let original = app.state().resource_shell_sessions[0].id;
+    app.update(AppEvent::ResourceShellStarted {
+        session_id: original,
+    });
+    let saved = app.take_pending_shell_user_save().unwrap();
+    app.take_resource_shell_effects();
+    for reason in ["user not found", "permission denied", "shell unavailable"] {
+        let requests = app.invoke(Command::OpenShellAs);
+        app.update(discovered(requests, Ok(None)));
+        for c in "worker".chars() {
+            app.invoke(Command::ShellUserCharacter(c));
+        }
+        let request = app.invoke(Command::Confirm);
+        app.update(verified(request, Err(WorkspaceError::new(reason))));
+        let picker = app.state().shell_user_picker.as_ref().unwrap();
+        assert_eq!(picker.input, "worker");
+        assert_eq!(picker.error.as_deref(), Some(reason));
+        assert!(!picker.verifying);
+        assert_eq!(app.state().default_shell_users, saved);
+        assert_eq!(app.state().resource_shell_sessions[0].id, original);
+        assert!(app.take_resource_shell_effects().is_empty());
+        app.invoke(Command::Cancel);
+    }
+}
+
+#[test]
+fn unsupported_targets_keep_native_shell_without_shell_as_or_saved_override() {
+    let mut app = app_with_shell(false).with_default_shell_users(vec![DefaultShellUser {
+        key: ShellUserKey {
+            provider_id: ProviderId::new("fixture"),
+            target_environment: Some(TargetEnvironment::new("local")),
+            target: common::resource_target("containers", "web"),
+        },
+        username: "worker".into(),
+    }]);
+    app.invoke(Command::ToggleHelp);
+    assert!(
+        !app.state()
+            .help_overlay
+            .as_ref()
+            .unwrap()
+            .entries
+            .iter()
+            .any(|e| e.description == "Shell as…")
+    );
+    app.invoke(Command::Cancel);
+    assert!(app.invoke(Command::OpenShellAs).is_empty());
+    assert!(app.state().shell_user_picker.is_none());
+    app.invoke(Command::OpenShell);
+    assert!(app.state().shell_user_picker.is_none());
+    assert!(
+        matches!(app.take_resource_shell_effects().as_slice(), [ResourceShellEffect::Start { process, .. }] if process.args() == ["shell"])
+    );
+}
+
+#[test]
+fn selecting_the_live_account_resumes_it_without_replacement() {
+    let mut app = app_with_shell(true);
+    let request = pick_worker(&mut app);
+    app.update(verified(
+        request,
+        Ok(ResourceShellProcess::new("fixture", &["worker"])),
+    ));
+    let original = app.state().resource_shell_sessions[0].id;
+    app.update(AppEvent::ResourceShellStarted {
+        session_id: original,
+    });
+    app.take_pending_shell_user_save();
+    app.take_resource_shell_effects();
+    let requests = app.invoke(Command::OpenShellAs);
+    app.update(discovered(requests, Ok(Some(vec!["worker".into()]))));
+    let request = app.invoke(Command::Confirm);
+    app.update(verified(
+        request,
+        Ok(ResourceShellProcess::new("fixture", &["worker"])),
+    ));
+    assert_eq!(app.state().resource_shell_sessions[0].id, original);
+    assert!(app.state().confirmation.is_none());
+    assert!(app.take_resource_shell_effects().is_empty());
+    assert!(app.take_pending_shell_user_save().is_none());
+}
+
+#[test]
+fn cancelling_verification_refuses_its_late_success() {
+    let mut app = app_with_shell(true);
+    let requests = pick_worker(&mut app);
+    app.invoke(Command::Cancel);
+    app.update(verified(
+        requests,
+        Ok(ResourceShellProcess::new("fixture", &["worker"])),
+    ));
+    assert!(app.state().default_shell_users.is_empty());
+    assert!(app.take_resource_shell_effects().is_empty());
+}

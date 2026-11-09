@@ -218,6 +218,12 @@ impl AppState {
     /// View stays visible while a Resource Panel has focus, but it must not
     /// intercept that panel's navigation Commands.
     pub fn keyboard_running_resource_shell_session(&self) -> Option<&ResourceShellSession> {
+        if self.shell_user_picker.is_some()
+            || self.confirmation.is_some()
+            || self.command_error.is_some()
+        {
+            return None;
+        }
         if self.enlarged_resource_shell_session().is_some()
             || self.focused_pane == FocusedPane::Details
         {

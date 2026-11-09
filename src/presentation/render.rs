@@ -114,7 +114,7 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
             );
         }
         render_resource_shell_state(Some(session), frame, shell.terminal);
-        render_confirmation(state, frame);
+        render_resource_shell_overlays(state, frame);
         return;
     }
     render_provider_bar(state, frame, layout);
@@ -173,23 +173,7 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
         );
     }
 
-    if let (Some(error), Some(area)) = (
-        &state.command_error,
-        command_error_area(state, frame.area()),
-    ) {
-        frame.render_widget(Clear, area);
-        frame.render_widget(
-            Paragraph::new(vec![
-                Line::styled(error.as_str(), themed_style(ThemeRole::Error)),
-                Line::from("Press Esc to dismiss."),
-            ])
-            .wrap(ratatui::widgets::Wrap { trim: true })
-            .block(modal_block(" Command failed ", ThemeRole::Error)),
-            area,
-        );
-    }
-
-    render_confirmation(state, frame);
+    render_resource_shell_overlays(state, frame);
 }
 
 fn shell_prefix_hint(prefix: crate::application::Key) -> String {
@@ -276,7 +260,23 @@ fn render_configuration_review(
     frame.render_widget(configuration_review_paragraph(state, review), inner);
 }
 
-fn render_confirmation(state: &AppState, frame: &mut Frame<'_>) {
+pub fn render_resource_shell_overlays(state: &AppState, frame: &mut Frame<'_>) {
+    if let (Some(error), Some(area)) = (
+        &state.command_error,
+        command_error_area(state, frame.area()),
+    ) {
+        frame.render_widget(Clear, area);
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::styled(error.as_str(), themed_style(ThemeRole::Error)),
+                Line::from("Press Esc to dismiss."),
+            ])
+            .wrap(ratatui::widgets::Wrap { trim: true })
+            .block(modal_block(" Command failed ", ThemeRole::Error)),
+            area,
+        );
+    }
+
     if let (Some(picker), Some(area)) = (
         &state.shell_user_picker,
         super::screen_layout::shell_user_picker_area(state, frame.area()),

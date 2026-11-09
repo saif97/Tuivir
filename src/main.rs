@@ -447,9 +447,11 @@ fn resolve_key_command(app: &App, event: KeyEvent) -> Option<Command> {
 /// Session can reclaim input. In particular, Enter must confirm Quit rather
 /// than refocus the terminal and send it a newline.
 fn resolve_modal_key_command(app: &App, event: KeyEvent) -> Option<Command> {
-    (app.state().confirmation.is_some() || app.state().shell_user_picker.is_some())
-        .then(|| resolve_key_command(app, event))
-        .flatten()
+    (app.state().confirmation.is_some()
+        || app.state().shell_user_picker.is_some()
+        || app.state().command_error.is_some())
+    .then(|| resolve_key_command(app, event))
+    .flatten()
 }
 
 fn handle_command(app: &mut App, command: Option<Command>) -> (ShellControl, Vec<ProviderRequest>) {
@@ -714,6 +716,7 @@ async fn run(
                     // wakeup pending while their PTYs continue draining output.
                     resource_shell_runtime.acknowledge_output(session.id);
                 }
+                presentation::render_resource_shell_overlays(app.state(), frame);
                 layout = Some(measured);
             }) {
                 break Err(error);
@@ -727,8 +730,9 @@ async fn run(
             Some(event) = key_rx.recv() => {
                 let (control, requests) = match event {
                     Event::Key(key) => {
-                        if let Some(command) = resolve_modal_key_command(&app, key) {
-                            handle_command(&mut app, Some(command))
+                        if app.state().confirmation.is_some() || app.state().shell_user_picker.is_some() || app.state().command_error.is_some() {
+                            let command = resolve_modal_key_command(&app, key);
+                            handle_command(&mut app, command)
                         } else {
                         let enlarged = app
                             .state()
@@ -856,6 +860,7 @@ async fn run(
             }
             Some(event) = completion_rx.recv() => {
                 let requests = app.update(event);
+                persist_pane_boundary(&mut app, &state_env, &state_storage);
                 dispatch_all(&runtime, &completion_tx, &mut detail_dispatch, requests);
                 let requests = dispatch_resource_shell_effects(
                     &mut app,
