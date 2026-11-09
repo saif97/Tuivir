@@ -3,7 +3,11 @@ use common::ready_workspace;
 use tuivir::{application::*, domain::*, infrastructure::provider::ProviderDiscovery};
 
 fn app_with_shell(selectable: bool) -> App {
-    let mut app = App::new();
+    app_with_registry(selectable, CommandRegistry::default())
+}
+
+fn app_with_registry(selectable: bool, registry: CommandRegistry) -> App {
+    let mut app = App::with_registry(registry);
     let mut process = ResourceShellProcess::new("fixture", &["shell"]);
     if selectable {
         process = process.with_user_selection();
@@ -325,4 +329,27 @@ fn enter_in_an_unrelated_details_tab_does_not_start_account_selection() {
     assert!(requests.is_empty());
     assert!(app.state().shell_user_picker.is_none());
     assert!(app.take_resource_shell_effects().is_empty());
+}
+
+#[test]
+fn picker_dispatch_and_hints_follow_custom_keybindings() {
+    let registry = CommandRegistry::effective(&[
+        ("shell_user_submit".into(), vec!["x".into()]),
+        ("shell_user_cancel".into(), vec!["ctrl+g".into()]),
+    ])
+    .unwrap();
+    let mut app = app_with_registry(true, registry);
+    app.invoke(Command::OpenShell);
+    assert_eq!(
+        app.resolve_command(Key::character('x')),
+        Some(Command::Confirm)
+    );
+    assert_eq!(
+        app.resolve_command(Key::character('w')),
+        Some(Command::ShellUserCharacter('w'))
+    );
+    let rendered = tuivir::presentation::render_to_text(app.state(), 110, 30);
+    assert!(rendered.contains("x Use account"), "{rendered}");
+    assert!(rendered.contains("ctrl+g Cancel"), "{rendered}");
+    assert!(!rendered.contains("Enter use"));
 }

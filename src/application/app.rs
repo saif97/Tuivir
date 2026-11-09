@@ -634,7 +634,10 @@ impl App {
         if self.active_scope() == CommandScope::ShellUserPicker
             && let Some(character) = key.text_character()
         {
-            return Some(Command::ShellUserCharacter(character));
+            return self
+                .commands
+                .resolve(CommandScope::ShellUserPicker, key)
+                .or(Some(Command::ShellUserCharacter(character)));
         }
         if self.active_scope() == CommandScope::ConfigurationInput
             && let Some(character) = key.text_character()

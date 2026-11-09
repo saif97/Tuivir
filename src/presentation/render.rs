@@ -323,9 +323,15 @@ pub fn render_resource_shell_overlays(state: &AppState, frame: &mut Frame<'_>) {
         if let Some(error) = &picker.error {
             lines.push(Line::from(error.clone()));
         }
-        lines.push(Line::from(
-            "Type to search • ↑/↓ select • Enter use • Esc cancel",
-        ));
+        lines.push(Line::from(format!(
+            "Type to search • {}",
+            state
+                .command_bar
+                .iter()
+                .map(|entry| format!("{} {}", entry.key, entry.description))
+                .collect::<Vec<_>>()
+                .join(" • ")
+        )));
         frame.render_widget(
             Paragraph::new(lines)
                 .wrap(ratatui::widgets::Wrap { trim: false })
@@ -384,7 +390,11 @@ pub fn render_resource_shell_overlays(state: &AppState, frame: &mut Frame<'_>) {
             }
         };
         let mut lines = lines;
-        lines.push(Line::from("Press y/Enter to confirm or n/Esc to cancel."));
+        lines.push(Line::from(format!(
+            "{} confirm • {} cancel",
+            state.hints.confirm.as_deref().unwrap_or("Unbound"),
+            state.hints.cancel.as_deref().unwrap_or("Unbound")
+        )));
         frame.render_widget(
             Paragraph::new(lines).block(modal_block(title, ThemeRole::Warning)),
             area,
