@@ -182,3 +182,34 @@ fn switching_a_live_shell_validates_then_confirms_before_replacing_it() {
         matches!(app.take_resource_shell_effects().as_slice(), [ResourceShellEffect::Stop { session_id }, ResourceShellEffect::Start { .. }] if *session_id == original)
     );
 }
+
+#[test]
+fn a_separate_launch_failure_reopens_the_picker_without_replacing_the_default() {
+    let mut app = app_with_shell(true);
+    let requests = pick_worker(&mut app);
+    app.update(verified(
+        requests,
+        Ok(ResourceShellProcess::new("fixture", &["worker"])),
+    ));
+    let saved = app.take_pending_shell_user_save().unwrap();
+    let session_id = app.state().resource_shell_sessions[0].id;
+    let requests = app.update(AppEvent::ResourceShellStartFailed {
+        session_id,
+        reason: "account no longer exists".into(),
+    });
+    let picker = app
+        .state()
+        .shell_user_picker
+        .as_ref()
+        .expect("recovery picker");
+    assert_eq!(picker.input, "worker");
+    assert_eq!(picker.error.as_deref(), Some("account no longer exists"));
+    assert!(
+        requests
+            .iter()
+            .any(|r| matches!(r, ProviderRequest::DiscoverShellAccounts { .. }))
+    );
+    app.invoke(Command::Cancel);
+    assert_eq!(app.state().default_shell_users, saved);
+    assert!(app.take_pending_shell_user_save().is_none());
+}

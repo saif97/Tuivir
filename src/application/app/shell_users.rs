@@ -18,7 +18,7 @@ impl App {
         self.open_shell_user_picker_for(key, enlarged)
     }
 
-    fn open_shell_user_picker_for(
+    pub(super) fn open_shell_user_picker_for(
         &mut self,
         key: ShellUserKey,
         enlarged: bool,

@@ -551,8 +551,7 @@ impl App {
                 Vec::new()
             }
             AppEvent::ResourceShellStartFailed { session_id, reason } => {
-                self.apply_resource_shell_start_failed(session_id, reason);
-                Vec::new()
+                self.apply_resource_shell_start_failed(session_id, reason)
             }
             AppEvent::ResourceShellExited { session_id } => {
                 self.apply_resource_shell_exited(session_id)
@@ -1462,16 +1461,38 @@ impl App {
         &mut self,
         session_id: ResourceShellSessionId,
         reason: String,
-    ) {
-        if let Some(session) = self
+    ) -> Vec<ProviderRequest> {
+        let Some(session) =
+            self.state.resource_shell_sessions.iter_mut().find(|s| {
+                s.id == session_id && s.lifecycle == ResourceShellSessionLifecycle::Starting
+            })
+        else {
+            return Vec::new();
+        };
+        session.lifecycle = ResourceShellSessionLifecycle::StartFailed(reason.clone());
+        let Some(username) = session.username.clone() else {
+            return Vec::new();
+        };
+        let Some(workspace) = self
             .state
-            .resource_shell_sessions
-            .iter_mut()
-            .find(|session| session.id == session_id)
-            && session.lifecycle == ResourceShellSessionLifecycle::Starting
-        {
-            session.lifecycle = ResourceShellSessionLifecycle::StartFailed(reason);
+            .providers
+            .iter()
+            .find(|p| p.id() == &session.provider_id)
+        else {
+            return Vec::new();
+        };
+        let key = super::ShellUserKey {
+            provider_id: session.provider_id.clone(),
+            target_environment: workspace.target_environment().cloned(),
+            target: session.target.clone(),
+        };
+        let enlarged = matches!(self.state.resource_shell_presentation, ResourceShellPresentation::Enlarged(id) if id == session_id);
+        let requests = self.open_shell_user_picker_for(key, enlarged);
+        if let Some(picker) = self.state.shell_user_picker.as_mut() {
+            picker.input = username;
+            picker.error = Some(reason);
         }
+        requests
     }
 
     fn apply_resource_shell_exited(
