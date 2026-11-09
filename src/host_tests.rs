@@ -11,7 +11,7 @@ use std::{
 use super::{
     Clipboard, DetailDispatchQueue, Osc52Clipboard, ResourceShellRuntime,
     ResourceShellRuntimeEvent, ShellInputRouter, ShellKeyRoute, ShellPointerRoute, handle_key,
-    handle_mouse, persist_pane_boundary, release_resource_shell, resolve_modal_key_command,
+    handle_mouse, persist_preferences, release_resource_shell, resolve_modal_key_command,
     resource_shell_output_requires_redraw,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -80,7 +80,7 @@ fn releasing_a_resized_pane_boundary_persists_one_preference() {
         Command::ReleasePaneBoundary,
     ] {
         app.invoke(command);
-        persist_pane_boundary(&mut app, &env, &state);
+        persist_preferences(&mut app, &env, &state);
     }
 
     assert_eq!(
@@ -99,7 +99,7 @@ fn a_pane_boundary_write_failure_uses_the_normal_in_app_error() {
     };
 
     app.invoke(Command::MovePaneBoundaryRight);
-    persist_pane_boundary(&mut app, &env, &FailingState);
+    persist_preferences(&mut app, &env, &FailingState);
 
     assert_eq!(
         app.state().command_error.as_deref(),
@@ -1291,4 +1291,160 @@ fn mouse_detail_click_focuses_details_without_live_terminal() {
         app.state().focused_pane,
         tuivir::application::FocusedPane::Details
     );
+}
+
+#[test]
+fn guest_acknowledgement_distinguishes_launch_failure_from_a_nonzero_shell_exit() {
+    use tuivir::application::ResourceShellSessionId;
+    for (source, failure) in [
+        ("printf 'permission denied\\n'; exit 70", true),
+        ("printf '\\033]2;tuivir-shell-ready\\007'; exit 70", false),
+    ] {
+        let mut runtime = ResourceShellRuntime::default();
+        let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let session_id = ResourceShellSessionId::new(99);
+        let process = ResourceShellProcess::new("/bin/sh", &["-c", source])
+            .with_startup_marker("tuivir-shell-ready");
+        runtime.start(session_id, &process, 80, 24, events).unwrap();
+        while !matches!(
+            receiver.blocking_recv(),
+            Some(ResourceShellRuntimeEvent::Exited { .. })
+        ) {}
+        let reason = runtime.startup_failure(session_id);
+        assert_eq!(reason.is_some(), failure);
+        if let Some(reason) = reason {
+            assert!(reason.contains("permission denied"));
+        }
+        runtime.stop(session_id);
+    }
+}
+
+#[test]
+fn shell_account_picker_is_rendered_above_live_terminal_output() {
+    use ratatui::{Terminal, backend::TestBackend};
+    let mut snapshot = two_containers();
+    snapshot.panels[0].resources[0].shell =
+        Some(ResourceShellProcess::new("fixture", &["shell"]).with_user_selection());
+    let mut app = app_on_workspace(snapshot);
+    app.invoke(Command::OpenShellAs);
+    let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+    terminal
+        .draw(|frame| {
+            let layout = ScreenLayout::measure(app.state(), frame.area());
+            tuivir::presentation::render_with_layout(app.state(), frame, &layout);
+            // The host paints the actual PTY after the application frame.
+            frame.render_widget(
+                ratatui::widgets::Paragraph::new("terminal output"),
+                frame.area(),
+            );
+            tuivir::presentation::render_resource_shell_overlays(app.state(), frame);
+        })
+        .unwrap();
+    let screen: String = terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    assert!(screen.contains("Shell account"));
+    assert!(screen.contains("Listing accounts"));
+}
+
+#[test]
+fn modal_overlays_prevent_mouse_routing_to_a_live_shell() {
+    let mut app = app_on_workspace(two_containers());
+    app.invoke(Command::OpenShell);
+    let session_id = app.state().resource_shell_sessions[0].id;
+    app.update(AppEvent::ResourceShellStarted { session_id });
+    let layout = ScreenLayout::measure(app.state(), Rect::new(0, 0, 100, 30));
+    assert!(super::resource_shell_pointer_view(&app, Some(&layout)).is_some());
+    app.invoke(Command::Quit);
+    let layout = ScreenLayout::measure(app.state(), layout.area);
+    assert!(super::resource_shell_pointer_view(&app, Some(&layout)).is_none());
+}
+
+#[tokio::test]
+async fn an_incus_interactive_exec_failure_is_reported_after_a_successful_check() {
+    use std::{future::Future, pin::Pin};
+    use tuivir::infrastructure::{
+        process::{CliRunner, ProcessError, ProcessOutput, ProcessSpec},
+        provider::{IncusWorkspace, ProviderWorkspace},
+    };
+    struct VerifiedAccount;
+    impl CliRunner for VerifiedAccount {
+        fn run<'a>(
+            &'a self,
+            _: ProcessSpec,
+        ) -> Pin<Box<dyn Future<Output = Result<ProcessOutput, ProcessError>> + Send + 'a>>
+        {
+            Box::pin(async {
+                Ok(ProcessOutput {
+                    stdout: "TUIVIR_SHELL_VERIFIED".into(),
+                    stderr: String::new(),
+                })
+            })
+        }
+    }
+    let target = tuivir::domain::ResourceTarget::new(
+        ResourcePanelId::new("instances"),
+        ResourceId::new("web"),
+    );
+    let launch = IncusWorkspace
+        .shell_as(&VerifiedAccount, &target, "worker")
+        .await
+        .unwrap();
+    let source = launch.args().last().unwrap();
+    // The account's login shell changed between verification and execution.
+    let process = ResourceShellProcess::new(
+        "/bin/sh",
+        &[
+            "-c",
+            "SHELL=/missing-tuivir-shell; export SHELL; exec /bin/sh -c \"$1\"",
+            "tuivir",
+            source,
+        ],
+    )
+    .with_startup_marker(launch.startup_marker().unwrap());
+    let mut runtime = ResourceShellRuntime::default();
+    let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    let session_id = tuivir::application::ResourceShellSessionId::new(101);
+    runtime
+        .start(session_id, &process, 100, 24, events)
+        .unwrap();
+    while !matches!(
+        receiver.recv().await,
+        Some(ResourceShellRuntimeEvent::Exited { .. })
+    ) {}
+    let error = runtime
+        .startup_failure(session_id)
+        .expect("failed exec must be a launch failure");
+    assert!(error.contains("missing-tuivir-shell"), "{error}");
+    runtime.stop(session_id);
+
+    let process = ResourceShellProcess::new(
+        "/bin/sh",
+        &[
+            "-c",
+            "SHELL=/bin/sh; export SHELL; exec /bin/sh -c \"$1\"",
+            "tuivir",
+            source,
+        ],
+    )
+    .with_startup_marker(launch.startup_marker().unwrap());
+    let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    runtime
+        .start(session_id, &process, 100, 24, events)
+        .unwrap();
+    runtime.write(session_id, b"exit 127\n".to_vec()).unwrap();
+    while !matches!(
+        receiver.recv().await,
+        Some(ResourceShellRuntimeEvent::Exited { .. })
+    ) {}
+    assert_eq!(
+        runtime.startup_failure(session_id),
+        None,
+        "a real shell exit discards the launch trap"
+    );
+    runtime.stop(session_id);
 }

@@ -746,7 +746,8 @@ async fn only_a_running_instance_carries_an_interactive_shell() {
         shells,
         [(
             "api",
-            ResourceShellProcess::new("incus", &["exec", "api", "--", "su", "-l"]),
+            ResourceShellProcess::new("incus", &["exec", "api", "--", "su", "-l"])
+                .with_user_selection(),
         )]
     );
 }

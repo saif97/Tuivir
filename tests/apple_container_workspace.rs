@@ -644,10 +644,13 @@ async fn only_running_containers_offer_an_interactive_bin_sh_session() {
     let resources = &snapshot.panels[0].resources;
     assert_eq!(
         resources[0].shell,
-        Some(ResourceShellProcess::new(
-            "container",
-            &["exec", "--interactive", "--tty", "--", "web", "/bin/sh"]
-        ))
+        Some(
+            ResourceShellProcess::new(
+                "container",
+                &["exec", "--interactive", "--tty", "--", "web", "/bin/sh"]
+            )
+            .with_user_selection()
+        )
     );
     for resource in &resources[1..] {
         assert_eq!(resource.shell, None);

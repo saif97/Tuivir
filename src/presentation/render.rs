@@ -100,6 +100,11 @@ pub fn render(state: &AppState, frame: &mut Frame<'_>) {
 /// The host measures once per frame and keeps that layout for mouse routing, so
 /// what the user clicks is what they see.
 pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &ScreenLayout) {
+    render_base_with_layout(state, frame, layout);
+    render_resource_shell_overlays(state, frame);
+}
+
+pub fn render_base_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &ScreenLayout) {
     if let (Some(session), Some(shell)) = (
         state.enlarged_resource_shell_session(),
         layout.resource_shell.as_ref(),
@@ -114,7 +119,6 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
             );
         }
         render_resource_shell_state(Some(session), frame, shell.terminal);
-        render_confirmation(state, frame);
         return;
     }
     render_provider_bar(state, frame, layout);
@@ -155,41 +159,6 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
         columns[1],
         layout.configuration.as_ref(),
     );
-
-    if let (Some(help), Some(area)) = (&state.help_overlay, help_overlay_area(state, frame.area()))
-    {
-        let lines = help
-            .entries
-            .iter()
-            .map(|entry| Line::from(format!("{}  {}", entry.key, entry.description)))
-            .collect::<Vec<_>>();
-        frame.render_widget(Clear, area);
-        frame.render_widget(
-            Paragraph::new(lines).block(modal_block(
-                format!(" Commands for {} ", help.target),
-                ThemeRole::Primary,
-            )),
-            area,
-        );
-    }
-
-    if let (Some(error), Some(area)) = (
-        &state.command_error,
-        command_error_area(state, frame.area()),
-    ) {
-        frame.render_widget(Clear, area);
-        frame.render_widget(
-            Paragraph::new(vec![
-                Line::styled(error.as_str(), themed_style(ThemeRole::Error)),
-                Line::from("Press Esc to dismiss."),
-            ])
-            .wrap(ratatui::widgets::Wrap { trim: true })
-            .block(modal_block(" Command failed ", ThemeRole::Error)),
-            area,
-        );
-    }
-
-    render_confirmation(state, frame);
 }
 
 fn shell_prefix_hint(prefix: crate::application::Key) -> String {
@@ -276,12 +245,108 @@ fn render_configuration_review(
     frame.render_widget(configuration_review_paragraph(state, review), inner);
 }
 
-fn render_confirmation(state: &AppState, frame: &mut Frame<'_>) {
+pub fn render_resource_shell_overlays(state: &AppState, frame: &mut Frame<'_>) {
+    if let (Some(help), Some(area)) = (&state.help_overlay, help_overlay_area(state, frame.area()))
+    {
+        let lines = help
+            .entries
+            .iter()
+            .map(|entry| Line::from(format!("{}  {}", entry.key, entry.description)))
+            .collect::<Vec<_>>();
+        frame.render_widget(Clear, area);
+        frame.render_widget(
+            Paragraph::new(lines).block(modal_block(
+                format!(" Commands for {} ", help.target),
+                ThemeRole::Primary,
+            )),
+            area,
+        );
+    }
+    if let (Some(error), Some(area)) = (
+        &state.command_error,
+        command_error_area(state, frame.area()),
+    ) {
+        frame.render_widget(Clear, area);
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::styled(error.as_str(), themed_style(ThemeRole::Error)),
+                Line::from("Press Esc to dismiss."),
+            ])
+            .wrap(ratatui::widgets::Wrap { trim: true })
+            .block(modal_block(" Command failed ", ThemeRole::Error)),
+            area,
+        );
+    }
+
+    if let (Some(picker), Some(area)) = (
+        &state.shell_user_picker,
+        super::screen_layout::shell_user_picker_area(state, frame.area()),
+    ) {
+        frame.render_widget(Clear, area);
+        let mut lines = vec![Line::from(format!("Account: {}", picker.input))];
+        if picker.loading {
+            lines.push(Line::from("Listing accounts…"));
+        } else if picker.accounts.is_none() {
+            lines.push(Line::from(
+                "Automatic account listing unavailable. Enter a username.",
+            ));
+        }
+        let candidates = picker.candidates();
+        let rows = area.height.saturating_sub(8) as usize;
+        let start = picker.selected.saturating_sub(rows.saturating_sub(1));
+        lines.extend(
+            candidates
+                .iter()
+                .enumerate()
+                .skip(start)
+                .take(rows)
+                .map(|(i, name)| {
+                    Line::from(format!(
+                        "{} {name}",
+                        if i == picker.selected { ">" } else { " " }
+                    ))
+                }),
+        );
+        if !picker.input.is_empty() {
+            lines.push(Line::from(format!(
+                "{} Use typed username: {}",
+                if picker.selected == candidates.len() {
+                    ">"
+                } else {
+                    " "
+                },
+                picker.input
+            )));
+        }
+        if picker.verifying {
+            lines.push(Line::from("Checking account…"));
+        }
+        if let Some(error) = &picker.error {
+            lines.push(Line::from(error.clone()));
+        }
+        frame.render_widget(
+            Paragraph::new(lines)
+                .wrap(ratatui::widgets::Wrap { trim: false })
+                .block(modal_block(" Shell account ", ThemeRole::Warning)),
+            area,
+        );
+    }
+
     if let (Some(confirmation), Some(area)) =
         (&state.confirmation, confirmation_area(state, frame.area()))
     {
         frame.render_widget(Clear, area);
         let (title, lines) = match confirmation {
+            Confirmation::ReplaceResourceShell(selected) => (
+                " Replace Resource Shell Session ",
+                vec![
+                    Line::from(format!(
+                        "Close the live shell in {} and start as {}?",
+                        selected.key.target, selected.username
+                    )),
+                    Line::from("Running work in that shell will be terminated."),
+                ],
+            ),
             Confirmation::ResourceConfiguration(review) => {
                 render_configuration_review(state, review, frame, area);
                 return;
@@ -317,7 +382,11 @@ fn render_confirmation(state: &AppState, frame: &mut Frame<'_>) {
             }
         };
         let mut lines = lines;
-        lines.push(Line::from("Press y/Enter to confirm or n/Esc to cancel."));
+        lines.push(Line::from(format!(
+            "{} confirm • {} cancel",
+            state.hints.confirm.as_deref().unwrap_or("Unbound"),
+            state.hints.cancel.as_deref().unwrap_or("Unbound")
+        )));
         frame.render_widget(
             Paragraph::new(lines).block(modal_block(title, ThemeRole::Warning)),
             area,

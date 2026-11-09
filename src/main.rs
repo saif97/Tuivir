@@ -448,8 +448,7 @@ fn resolve_key_command(app: &App, event: KeyEvent) -> Option<Command> {
 /// than refocus the terminal and send it a newline.
 fn resolve_modal_key_command(app: &App, event: KeyEvent) -> Option<Command> {
     app.state()
-        .confirmation
-        .is_some()
+        .modal_owns_input()
         .then(|| resolve_key_command(app, event))
         .flatten()
 }
@@ -494,6 +493,20 @@ fn handle_mouse(
     resolve_mouse_command(app, event, layout).map_or_else(Vec::new, |command| app.invoke(command))
 }
 
+fn resource_shell_pointer_view(
+    app: &App,
+    layout: Option<&presentation::ScreenLayout>,
+) -> Option<(ResourceShellSessionId, Rect)> {
+    let layout = layout?;
+    if layout.overlay.is_some() {
+        return None;
+    }
+    Some((
+        app.state().visible_running_resource_shell_session()?.id,
+        layout.resource_shell?.terminal,
+    ))
+}
+
 fn resolve_mouse_command(
     app: &App,
     event: crossterm::event::MouseEvent,
@@ -503,7 +516,12 @@ fn resolve_mouse_command(
     presentation::resolve_mouse(layout, input, app.state().pane_boundary.grab())
 }
 
-fn persist_pane_boundary(app: &mut App, env: &StateEnv, storage: &dyn StateStorage) {
+fn persist_preferences(app: &mut App, env: &StateEnv, storage: &dyn StateStorage) {
+    if let Some(users) = app.take_pending_shell_user_save()
+        && let Err(error) = tuivir::infrastructure::shell_user_state::save(env, storage, &users)
+    {
+        app.report_shell_user_persistence_failure(error.to_string());
+    }
     let Some(boundary) = app.take_pending_pane_boundary_save() else {
         return;
     };
@@ -540,6 +558,7 @@ fn dispatch_resource_shell_effects(
                     size.height.max(1),
                     events.clone(),
                 ) {
+                    Ok(()) if process.startup_marker().is_some() => continue,
                     Ok(()) => AppEvent::ResourceShellStarted {
                         session_id: session.id,
                     },
@@ -660,7 +679,10 @@ async fn run(
     let runtime = ProviderRuntime::with_builtin_providers(cli);
     let (completion_tx, mut completion_rx) = mpsc::unbounded_channel();
     let mut shell_input = ShellInputRouter::new(registry.resource_shell_controls().clone());
-    let mut app = App::with_registry_and_pane_boundary(registry, pane_boundary);
+    let mut app =
+        App::with_registry_and_pane_boundary(registry, pane_boundary).with_default_shell_users(
+            tuivir::infrastructure::shell_user_state::load(&state_env, &FileSystemReader),
+        );
     let state_storage = FileSystemReader;
     let mut clipboard = Osc52Clipboard(io::stdout());
     let mut detail_dispatch = DetailDispatchQueue::new(DETAIL_DISPATCH_QUIET_PERIOD);
@@ -689,7 +711,7 @@ async fn run(
                     app.state(),
                     &measured,
                 ));
-                presentation::render_with_layout(app.state(), frame, &measured);
+                presentation::render_base_with_layout(app.state(), frame, &measured);
                 if let (Some(session), Some(shell)) = (
                     app.state().visible_running_resource_shell_session(),
                     measured.resource_shell,
@@ -707,6 +729,7 @@ async fn run(
                     // wakeup pending while their PTYs continue draining output.
                     resource_shell_runtime.acknowledge_output(session.id);
                 }
+                presentation::render_resource_shell_overlays(app.state(), frame);
                 layout = Some(measured);
             }) {
                 break Err(error);
@@ -720,8 +743,9 @@ async fn run(
             Some(event) = key_rx.recv() => {
                 let (control, requests) = match event {
                     Event::Key(key) => {
-                        if let Some(command) = resolve_modal_key_command(&app, key) {
-                            handle_command(&mut app, Some(command))
+                        if app.state().modal_owns_input() {
+                            let command = resolve_modal_key_command(&app, key);
+                            handle_command(&mut app, command)
                         } else {
                         let enlarged = app
                             .state()
@@ -774,23 +798,10 @@ async fn run(
                         }
                     }
                     Event::Mouse(mouse) => {
-                        let route = app
-                            .state()
-                            .visible_running_resource_shell_session()
-                            .and_then(|session| {
-                                let viewport = layout.as_ref()?.resource_shell?.terminal;
-                                let modes = resource_shell_runtime.input_modes(session.id)?;
-                                Some((
-                                    session.id,
-                                    shell_input.route_mouse(
-                                        session.id,
-                                        mouse,
-                                        viewport,
-                                        modes.mouse_reporting,
-                                        modes.sgr_mouse,
-                                    ),
-                                ))
-                            });
+                        let route = resource_shell_pointer_view(&app, layout.as_ref()).and_then(|(session_id, viewport)| {
+                            let modes = resource_shell_runtime.input_modes(session_id)?;
+                            Some((session_id, shell_input.route_mouse(session_id, mouse, viewport, modes.mouse_reporting, modes.sgr_mouse)))
+                        });
                         let requests = match route {
                             Some((session_id, ShellPointerRoute::ToPty(bytes))) => {
                                 let _ = resource_shell_runtime.write(session_id, bytes);
@@ -832,7 +843,7 @@ async fn run(
                     }
                     _ => (ShellControl::Continue, Vec::new()),
                 };
-                persist_pane_boundary(&mut app, &state_env, &state_storage);
+                persist_preferences(&mut app, &state_env, &state_storage);
                 dispatch_all(&runtime, &completion_tx, &mut detail_dispatch, requests);
                 let requests = dispatch_resource_shell_effects(
                     &mut app,
@@ -849,6 +860,7 @@ async fn run(
             }
             Some(event) = completion_rx.recv() => {
                 let requests = app.update(event);
+                persist_preferences(&mut app, &state_env, &state_storage);
                 dispatch_all(&runtime, &completion_tx, &mut detail_dispatch, requests);
                 let requests = dispatch_resource_shell_effects(
                     &mut app,
@@ -861,11 +873,18 @@ async fn run(
             }
             Some(event) = resource_shell_event_rx.recv() => {
                 let (requests, requests_redraw) = match event {
+                    ResourceShellRuntimeEvent::Started { session_id } => {
+                        (app.update(AppEvent::ResourceShellStarted { session_id }), true)
+                    }
                     ResourceShellRuntimeEvent::OutputReady { session_id } => {
                         (Vec::new(), resource_shell_output_requires_redraw(&app, session_id))
                     }
                     ResourceShellRuntimeEvent::Exited { session_id } => {
-                        (app.update(AppEvent::ResourceShellExited { session_id }), true)
+                        let event = match resource_shell_runtime.startup_failure(session_id) {
+                            Some(reason) => AppEvent::ResourceShellStartFailed { session_id, reason },
+                            None => AppEvent::ResourceShellExited { session_id },
+                        };
+                        (app.update(event), true)
                     }
                 };
                 dispatch_all(&runtime, &completion_tx, &mut detail_dispatch, requests);

@@ -80,6 +80,9 @@ _Avoid_: Detail View, pane, inspector, log view
 An ongoing interactive command shell running inside exactly one Resource and presented through its Shell Detail View Tab. At most one runs for a Resource; the same session can be shown inside the Details pane or enlarged to fill Tuivir, continues while the user navigates elsewhere, and ends when its process exits, its Resource disappears, or Tuivir exits.
 _Avoid_: Interactive Shell, attached shell, shell panel, terminal tab
 
+**Default Shell User**:
+The account a person has chosen for starting Resource Shell Sessions in one Resource. It remains that Resource's preference until the person chooses another account through Shell as….
+
 **Resource State**:
 What a Provider reported a stateful Resource to be doing at the last refresh, in one vocabulary shared by every Provider: running, stopped, paused, transitioning, broken, or unknown. Each Provider Workspace maps its own status words into it, and an invoked lifecycle Command carries it so Tuivir never asks a Provider CLI for what it already knows. A stateless Resource has no Resource State; absence is not _unknown_. Only _stopped_ is positively determined; every other state, unknown included, means "not settled and stopped", so a Command that must treat those differently fails safe.
 _Avoid_: Status, run state, power state, phase

@@ -71,6 +71,71 @@ struct VolumeRow {
 }
 
 impl ProviderWorkspace for DockerWorkspace {
+    fn shell_as<'a>(
+        &'a self,
+        cli: &'a dyn CliRunner,
+        target: &'a ResourceTarget,
+        username: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<ResourceShellProcess, WorkspaceError>> + Send + 'a>>
+    {
+        Box::pin(async move {
+            use super::shell_users::{READY, START_SH, VERIFY, verify};
+            verify(
+                cli,
+                ProcessSpec::new(
+                    "docker",
+                    &[
+                        "exec",
+                        "--user",
+                        username,
+                        &target.resource_id().0,
+                        "/bin/sh",
+                        "-c",
+                        VERIFY,
+                    ],
+                ),
+            )
+            .await?;
+            Ok(ResourceShellProcess::new(
+                "docker",
+                &[
+                    "exec",
+                    "-it",
+                    "--user",
+                    username,
+                    &target.resource_id().0,
+                    "/bin/sh",
+                    "-c",
+                    START_SH,
+                ],
+            )
+            .with_startup_marker(READY))
+        })
+    }
+
+    fn shell_accounts<'a>(
+        &'a self,
+        cli: &'a dyn CliRunner,
+        target: &'a ResourceTarget,
+    ) -> super::ShellAccountsFuture<'a> {
+        Box::pin(async move {
+            super::shell_users::discover(
+                cli,
+                ProcessSpec::new(
+                    "docker",
+                    &[
+                        "exec",
+                        &target.resource_id().0,
+                        "/bin/sh",
+                        "-c",
+                        super::shell_users::DISCOVER,
+                    ],
+                ),
+            )
+            .await
+        })
+    }
+
     fn write_configuration<'a>(
         &'a self,
         cli: &'a dyn CliRunner,
@@ -628,8 +693,10 @@ fn docker_resource_state(state: &str) -> ResourceState {
 /// does, including the minimal images Docker containers are so often built
 /// from; reaching for a login shell instead would fail on exactly those.
 fn container_shell(state: ResourceState, resource_id: &str) -> Option<ResourceShellProcess> {
-    (state == ResourceState::Running)
-        .then(|| ResourceShellProcess::new("docker", &["exec", "-it", resource_id, "/bin/sh"]))
+    (state == ResourceState::Running).then(|| {
+        ResourceShellProcess::new("docker", &["exec", "-it", resource_id, "/bin/sh"])
+            .with_user_selection()
+    })
 }
 
 fn discovery_with_error(message: impl Into<String>) -> ProviderDiscovery {

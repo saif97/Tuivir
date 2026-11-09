@@ -223,6 +223,66 @@ async fn custom_volume_resources(
 }
 
 impl ProviderWorkspace for IncusWorkspace {
+    fn shell_accounts<'a>(
+        &'a self,
+        cli: &'a dyn CliRunner,
+        target: &'a ResourceTarget,
+    ) -> super::ShellAccountsFuture<'a> {
+        Box::pin(async move {
+            super::shell_users::discover(
+                cli,
+                ProcessSpec::new(
+                    "incus",
+                    &[
+                        "exec",
+                        &target.resource_id().0,
+                        "--",
+                        "/bin/sh",
+                        "-c",
+                        super::shell_users::DISCOVER,
+                    ],
+                ),
+            )
+            .await
+        })
+    }
+
+    fn shell_as<'a>(
+        &'a self,
+        cli: &'a dyn CliRunner,
+        target: &'a ResourceTarget,
+        username: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<ResourceShellProcess, WorkspaceError>> + Send + 'a>>
+    {
+        Box::pin(async move {
+            use super::shell_users::{READY, START_LOGIN, VERIFY, verify};
+            let id = &target.resource_id().0;
+            verify(
+                cli,
+                ProcessSpec::new(
+                    "incus",
+                    &["exec", id, "--", "su", "-l", "--", username, "-c", VERIFY],
+                ),
+            )
+            .await?;
+            Ok(ResourceShellProcess::new(
+                "incus",
+                &[
+                    "exec",
+                    id,
+                    "--",
+                    "su",
+                    "-l",
+                    "--",
+                    username,
+                    "-c",
+                    START_LOGIN,
+                ],
+            )
+            .with_startup_marker(READY))
+        })
+    }
+
     fn write_configuration<'a>(
         &'a self,
         cli: &'a dyn CliRunner,
@@ -798,8 +858,9 @@ fn incus_resource_state(status: &str) -> ResourceState {
 /// what Incus's own `shell` alias expands to, spelled out here so it does not
 /// depend on that alias surviving in the user's configuration.
 fn instance_shell(state: ResourceState, name: &str) -> Option<ResourceShellProcess> {
-    (state == ResourceState::Running)
-        .then(|| ResourceShellProcess::new("incus", &["exec", name, "--", "su", "-l"]))
+    (state == ResourceState::Running).then(|| {
+        ResourceShellProcess::new("incus", &["exec", name, "--", "su", "-l"]).with_user_selection()
+    })
 }
 
 fn discovery_error(message: impl AsRef<str>, command: &str) -> ProviderDiscovery {

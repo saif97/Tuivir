@@ -256,7 +256,8 @@ async fn only_a_running_container_carries_an_interactive_shell() {
         shells,
         [(
             "container-running",
-            ResourceShellProcess::new("docker", &["exec", "-it", "container-running", "/bin/sh"],),
+            ResourceShellProcess::new("docker", &["exec", "-it", "container-running", "/bin/sh"],)
+                .with_user_selection(),
         )]
     );
 }

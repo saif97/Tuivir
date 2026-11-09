@@ -184,3 +184,50 @@ async fn a_non_zero_exit_is_a_failure_that_preserves_status_and_output() {
     assert_eq!(failure.stdout, "listing");
     assert_eq!(failure.stderr, "denied");
 }
+
+#[tokio::test]
+async fn cancelling_a_foreground_provider_check_terminates_its_cli() {
+    use std::time::Duration;
+    let path = std::env::temp_dir().join(format!("tuivir-cancel-check-{}.pid", std::process::id()));
+    let process = ProcessSpec::new(
+        "/bin/sh",
+        &[
+            "-c",
+            "printf '%s' \"$$\" > \"$1\"; exec sleep 30",
+            "test",
+            path.to_str().unwrap(),
+        ],
+    );
+    let check = tokio::spawn(async move { TokioCliRunner.run(process).await });
+    let pid: i32 = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if let Ok(contents) = std::fs::read_to_string(&path)
+                && let Ok(pid) = contents.parse()
+            {
+                break pid;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the check started");
+    check.abort();
+    let _ = check.await;
+    let stopped = tokio::time::timeout(Duration::from_secs(1), async {
+        while unsafe { libc::kill(pid, 0) } == 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .is_ok();
+    if !stopped {
+        unsafe {
+            libc::kill(pid, libc::SIGKILL);
+        }
+    }
+    std::fs::remove_file(path).unwrap();
+    assert!(
+        stopped,
+        "abandoned account checks must not leave a CLI running"
+    );
+}

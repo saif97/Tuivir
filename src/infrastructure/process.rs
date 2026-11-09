@@ -108,6 +108,7 @@ impl CliRunner for TokioCliRunner {
             }
             let output = tokio::process::Command::new(&process.program)
                 .args(&process.args)
+                .kill_on_drop(true)
                 .stdin(Stdio::null())
                 .output()
                 .await

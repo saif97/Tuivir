@@ -1,3 +1,4 @@
+mod shell_users;
 use super::{ConfigurationChange, ConfigurationDraft, ConfigurationReview, ResourceConfiguration};
 use std::collections::HashMap;
 
@@ -16,6 +17,14 @@ use crate::domain::{DetailViewId, Provider, ProviderId, ResourceState, ResourceT
 /// User intentions are [`Command`]s, resolved from keys, not events. Keeping
 /// the two separate means a keypress never looks like a completed refresh.
 pub enum AppEvent {
+    ShellUserVerified {
+        request_id: ProviderRequestId,
+        result: Result<super::ResourceShellProcess, WorkspaceError>,
+    },
+    ShellAccountsDiscovered {
+        request_id: ProviderRequestId,
+        result: Result<Option<Vec<String>>, WorkspaceError>,
+    },
     ResourceConfigurationApplied {
         request_id: ProviderRequestId,
         provider_id: ProviderId,
@@ -110,6 +119,8 @@ fn operation_failure(
 
 #[derive(Default)]
 pub struct AppState {
+    pub default_shell_users: Vec<super::DefaultShellUser>,
+    pub shell_user_picker: Option<super::ShellUserPicker>,
     pub configuration_drafts: HashMap<(ProviderId, ResourceTarget), ConfigurationDraft>,
     pub providers: Vec<ProviderWorkspaceState>,
     pub focused_pane: FocusedPane,
@@ -203,10 +214,20 @@ impl AppState {
             .filter(|session| session.lifecycle == ResourceShellSessionLifecycle::Running)
     }
 
+    pub fn modal_owns_input(&self) -> bool {
+        self.shell_user_picker.is_some()
+            || self.confirmation.is_some()
+            || self.command_error.is_some()
+            || self.help_overlay.is_some()
+    }
+
     /// The running visible session that owns keyboard input. A Shell Detail
     /// View stays visible while a Resource Panel has focus, but it must not
     /// intercept that panel's navigation Commands.
     pub fn keyboard_running_resource_shell_session(&self) -> Option<&ResourceShellSession> {
+        if self.modal_owns_input() {
+            return None;
+        }
         if self.enlarged_resource_shell_session().is_some()
             || self.focused_pane == FocusedPane::Details
         {
@@ -356,12 +377,15 @@ pub struct ResourceCommandInvocation {
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// The deliberate operation awaiting the user's confirmation.
 pub enum Confirmation {
+    ReplaceResourceShell(super::VerifiedShellUser),
     ResourceConfiguration(ConfigurationReview),
     ResourceCommand(ResourceCommandInvocation),
     QuitResourceShellSessions,
 }
 
 pub struct App {
+    pending_shell_verification: Option<super::shell_user::ShellUserVerification>,
+    pending_shell_user_save: bool,
     state: AppState,
     commands: CommandRegistry,
     /// Monotonically allocates request IDs in the main event loop.
@@ -424,6 +448,8 @@ impl App {
             next_resource_shell_session_id: 1,
             pending_resource_shell_effects: Vec::new(),
             quit_is_ready: false,
+            pending_shell_verification: None,
+            pending_shell_user_save: false,
         }
     }
 
@@ -461,6 +487,24 @@ impl App {
 
     fn apply(&mut self, event: AppEvent) -> Vec<ProviderRequest> {
         match event {
+            AppEvent::ShellUserVerified { request_id, result } => {
+                self.apply_shell_user_verified(request_id, result)
+            }
+            AppEvent::ShellAccountsDiscovered { request_id, result } => {
+                if let Some(picker) = self
+                    .state
+                    .shell_user_picker
+                    .as_mut()
+                    .filter(|p| p.request_id == request_id)
+                {
+                    picker.loading = false;
+                    match result {
+                        Ok(accounts) => picker.accounts = accounts,
+                        Err(error) => picker.error = Some(error.message),
+                    }
+                }
+                Vec::new()
+            }
             AppEvent::ResourceConfigurationApplied {
                 request_id,
                 provider_id,
@@ -517,8 +561,7 @@ impl App {
                 Vec::new()
             }
             AppEvent::ResourceShellStartFailed { session_id, reason } => {
-                self.apply_resource_shell_start_failed(session_id, reason);
-                Vec::new()
+                self.apply_resource_shell_start_failed(session_id, reason)
             }
             AppEvent::ResourceShellExited { session_id } => {
                 self.apply_resource_shell_exited(session_id)
@@ -557,6 +600,8 @@ impl App {
     pub fn active_scope(&self) -> CommandScope {
         if self.state.confirmation.is_some() {
             CommandScope::Confirmation
+        } else if self.state.shell_user_picker.is_some() {
+            CommandScope::ShellUserPicker
         } else if self.state.command_error.is_some() {
             CommandScope::CommandFailure
         } else if self.state.help_overlay.is_some() {
@@ -590,6 +635,14 @@ impl App {
     /// scope. The caller normalizes the terminal event into the registry's
     /// [`Key`] type, so this never sees a crossterm event.
     pub fn resolve_command(&self, key: Key) -> Option<Command> {
+        if self.active_scope() == CommandScope::ShellUserPicker
+            && let Some(character) = key.text_character()
+        {
+            return self
+                .commands
+                .resolve(CommandScope::ShellUserPicker, key)
+                .or(Some(Command::ShellUserCharacter(character)));
+        }
         if self.active_scope() == CommandScope::ConfigurationInput
             && let Some(character) = key.text_character()
         {
@@ -678,6 +731,7 @@ impl App {
             self.commands
                 .in_scope(scope)
                 .filter(|entry| match entry.command {
+                    Command::OpenShellAs => self.shell_user_selection_supported(),
                     Command::Resource(command) => resource
                         .is_some_and(|resource| resource.available_commands.contains(&command)),
                     _ => true,
@@ -1032,16 +1086,34 @@ impl App {
                 }
                 Vec::new()
             }
-            Command::OpenShell => {
-                self.open_shell();
-                Vec::new()
-            }
-            Command::OpenShellInDetails => {
-                self.open_shell_in_details();
-                Vec::new()
-            }
+            Command::OpenShell => self.request_resource_shell(true, false),
+            Command::OpenShellInDetails => self.request_resource_shell(false, false),
             Command::StartResourceShell => {
-                self.start_selected_resource_shell();
+                if self
+                    .state
+                    .active_workspace()
+                    .is_some_and(ProviderWorkspaceState::selected_resource_shell_tab)
+                {
+                    self.request_resource_shell(false, false)
+                } else {
+                    Vec::new()
+                }
+            }
+            Command::OpenShellAs => self.request_resource_shell(true, true),
+            Command::ShellUserCharacter(c) => {
+                self.edit_shell_user(Some(c));
+                Vec::new()
+            }
+            Command::ShellUserBackspace => {
+                self.edit_shell_user(None);
+                Vec::new()
+            }
+            Command::NextShellUser => {
+                self.move_shell_user(1);
+                Vec::new()
+            }
+            Command::PreviousShellUser => {
+                self.move_shell_user(-1);
                 Vec::new()
             }
             Command::ToggleResourceShellSize => {
@@ -1099,7 +1171,14 @@ impl App {
     /// Accepts the open modal: confirms a Resource Command, or dismisses a
     /// reported failure.
     fn confirm_or_dismiss(&mut self) -> Vec<ProviderRequest> {
+        if self.state.confirmation.is_none() && self.state.shell_user_picker.is_some() {
+            return self.submit_shell_user();
+        }
         match self.state.confirmation.take() {
+            Some(Confirmation::ReplaceResourceShell(selected)) => {
+                self.start_verified_shell(selected);
+                Vec::new()
+            }
             Some(Confirmation::ResourceConfiguration(review)) => {
                 let request_id = ProviderRequestId::new(self.next_request_id);
                 self.next_request_id += 1;
@@ -1144,6 +1223,9 @@ impl App {
     fn cancel_or_dismiss(&mut self) {
         if self.state.confirmation.is_some() {
             self.state.confirmation = None;
+        } else if self.state.shell_user_picker.is_some() {
+            self.state.shell_user_picker = None;
+            self.pending_shell_verification = None;
         } else if self.state.command_error.is_some() {
             self.state.command_error = None;
         } else if self.state.help_overlay.is_some() {
@@ -1401,16 +1483,41 @@ impl App {
         &mut self,
         session_id: ResourceShellSessionId,
         reason: String,
-    ) {
-        if let Some(session) = self
+    ) -> Vec<ProviderRequest> {
+        let Some(session) = self.state.resource_shell_sessions.iter_mut().find(|s| {
+            s.id == session_id
+                && matches!(
+                    s.lifecycle,
+                    ResourceShellSessionLifecycle::Starting
+                        | ResourceShellSessionLifecycle::Running
+                )
+        }) else {
+            return Vec::new();
+        };
+        session.lifecycle = ResourceShellSessionLifecycle::StartFailed(reason.clone());
+        let Some(username) = session.username.clone() else {
+            return Vec::new();
+        };
+        let Some(workspace) = self
             .state
-            .resource_shell_sessions
-            .iter_mut()
-            .find(|session| session.id == session_id)
-            && session.lifecycle == ResourceShellSessionLifecycle::Starting
-        {
-            session.lifecycle = ResourceShellSessionLifecycle::StartFailed(reason);
+            .providers
+            .iter()
+            .find(|p| p.id() == &session.provider_id)
+        else {
+            return Vec::new();
+        };
+        let key = super::ShellUserKey {
+            provider_id: session.provider_id.clone(),
+            target_environment: workspace.target_environment().cloned(),
+            target: session.target.clone(),
+        };
+        let enlarged = matches!(self.state.resource_shell_presentation, ResourceShellPresentation::Enlarged(id) if id == session_id);
+        let requests = self.open_shell_user_picker_for(key, enlarged);
+        if let Some(picker) = self.state.shell_user_picker.as_mut() {
+            picker.input = username;
+            picker.error = Some(reason);
         }
+        requests
     }
 
     fn apply_resource_shell_exited(
@@ -1576,10 +1683,21 @@ impl App {
                 && session.target == target
                 && session.lifecycle == ResourceShellSessionLifecycle::Exited
         });
+        Some(self.start_resource_shell(provider_id, target, None, process))
+    }
+
+    fn start_resource_shell(
+        &mut self,
+        provider_id: ProviderId,
+        target: ResourceTarget,
+        username: Option<String>,
+        process: super::ResourceShellProcess,
+    ) -> ResourceShellSessionId {
         let session = ResourceShellSession {
             id: ResourceShellSessionId(self.next_resource_shell_session_id),
             provider_id,
             target,
+            username,
             lifecycle: ResourceShellSessionLifecycle::Starting,
         };
         self.next_resource_shell_session_id += 1;
@@ -1587,7 +1705,7 @@ impl App {
         self.state.resource_shell_sessions.push(session.clone());
         self.pending_resource_shell_effects
             .push(ResourceShellEffect::Start { session, process });
-        Some(session_id)
+        session_id
     }
 
     fn toggle_resource_shell_size(&mut self) {
@@ -1643,6 +1761,7 @@ impl App {
                 .filter(|registered| match registered.command {
                     Command::Resource(command) => available_commands.contains(&command),
                     Command::OpenShell | Command::OpenShellInDetails => offers_a_shell,
+                    Command::OpenShellAs => self.shell_user_selection_supported(),
                     _ => true,
                 })
                 .map(|registered| HelpEntry {

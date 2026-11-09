@@ -153,8 +153,9 @@ fn sandbox_resource_state(status: &str) -> ResourceState {
 /// `bash` is what sbx's own documentation reaches for, and a sandbox is a
 /// prepared agent environment rather than a stripped image, so it is there.
 fn sandbox_shell(state: ResourceState, name: &str) -> Option<ResourceShellProcess> {
-    matches!(state, ResourceState::Running | ResourceState::Stopped)
-        .then(|| ResourceShellProcess::new("sbx", &["exec", "-it", name, "bash"]))
+    matches!(state, ResourceState::Running | ResourceState::Stopped).then(|| {
+        ResourceShellProcess::new("sbx", &["exec", "-it", name, "bash"]).with_user_selection()
+    })
 }
 
 /// The Commands a sandbox in this state can be asked to perform.
@@ -237,6 +238,57 @@ fn sbx_version(output: &str) -> ProviderVersion {
 }
 
 impl ProviderWorkspace for DockerSandboxWorkspace {
+    fn shell_accounts<'a>(
+        &'a self,
+        cli: &'a dyn CliRunner,
+        target: &'a ResourceTarget,
+    ) -> super::ShellAccountsFuture<'a> {
+        Box::pin(async move {
+            super::shell_users::discover(
+                cli,
+                ProcessSpec::new(
+                    "sbx",
+                    &[
+                        "exec",
+                        &target.resource_id().0,
+                        "bash",
+                        "-c",
+                        super::shell_users::DISCOVER,
+                    ],
+                ),
+            )
+            .await
+        })
+    }
+
+    fn shell_as<'a>(
+        &'a self,
+        cli: &'a dyn CliRunner,
+        target: &'a ResourceTarget,
+        username: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<ResourceShellProcess, WorkspaceError>> + Send + 'a>>
+    {
+        Box::pin(async move {
+            use super::shell_users::{READY, START_BASH, VERIFY, verify};
+            let id = &target.resource_id().0;
+            verify(
+                cli,
+                ProcessSpec::new(
+                    "sbx",
+                    &["exec", "--user", username, id, "bash", "-c", VERIFY],
+                ),
+            )
+            .await?;
+            Ok(ResourceShellProcess::new(
+                "sbx",
+                &[
+                    "exec", "-it", "--user", username, id, "bash", "-c", START_BASH,
+                ],
+            )
+            .with_startup_marker(READY))
+        })
+    }
+
     fn load_configuration<'a>(
         &'a self,
         cli: &'a dyn CliRunner,

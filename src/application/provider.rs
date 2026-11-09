@@ -59,6 +59,15 @@ impl ProviderRequestId {
 ///
 /// Infrastructure executes requests outside the single-owner application state.
 pub enum ProviderRequest {
+    VerifyShellUser {
+        request_id: ProviderRequestId,
+        key: super::ShellUserKey,
+        username: String,
+    },
+    DiscoverShellAccounts {
+        request_id: ProviderRequestId,
+        key: super::ShellUserKey,
+    },
     ApplyResourceConfiguration {
         request_id: ProviderRequestId,
         review: super::ConfigurationReview,

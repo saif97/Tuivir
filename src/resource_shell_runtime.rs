@@ -36,6 +36,7 @@ use tuivir::presentation::{ResourceShellCell, ResourceShellScreen};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// A fact the private PTY runtime publishes to its host.
 pub enum ResourceShellRuntimeEvent {
+    Started { session_id: ResourceShellSessionId },
     OutputReady { session_id: ResourceShellSessionId },
     Exited { session_id: ResourceShellSessionId },
 }
@@ -61,7 +62,8 @@ pub struct ResourceShellRuntime {
 struct LiveResourceShell {
     terminal: Arc<FairMutex<Term<SessionListener>>>,
     input: EventLoopSender,
-    event_loop: JoinHandle<(EventLoop<tty::Pty, SessionListener>, State)>,
+    event_loop: Option<JoinHandle<(EventLoop<tty::Pty, SessionListener>, State)>>,
+    started: Arc<AtomicBool>,
     selection: Option<((u16, u16), (u16, u16))>,
     size: (u16, u16),
     redraw_pending: Arc<AtomicBool>,
@@ -72,6 +74,8 @@ const RESOURCE_SHELL_TERMINATION_GRACE: Duration = Duration::from_millis(250);
 
 #[derive(Clone)]
 struct SessionListener {
+    startup_marker: Option<String>,
+    started: Arc<AtomicBool>,
     session_id: ResourceShellSessionId,
     events: UnboundedSender<ResourceShellRuntimeEvent>,
     input: Arc<Mutex<Option<EventLoopSender>>>,
@@ -81,6 +85,21 @@ struct SessionListener {
 impl EventListener for SessionListener {
     fn send_event(&self, event: Event) {
         match event {
+            Event::Title(title)
+                if self
+                    .startup_marker
+                    .as_ref()
+                    .is_some_and(|marker| title == format!("{marker}-failed")) =>
+            {
+                self.started.store(false, Ordering::Release);
+            }
+            Event::Title(title) if self.startup_marker.as_deref() == Some(&title) => {
+                if !self.started.swap(true, Ordering::AcqRel) {
+                    let _ = self.events.send(ResourceShellRuntimeEvent::Started {
+                        session_id: self.session_id,
+                    });
+                }
+            }
             Event::Wakeup => {
                 if !self.redraw_pending.swap(true, Ordering::AcqRel)
                     && self
@@ -169,7 +188,10 @@ impl ResourceShellRuntime {
         };
         let input = Arc::new(Mutex::new(None));
         let redraw_pending = Arc::new(AtomicBool::new(false));
+        let started = Arc::new(AtomicBool::new(process.startup_marker().is_none()));
         let listener = SessionListener {
+            startup_marker: process.startup_marker().map(str::to_owned),
+            started: Arc::clone(&started),
             session_id,
             events,
             input: Arc::clone(&input),
@@ -206,7 +228,8 @@ impl ResourceShellRuntime {
             LiveResourceShell {
                 terminal,
                 input: event_loop_sender,
-                event_loop,
+                event_loop: Some(event_loop),
+                started,
                 selection: None,
                 size: (columns.max(2), lines.max(1)),
                 redraw_pending,
@@ -355,7 +378,42 @@ impl ResourceShellRuntime {
         };
         terminate_process_group(session.process_group_id);
         let _ = session.input.send(Msg::Shutdown);
-        let _ = session.event_loop.join();
+        if let Some(event_loop) = session.event_loop {
+            let _ = event_loop.join();
+        }
+    }
+
+    /// Called only after the child-exit fact. Alacritty publishes that fact
+    /// before draining the last PTY bytes, so join first to observe even an
+    /// acknowledgement immediately followed by a normal nonzero exit.
+    pub fn startup_failure(&mut self, session_id: ResourceShellSessionId) -> Option<String> {
+        let session = self.sessions.get_mut(&session_id)?;
+        if let Some(event_loop) = session.event_loop.take() {
+            let _ = event_loop.join();
+        }
+        if session.started.load(Ordering::Acquire) {
+            return None;
+        }
+        let diagnostic = self
+            .screen(session_id)?
+            .lines
+            .iter()
+            .map(|line| {
+                line.iter()
+                    .map(|cell| cell.text.as_str())
+                    .collect::<String>()
+                    .trim_end()
+                    .to_owned()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim()
+            .to_owned();
+        Some(if diagnostic.is_empty() {
+            "Provider exited before starting the selected account's shell".into()
+        } else {
+            diagnostic
+        })
     }
 
     /// Adapts the emulator's visible grid into presentation-neutral cells.

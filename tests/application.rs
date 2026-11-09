@@ -1984,12 +1984,7 @@ fn a_delete_confirmation_is_a_raised_warning_surface() {
         Color::Yellow
     );
     assert_eq!(
-        background_of(
-            app.state(),
-            100,
-            24,
-            "Press y/Enter to confirm or n/Esc to cancel."
-        ),
+        background_of(app.state(), 100, 24, "y/enter confirm • esc/n cancel"),
         Color::Black
     );
 }

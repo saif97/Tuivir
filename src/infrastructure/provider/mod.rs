@@ -1,6 +1,7 @@
 use std::{future::Future, pin::Pin};
 
 mod configuration;
+mod shell_users;
 pub(crate) use configuration::apply_configuration;
 
 mod apple_container;
@@ -88,11 +89,41 @@ impl ProviderDiscovery {
     }
 }
 
+/// Account candidates, or explicit evidence that guest enumeration is unavailable.
+pub type ShellAccountsFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<Option<Vec<String>>, WorkspaceError>> + Send + 'a>>;
+
 /// A provider-specific source of presentation-neutral workspace data.
 ///
 /// Implementations own CLI commands and parsing. They never render Ratatui
 /// widgets, keeping provider knowledge out of the shared shell.
 pub trait ProviderWorkspace: Send + Sync {
+    /// Checks only the submitted account, then describes its interactive launch.
+    fn shell_as<'a>(
+        &'a self,
+        _cli: &'a dyn CliRunner,
+        _target: &'a ResourceTarget,
+        _username: &'a str,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<crate::application::ResourceShellProcess, WorkspaceError>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async { Err(WorkspaceError::new("Account selection is unsupported")) })
+    }
+
+    /// `None` means the guest proved getent is unavailable; errors retain
+    /// Provider execution diagnostics. Candidates never imply validity.
+    fn shell_accounts<'a>(
+        &'a self,
+        _cli: &'a dyn CliRunner,
+        _target: &'a ResourceTarget,
+    ) -> ShellAccountsFuture<'a> {
+        Box::pin(async { Err(WorkspaceError::new("Account selection is unsupported")) })
+    }
+
     fn write_configuration<'a>(
         &'a self,
         _cli: &'a dyn CliRunner,

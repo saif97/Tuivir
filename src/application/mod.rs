@@ -41,3 +41,6 @@ pub use workspace::{
     ProviderWorkspaceState, ResourceDetailsView, ResourcePanelView, WorkspaceLoadState,
     WorkspacePresentation, WorkspaceView,
 };
+
+mod shell_user;
+pub use shell_user::{DefaultShellUser, ShellUserKey, ShellUserPicker, VerifiedShellUser};
