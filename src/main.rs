@@ -543,6 +543,7 @@ fn dispatch_resource_shell_effects(
                     size.height.max(1),
                     events.clone(),
                 ) {
+                    Ok(()) if process.startup_marker().is_some() => continue,
                     Ok(()) => AppEvent::ResourceShellStarted {
                         session_id: session.id,
                     },
@@ -867,11 +868,18 @@ async fn run(
             }
             Some(event) = resource_shell_event_rx.recv() => {
                 let (requests, requests_redraw) = match event {
+                    ResourceShellRuntimeEvent::Started { session_id } => {
+                        (app.update(AppEvent::ResourceShellStarted { session_id }), true)
+                    }
                     ResourceShellRuntimeEvent::OutputReady { session_id } => {
                         (Vec::new(), resource_shell_output_requires_redraw(&app, session_id))
                     }
                     ResourceShellRuntimeEvent::Exited { session_id } => {
-                        (app.update(AppEvent::ResourceShellExited { session_id }), true)
+                        let event = match resource_shell_runtime.startup_failure(session_id) {
+                            Some(reason) => AppEvent::ResourceShellStartFailed { session_id, reason },
+                            None => AppEvent::ResourceShellExited { session_id },
+                        };
+                        (app.update(event), true)
                     }
                 };
                 dispatch_all(&runtime, &completion_tx, &mut detail_dispatch, requests);

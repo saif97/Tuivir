@@ -1292,3 +1292,29 @@ fn mouse_detail_click_focuses_details_without_live_terminal() {
         tuivir::application::FocusedPane::Details
     );
 }
+
+#[test]
+fn guest_acknowledgement_distinguishes_launch_failure_from_a_nonzero_shell_exit() {
+    use tuivir::application::ResourceShellSessionId;
+    for (source, failure) in [
+        ("printf 'permission denied\\n'; exit 70", true),
+        ("printf '\\033]2;tuivir-shell-ready\\007'; exit 70", false),
+    ] {
+        let mut runtime = ResourceShellRuntime::default();
+        let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let session_id = ResourceShellSessionId::new(99);
+        let process = ResourceShellProcess::new("/bin/sh", &["-c", source])
+            .with_startup_marker("tuivir-shell-ready");
+        runtime.start(session_id, &process, 80, 24, events).unwrap();
+        while !matches!(
+            receiver.blocking_recv(),
+            Some(ResourceShellRuntimeEvent::Exited { .. })
+        ) {}
+        let reason = runtime.startup_failure(session_id);
+        assert_eq!(reason.is_some(), failure);
+        if let Some(reason) = reason {
+            assert!(reason.contains("permission denied"));
+        }
+        runtime.stop(session_id);
+    }
+}
