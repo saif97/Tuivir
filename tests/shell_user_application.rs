@@ -353,3 +353,57 @@ fn picker_dispatch_and_hints_follow_custom_keybindings() {
     assert!(rendered.contains("ctrl+g Cancel"), "{rendered}");
     assert!(!rendered.contains("Enter use"));
 }
+
+#[test]
+fn a_new_picker_supersedes_saved_account_verification_for_another_resource() {
+    let mut app = app_with_shell(true).with_default_shell_users(vec![DefaultShellUser {
+        key: ShellUserKey {
+            provider_id: ProviderId::new("fixture"),
+            target_environment: Some(TargetEnvironment::new("local")),
+            target: common::resource_target("containers", "web"),
+        },
+        username: "worker".into(),
+    }]);
+    let web = app
+        .state()
+        .active_workspace()
+        .unwrap()
+        .selected_resource()
+        .unwrap()
+        .clone();
+    let mut db = web.clone();
+    db.id = ResourceId::new("db");
+    db.name = "db".into();
+    let refresh = common::refresh_request(app.update(AppEvent::RefreshTimerElapsed));
+    app.update(common::refresh_completed(
+        refresh,
+        Ok(WorkspaceSnapshot {
+            panels: vec![ResourcePanel {
+                id: ResourcePanelId::new("containers"),
+                title: "Containers".into(),
+                detail_views: vec![],
+                resources: vec![web, db],
+            }],
+        }),
+    ));
+    let old_request = app.invoke(Command::OpenShell);
+    app.invoke(Command::SelectResource {
+        panel: 0,
+        resource: 1,
+    });
+    let requests = app.invoke(Command::OpenShell);
+    app.update(discovered(requests, Ok(Some(vec!["worker".into()]))));
+    app.update(verified(
+        old_request,
+        Ok(ResourceShellProcess::new("fixture", &["old-worker"])),
+    ));
+    assert_eq!(
+        app.state().shell_user_picker.as_ref().unwrap().key.target,
+        common::resource_target("containers", "db")
+    );
+    assert!(app.take_resource_shell_effects().is_empty());
+    let requests = app.invoke(Command::Confirm);
+    assert!(
+        matches!(&requests[0], ProviderRequest::VerifyShellUser { key, .. } if key.target == common::resource_target("containers", "db"))
+    );
+}

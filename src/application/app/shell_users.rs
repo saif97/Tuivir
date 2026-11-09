@@ -23,6 +23,7 @@ impl App {
         key: ShellUserKey,
         enlarged: bool,
     ) -> Vec<ProviderRequest> {
+        self.pending_shell_verification = None;
         let request_id = ProviderRequestId::new(self.next_request_id);
         self.next_request_id += 1;
         self.state.shell_user_picker = Some(ShellUserPicker {
@@ -52,6 +53,13 @@ impl App {
     ) -> Vec<ProviderRequest> {
         if self.shell_user_selection_supported() {
             let key = self.selected_shell_user_key().unwrap();
+            if self
+                .pending_shell_verification
+                .as_ref()
+                .is_some_and(|pending| pending.key != key)
+            {
+                self.pending_shell_verification = None;
+            }
             let live = self
                 .state
                 .live_resource_shell_sessions()
@@ -194,6 +202,9 @@ impl App {
             return Vec::new();
         }
         let pending = self.pending_shell_verification.take().unwrap();
+        if self.selected_shell_user_key().as_ref() != Some(&pending.key) {
+            return Vec::new();
+        }
         match result {
             Ok(process) => {
                 self.state.shell_user_picker = None;
