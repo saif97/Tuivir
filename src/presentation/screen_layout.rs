@@ -84,7 +84,7 @@ impl ScreenLayout {
                 provider_workspaces: Vec::new(),
                 panes: None,
                 configuration: None,
-                overlay: None,
+                overlay: overlay_area(state, area),
                 resource_shell: Some(ResourceShellLayout {
                     header: Some(rows[0]),
                     terminal: rows[1],

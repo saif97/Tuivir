@@ -494,6 +494,20 @@ fn handle_mouse(
     resolve_mouse_command(app, event, layout).map_or_else(Vec::new, |command| app.invoke(command))
 }
 
+fn resource_shell_pointer_view(
+    app: &App,
+    layout: Option<&presentation::ScreenLayout>,
+) -> Option<(ResourceShellSessionId, Rect)> {
+    let layout = layout?;
+    if layout.overlay.is_some() {
+        return None;
+    }
+    Some((
+        app.state().visible_running_resource_shell_session()?.id,
+        layout.resource_shell?.terminal,
+    ))
+}
+
 fn resolve_mouse_command(
     app: &App,
     event: crossterm::event::MouseEvent,
@@ -785,23 +799,10 @@ async fn run(
                         }
                     }
                     Event::Mouse(mouse) => {
-                        let route = app
-                            .state()
-                            .visible_running_resource_shell_session()
-                            .and_then(|session| {
-                                let viewport = layout.as_ref()?.resource_shell?.terminal;
-                                let modes = resource_shell_runtime.input_modes(session.id)?;
-                                Some((
-                                    session.id,
-                                    shell_input.route_mouse(
-                                        session.id,
-                                        mouse,
-                                        viewport,
-                                        modes.mouse_reporting,
-                                        modes.sgr_mouse,
-                                    ),
-                                ))
-                            });
+                        let route = resource_shell_pointer_view(&app, layout.as_ref()).and_then(|(session_id, viewport)| {
+                            let modes = resource_shell_runtime.input_modes(session_id)?;
+                            Some((session_id, shell_input.route_mouse(session_id, mouse, viewport, modes.mouse_reporting, modes.sgr_mouse)))
+                        });
                         let requests = match route {
                             Some((session_id, ShellPointerRoute::ToPty(bytes))) => {
                                 let _ = resource_shell_runtime.write(session_id, bytes);

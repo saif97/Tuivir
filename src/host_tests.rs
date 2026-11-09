@@ -1350,3 +1350,16 @@ fn shell_account_picker_is_rendered_above_live_terminal_output() {
     assert!(screen.contains("Shell account"));
     assert!(screen.contains("Listing accounts"));
 }
+
+#[test]
+fn modal_overlays_prevent_mouse_routing_to_a_live_shell() {
+    let mut app = app_on_workspace(two_containers());
+    app.invoke(Command::OpenShell);
+    let session_id = app.state().resource_shell_sessions[0].id;
+    app.update(AppEvent::ResourceShellStarted { session_id });
+    let layout = ScreenLayout::measure(app.state(), Rect::new(0, 0, 100, 30));
+    assert!(super::resource_shell_pointer_view(&app, Some(&layout)).is_some());
+    app.invoke(Command::Quit);
+    let layout = ScreenLayout::measure(app.state(), layout.area);
+    assert!(super::resource_shell_pointer_view(&app, Some(&layout)).is_none());
+}
