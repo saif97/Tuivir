@@ -1,6 +1,7 @@
 use std::{future::Future, pin::Pin};
 
 mod configuration;
+mod shell_users;
 pub(crate) use configuration::apply_configuration;
 
 mod apple_container;
@@ -93,6 +94,17 @@ impl ProviderDiscovery {
 /// Implementations own CLI commands and parsing. They never render Ratatui
 /// widgets, keeping provider knowledge out of the shared shell.
 pub trait ProviderWorkspace: Send + Sync {
+    /// `None` means the guest proved getent is unavailable; errors retain
+    /// Provider execution diagnostics. Candidates never imply validity.
+    fn shell_accounts<'a>(
+        &'a self,
+        _cli: &'a dyn CliRunner,
+        _target: &'a ResourceTarget,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<String>>, WorkspaceError>> + Send + 'a>>
+    {
+        Box::pin(async { Err(WorkspaceError::new("Account selection is unsupported")) })
+    }
+
     fn write_configuration<'a>(
         &'a self,
         _cli: &'a dyn CliRunner,

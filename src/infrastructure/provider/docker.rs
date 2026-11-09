@@ -71,6 +71,30 @@ struct VolumeRow {
 }
 
 impl ProviderWorkspace for DockerWorkspace {
+    fn shell_accounts<'a>(
+        &'a self,
+        cli: &'a dyn CliRunner,
+        target: &'a ResourceTarget,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<String>>, WorkspaceError>> + Send + 'a>>
+    {
+        Box::pin(async move {
+            super::shell_users::discover(
+                cli,
+                ProcessSpec::new(
+                    "docker",
+                    &[
+                        "exec",
+                        &target.resource_id().0,
+                        "/bin/sh",
+                        "-c",
+                        super::shell_users::DISCOVER,
+                    ],
+                ),
+            )
+            .await
+        })
+    }
+
     fn write_configuration<'a>(
         &'a self,
         cli: &'a dyn CliRunner,
