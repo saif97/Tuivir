@@ -130,3 +130,55 @@ fn a_validated_selection_becomes_the_default_and_starts_one_session() {
     ));
     assert!(restarted.state().shell_user_picker.is_none());
 }
+
+#[test]
+fn switching_a_live_shell_validates_then_confirms_before_replacing_it() {
+    let mut app = app_with_shell(true);
+    let requests = pick_worker(&mut app);
+    app.update(verified(
+        requests,
+        Ok(ResourceShellProcess::new("fixture", &["worker"])),
+    ));
+    let original = app.state().resource_shell_sessions[0].id;
+    app.update(AppEvent::ResourceShellStarted {
+        session_id: original,
+    });
+    let saved = app.take_pending_shell_user_save().unwrap();
+    app.take_resource_shell_effects();
+    let requests = app.invoke(Command::OpenShellAs);
+    app.update(discovered(requests, Ok(None)));
+    for c in "operator".chars() {
+        app.invoke(Command::ShellUserCharacter(c));
+    }
+    let requests = app.invoke(Command::Confirm);
+    let ProviderRequest::VerifyShellUser { request_id, .. } = requests[0] else {
+        panic!("verify")
+    };
+    assert!(app.state().confirmation.is_none());
+    app.update(AppEvent::ShellUserVerified {
+        request_id,
+        result: Ok(ResourceShellProcess::new("fixture", &["operator"])),
+    });
+    assert!(app.state().confirmation.is_some());
+    assert!(app.take_resource_shell_effects().is_empty());
+    assert_eq!(app.state().default_shell_users, saved);
+    app.invoke(Command::Cancel);
+    assert_eq!(app.state().resource_shell_sessions[0].id, original);
+    assert_eq!(app.state().default_shell_users, saved);
+    let requests = app.invoke(Command::OpenShellAs);
+    app.update(discovered(requests, Ok(Some(vec!["operator".into()]))));
+    let requests = app.invoke(Command::Confirm);
+    let ProviderRequest::VerifyShellUser { request_id, .. } = requests[0] else {
+        panic!("verify")
+    };
+    app.update(AppEvent::ShellUserVerified {
+        request_id,
+        result: Ok(ResourceShellProcess::new("fixture", &["operator"])),
+    });
+    app.invoke(Command::Confirm);
+    assert_eq!(app.state().resource_shell_sessions.len(), 1);
+    assert_eq!(app.state().default_shell_users[0].username, "operator");
+    assert!(
+        matches!(app.take_resource_shell_effects().as_slice(), [ResourceShellEffect::Stop { session_id }, ResourceShellEffect::Start { .. }] if *session_id == original)
+    );
+}

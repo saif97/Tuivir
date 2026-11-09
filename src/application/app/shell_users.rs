@@ -197,12 +197,28 @@ impl App {
         match result {
             Ok(process) => {
                 self.state.shell_user_picker = None;
-                self.start_verified_shell(crate::application::VerifiedShellUser {
+                let selected = crate::application::VerifiedShellUser {
                     key: pending.key,
                     username: pending.username,
                     process,
                     enlarged: pending.enlarged,
-                });
+                };
+                let live = self
+                    .state
+                    .live_resource_shell_sessions()
+                    .find(|s| {
+                        s.provider_id == selected.key.provider_id && s.target == selected.key.target
+                    })
+                    .cloned();
+                match live {
+                    Some(session) if session.username.as_deref() == Some(&selected.username) => {
+                        self.present_selected_shell(session.id, selected.enlarged);
+                    }
+                    Some(_) => {
+                        self.state.confirmation = Some(Confirmation::ReplaceResourceShell(selected))
+                    }
+                    None => self.start_verified_shell(selected),
+                }
                 Vec::new()
             }
             Err(error) => {

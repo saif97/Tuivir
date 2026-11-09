@@ -367,6 +367,7 @@ pub struct ResourceCommandInvocation {
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// The deliberate operation awaiting the user's confirmation.
 pub enum Confirmation {
+    ReplaceResourceShell(super::VerifiedShellUser),
     ResourceConfiguration(ConfigurationReview),
     ResourceCommand(ResourceCommandInvocation),
     QuitResourceShellSessions,
@@ -1153,6 +1154,10 @@ impl App {
             return self.submit_shell_user();
         }
         match self.state.confirmation.take() {
+            Some(Confirmation::ReplaceResourceShell(selected)) => {
+                self.start_verified_shell(selected);
+                Vec::new()
+            }
             Some(Confirmation::ResourceConfiguration(review)) => {
                 let request_id = ProviderRequestId::new(self.next_request_id);
                 self.next_request_id += 1;

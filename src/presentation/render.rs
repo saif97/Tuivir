@@ -339,6 +339,16 @@ fn render_confirmation(state: &AppState, frame: &mut Frame<'_>) {
     {
         frame.render_widget(Clear, area);
         let (title, lines) = match confirmation {
+            Confirmation::ReplaceResourceShell(selected) => (
+                " Replace Resource Shell Session ",
+                vec![
+                    Line::from(format!(
+                        "Close the live shell in {} and start as {}?",
+                        selected.key.target, selected.username
+                    )),
+                    Line::from("Running work in that shell will be terminated."),
+                ],
+            ),
             Confirmation::ResourceConfiguration(review) => {
                 render_configuration_review(state, review, frame, area);
                 return;
