@@ -133,3 +133,56 @@ async fn supported_providers_validate_using_their_native_account_selection() {
         cli.assert_exhausted();
     }
 }
+
+#[tokio::test]
+async fn discovery_distinguishes_missing_getent_from_execution_failures_on_each_provider() {
+    use tuivir::infrastructure::provider::{
+        AppleContainerWorkspace, DockerSandboxWorkspace, IncusWorkspace,
+    };
+    let discover = "if command -v getent >/dev/null 2>&1; then exec getent passwd; else printf 'TUIVIR_GETENT_MISSING\\n'; fi";
+    let cases: Vec<(Box<dyn ProviderWorkspace>, &str, Vec<&str>)> = vec![
+        (
+            Box::new(DockerWorkspace),
+            "docker",
+            vec!["exec", "web", "/bin/sh", "-c", discover],
+        ),
+        (
+            Box::new(IncusWorkspace),
+            "incus",
+            vec!["exec", "web", "--", "/bin/sh", "-c", discover],
+        ),
+        (
+            Box::new(AppleContainerWorkspace),
+            "container",
+            vec!["exec", "--", "web", "/bin/sh", "-c", discover],
+        ),
+        (
+            Box::new(DockerSandboxWorkspace),
+            "sbx",
+            vec!["exec", "web", "bash", "-c", discover],
+        ),
+    ];
+    for (provider, program, args) in cases {
+        let cli = FixtureCli::new([
+            (
+                ProcessSpec::new(program, &args),
+                success("TUIVIR_GETENT_MISSING\n"),
+            ),
+            (
+                ProcessSpec::new(program, &args),
+                common::failure("connection refused"),
+            ),
+        ]);
+        let target = resource_target("resources", "web");
+        assert_eq!(provider.shell_accounts(&cli, &target).await.unwrap(), None);
+        assert!(
+            provider
+                .shell_accounts(&cli, &target)
+                .await
+                .unwrap_err()
+                .message
+                .contains("connection refused")
+        );
+        cli.assert_exhausted();
+    }
+}

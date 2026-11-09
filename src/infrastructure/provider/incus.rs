@@ -223,6 +223,31 @@ async fn custom_volume_resources(
 }
 
 impl ProviderWorkspace for IncusWorkspace {
+    fn shell_accounts<'a>(
+        &'a self,
+        cli: &'a dyn CliRunner,
+        target: &'a ResourceTarget,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<String>>, WorkspaceError>> + Send + 'a>>
+    {
+        Box::pin(async move {
+            super::shell_users::discover(
+                cli,
+                ProcessSpec::new(
+                    "incus",
+                    &[
+                        "exec",
+                        &target.resource_id().0,
+                        "--",
+                        "/bin/sh",
+                        "-c",
+                        super::shell_users::DISCOVER,
+                    ],
+                ),
+            )
+            .await
+        })
+    }
+
     fn shell_as<'a>(
         &'a self,
         cli: &'a dyn CliRunner,
