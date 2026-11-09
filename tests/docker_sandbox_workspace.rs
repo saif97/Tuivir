@@ -324,15 +324,18 @@ async fn every_recognised_sandbox_carries_an_interactive_shell() {
         [
             (
                 "running-sandbox",
-                ResourceShellProcess::new("sbx", &["exec", "-it", "running-sandbox", "bash"],),
+                ResourceShellProcess::new("sbx", &["exec", "-it", "running-sandbox", "bash"],)
+                    .with_user_selection(),
             ),
             (
                 "stopped-sandbox",
-                ResourceShellProcess::new("sbx", &["exec", "-it", "stopped-sandbox", "bash"],),
+                ResourceShellProcess::new("sbx", &["exec", "-it", "stopped-sandbox", "bash"],)
+                    .with_user_selection(),
             ),
             (
                 "shouting-sandbox",
-                ResourceShellProcess::new("sbx", &["exec", "-it", "shouting-sandbox", "bash"],),
+                ResourceShellProcess::new("sbx", &["exec", "-it", "shouting-sandbox", "bash"],)
+                    .with_user_selection(),
             ),
         ]
     );

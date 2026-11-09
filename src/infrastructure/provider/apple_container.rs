@@ -306,6 +306,7 @@ fn container_resource(row: ContainerRow) -> Resource {
                 "/bin/sh",
             ],
         )
+        .with_user_selection()
     });
     Resource {
         id: ResourceId::new(&row.configuration.id),

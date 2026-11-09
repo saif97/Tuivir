@@ -153,8 +153,9 @@ fn sandbox_resource_state(status: &str) -> ResourceState {
 /// `bash` is what sbx's own documentation reaches for, and a sandbox is a
 /// prepared agent environment rather than a stripped image, so it is there.
 fn sandbox_shell(state: ResourceState, name: &str) -> Option<ResourceShellProcess> {
-    matches!(state, ResourceState::Running | ResourceState::Stopped)
-        .then(|| ResourceShellProcess::new("sbx", &["exec", "-it", name, "bash"]))
+    matches!(state, ResourceState::Running | ResourceState::Stopped).then(|| {
+        ResourceShellProcess::new("sbx", &["exec", "-it", name, "bash"]).with_user_selection()
+    })
 }
 
 /// The Commands a sandbox in this state can be asked to perform.

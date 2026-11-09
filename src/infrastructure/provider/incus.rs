@@ -849,8 +849,9 @@ fn incus_resource_state(status: &str) -> ResourceState {
 /// what Incus's own `shell` alias expands to, spelled out here so it does not
 /// depend on that alias surviving in the user's configuration.
 fn instance_shell(state: ResourceState, name: &str) -> Option<ResourceShellProcess> {
-    (state == ResourceState::Running)
-        .then(|| ResourceShellProcess::new("incus", &["exec", name, "--", "su", "-l"]))
+    (state == ResourceState::Running).then(|| {
+        ResourceShellProcess::new("incus", &["exec", name, "--", "su", "-l"]).with_user_selection()
+    })
 }
 
 fn discovery_error(message: impl AsRef<str>, command: &str) -> ProviderDiscovery {

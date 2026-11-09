@@ -694,8 +694,10 @@ fn docker_resource_state(state: &str) -> ResourceState {
 /// does, including the minimal images Docker containers are so often built
 /// from; reaching for a login shell instead would fail on exactly those.
 fn container_shell(state: ResourceState, resource_id: &str) -> Option<ResourceShellProcess> {
-    (state == ResourceState::Running)
-        .then(|| ResourceShellProcess::new("docker", &["exec", "-it", resource_id, "/bin/sh"]))
+    (state == ResourceState::Running).then(|| {
+        ResourceShellProcess::new("docker", &["exec", "-it", resource_id, "/bin/sh"])
+            .with_user_selection()
+    })
 }
 
 fn discovery_with_error(message: impl Into<String>) -> ProviderDiscovery {
