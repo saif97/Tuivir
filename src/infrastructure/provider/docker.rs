@@ -117,8 +117,7 @@ impl ProviderWorkspace for DockerWorkspace {
         &'a self,
         cli: &'a dyn CliRunner,
         target: &'a ResourceTarget,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<String>>, WorkspaceError>> + Send + 'a>>
-    {
+    ) -> super::ShellAccountsFuture<'a> {
         Box::pin(async move {
             super::shell_users::discover(
                 cli,

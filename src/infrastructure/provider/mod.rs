@@ -93,6 +93,9 @@ impl ProviderDiscovery {
 ///
 /// Implementations own CLI commands and parsing. They never render Ratatui
 /// widgets, keeping provider knowledge out of the shared shell.
+pub type ShellAccountsFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<Option<Vec<String>>, WorkspaceError>> + Send + 'a>>;
+
 pub trait ProviderWorkspace: Send + Sync {
     /// Checks only the submitted account, then describes its interactive launch.
     fn shell_as<'a>(
@@ -116,8 +119,7 @@ pub trait ProviderWorkspace: Send + Sync {
         &'a self,
         _cli: &'a dyn CliRunner,
         _target: &'a ResourceTarget,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<String>>, WorkspaceError>> + Send + 'a>>
-    {
+    ) -> ShellAccountsFuture<'a> {
         Box::pin(async { Err(WorkspaceError::new("Account selection is unsupported")) })
     }
 

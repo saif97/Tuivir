@@ -64,9 +64,9 @@ async fn supported_providers_validate_using_their_native_account_selection() {
     use tuivir::infrastructure::provider::{
         AppleContainerWorkspace, DockerSandboxWorkspace, IncusWorkspace,
     };
-    let cases: Vec<(Box<dyn ProviderWorkspace>, &str, Vec<&str>, Vec<&str>)> = vec![
+    let cases = vec![
         (
-            Box::new(IncusWorkspace),
+            Box::new(IncusWorkspace) as Box<dyn ProviderWorkspace>,
             "incus",
             vec![
                 "exec",
@@ -74,11 +74,12 @@ async fn supported_providers_validate_using_their_native_account_selection() {
                 "--",
                 "su",
                 "-l",
+                "--",
                 "worker",
                 "-c",
                 "printf TUIVIR_SHELL_VERIFIED",
             ],
-            vec!["exec", "web", "--", "su", "-l", "worker"],
+            vec!["exec", "web", "--", "su", "-l", "--", "worker"],
         ),
         (
             Box::new(AppleContainerWorkspace),
@@ -185,4 +186,32 @@ async fn discovery_distinguishes_missing_getent_from_execution_failures_on_each_
         );
         cli.assert_exhausted();
     }
+}
+
+#[tokio::test]
+async fn incus_passes_a_username_as_data_even_when_it_looks_like_an_option() {
+    use tuivir::infrastructure::provider::IncusWorkspace;
+    let cli = FixtureCli::new([(
+        ProcessSpec::new(
+            "incus",
+            &[
+                "exec",
+                "web",
+                "--",
+                "su",
+                "-l",
+                "--",
+                "--help",
+                "-c",
+                "printf TUIVIR_SHELL_VERIFIED",
+            ],
+        ),
+        common::failure("user --help does not exist"),
+    )]);
+    let error = IncusWorkspace
+        .shell_as(&cli, &resource_target("instances", "web"), "--help")
+        .await
+        .unwrap_err();
+    assert_eq!(error.message, "user --help does not exist");
+    cli.assert_exhausted();
 }

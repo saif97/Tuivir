@@ -227,8 +227,7 @@ impl ProviderWorkspace for IncusWorkspace {
         &'a self,
         cli: &'a dyn CliRunner,
         target: &'a ResourceTarget,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<String>>, WorkspaceError>> + Send + 'a>>
-    {
+    ) -> super::ShellAccountsFuture<'a> {
         Box::pin(async move {
             super::shell_users::discover(
                 cli,
@@ -262,13 +261,23 @@ impl ProviderWorkspace for IncusWorkspace {
                 cli,
                 ProcessSpec::new(
                     "incus",
-                    &["exec", id, "--", "su", "-l", username, "-c", VERIFY],
+                    &["exec", id, "--", "su", "-l", "--", username, "-c", VERIFY],
                 ),
             )
             .await?;
             Ok(ResourceShellProcess::new(
                 "incus",
-                &["exec", id, "--", "su", "-l", username, "-c", START_LOGIN],
+                &[
+                    "exec",
+                    id,
+                    "--",
+                    "su",
+                    "-l",
+                    "--",
+                    username,
+                    "-c",
+                    START_LOGIN,
+                ],
             )
             .with_startup_marker(READY))
         })
