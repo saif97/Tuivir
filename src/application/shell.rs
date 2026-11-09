@@ -60,6 +60,7 @@ pub struct ResourceShellSession {
     pub provider_id: ProviderId,
     pub target: ResourceTarget,
     pub lifecycle: ResourceShellSessionLifecycle,
+    pub username: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

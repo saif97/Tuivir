@@ -103,6 +103,22 @@ impl ProviderRuntime {
         events: tokio::sync::mpsc::UnboundedSender<AppEvent>,
     ) {
         match request {
+            ProviderRequest::VerifyShellUser {
+                request_id,
+                key,
+                username,
+            } => {
+                let Some(workspace) = self.workspace(&key.provider_id) else {
+                    return;
+                };
+                let cli = Arc::clone(&self.cli);
+                tokio::spawn(async move {
+                    let result = workspace
+                        .shell_as(cli.as_ref(), &key.target, &username)
+                        .await;
+                    let _ = events.send(AppEvent::ShellUserVerified { request_id, result });
+                });
+            }
             ProviderRequest::DiscoverShellAccounts { request_id, key } => {
                 let Some(workspace) = self.workspace(&key.provider_id) else {
                     return;

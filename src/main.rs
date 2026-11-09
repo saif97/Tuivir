@@ -502,6 +502,11 @@ fn resolve_mouse_command(
 }
 
 fn persist_pane_boundary(app: &mut App, env: &StateEnv, storage: &dyn StateStorage) {
+    if let Some(users) = app.take_pending_shell_user_save()
+        && let Err(error) = tuivir::infrastructure::shell_user_state::save(env, storage, &users)
+    {
+        app.report_shell_user_persistence_failure(error.to_string());
+    }
     let Some(boundary) = app.take_pending_pane_boundary_save() else {
         return;
     };
@@ -658,7 +663,10 @@ async fn run(
     let runtime = ProviderRuntime::with_builtin_providers(cli);
     let (completion_tx, mut completion_rx) = mpsc::unbounded_channel();
     let mut shell_input = ShellInputRouter::new(registry.resource_shell_controls().clone());
-    let mut app = App::with_registry_and_pane_boundary(registry, pane_boundary);
+    let mut app =
+        App::with_registry_and_pane_boundary(registry, pane_boundary).with_default_shell_users(
+            tuivir::infrastructure::shell_user_state::load(&state_env, &FileSystemReader),
+        );
     let state_storage = FileSystemReader;
     let mut clipboard = Osc52Clipboard(io::stdout());
     let mut detail_dispatch = DetailDispatchQueue::new(DETAIL_DISPATCH_QUIET_PERIOD);

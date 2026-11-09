@@ -47,3 +47,18 @@ impl ShellUserPicker {
             .collect()
     }
 }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VerifiedShellUser {
+    pub key: ShellUserKey,
+    pub username: String,
+    pub(crate) process: super::ResourceShellProcess,
+    pub(crate) enlarged: bool,
+}
+
+pub(crate) struct ShellUserVerification {
+    pub request_id: super::ProviderRequestId,
+    pub key: ShellUserKey,
+    pub username: String,
+    pub enlarged: bool,
+}

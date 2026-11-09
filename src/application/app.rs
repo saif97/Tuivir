@@ -17,6 +17,10 @@ use crate::domain::{DetailViewId, Provider, ProviderId, ResourceState, ResourceT
 /// User intentions are [`Command`]s, resolved from keys, not events. Keeping
 /// the two separate means a keypress never looks like a completed refresh.
 pub enum AppEvent {
+    ShellUserVerified {
+        request_id: ProviderRequestId,
+        result: Result<super::ResourceShellProcess, WorkspaceError>,
+    },
     ShellAccountsDiscovered {
         request_id: ProviderRequestId,
         result: Result<Option<Vec<String>>, WorkspaceError>,
@@ -115,6 +119,7 @@ fn operation_failure(
 
 #[derive(Default)]
 pub struct AppState {
+    pub default_shell_users: Vec<super::DefaultShellUser>,
     pub shell_user_picker: Option<super::ShellUserPicker>,
     pub configuration_drafts: HashMap<(ProviderId, ResourceTarget), ConfigurationDraft>,
     pub providers: Vec<ProviderWorkspaceState>,
@@ -368,6 +373,8 @@ pub enum Confirmation {
 }
 
 pub struct App {
+    pending_shell_verification: Option<super::shell_user::ShellUserVerification>,
+    pending_shell_user_save: bool,
     state: AppState,
     commands: CommandRegistry,
     /// Monotonically allocates request IDs in the main event loop.
@@ -430,6 +437,8 @@ impl App {
             next_resource_shell_session_id: 1,
             pending_resource_shell_effects: Vec::new(),
             quit_is_ready: false,
+            pending_shell_verification: None,
+            pending_shell_user_save: false,
         }
     }
 
@@ -467,6 +476,9 @@ impl App {
 
     fn apply(&mut self, event: AppEvent) -> Vec<ProviderRequest> {
         match event {
+            AppEvent::ShellUserVerified { request_id, result } => {
+                self.apply_shell_user_verified(request_id, result)
+            }
             AppEvent::ShellAccountsDiscovered { request_id, result } => {
                 if let Some(picker) = self
                     .state
@@ -1137,6 +1149,9 @@ impl App {
     /// Accepts the open modal: confirms a Resource Command, or dismisses a
     /// reported failure.
     fn confirm_or_dismiss(&mut self) -> Vec<ProviderRequest> {
+        if self.state.confirmation.is_none() && self.state.shell_user_picker.is_some() {
+            return self.submit_shell_user();
+        }
         match self.state.confirmation.take() {
             Some(Confirmation::ResourceConfiguration(review)) => {
                 let request_id = ProviderRequestId::new(self.next_request_id);
@@ -1184,6 +1199,7 @@ impl App {
             self.state.confirmation = None;
         } else if self.state.shell_user_picker.is_some() {
             self.state.shell_user_picker = None;
+            self.pending_shell_verification = None;
         } else if self.state.command_error.is_some() {
             self.state.command_error = None;
         } else if self.state.help_overlay.is_some() {
@@ -1620,6 +1636,7 @@ impl App {
             id: ResourceShellSessionId(self.next_resource_shell_session_id),
             provider_id,
             target,
+            username: None,
             lifecycle: ResourceShellSessionLifecycle::Starting,
         };
         self.next_resource_shell_session_id += 1;

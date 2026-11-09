@@ -71,3 +71,62 @@ fn first_shell_use_requires_explicit_selection_even_for_a_single_fuzzy_match() {
         assert!(tuivir::presentation::render_to_text(app.state(), 100, 30).contains("worker"));
     }
 }
+
+fn verified(
+    requests: Vec<ProviderRequest>,
+    result: Result<ResourceShellProcess, WorkspaceError>,
+) -> AppEvent {
+    let request = requests
+        .into_iter()
+        .find(|r| matches!(r, ProviderRequest::VerifyShellUser { .. }))
+        .expect("account verification");
+    let ProviderRequest::VerifyShellUser {
+        request_id,
+        username,
+        ..
+    } = request
+    else {
+        unreachable!()
+    };
+    assert_eq!(username, "worker");
+    AppEvent::ShellUserVerified { request_id, result }
+}
+
+fn pick_worker(app: &mut App) -> Vec<ProviderRequest> {
+    let requests = app.invoke(Command::OpenShell);
+    app.update(discovered(requests, Ok(Some(vec!["worker".into()]))));
+    app.invoke(Command::Confirm)
+}
+
+#[test]
+fn a_validated_selection_becomes_the_default_and_starts_one_session() {
+    let mut app = app_with_shell(true);
+    let request = pick_worker(&mut app);
+    assert!(app.state().shell_user_picker.as_ref().unwrap().verifying);
+    assert!(app.take_resource_shell_effects().is_empty());
+    assert!(app.take_pending_shell_user_save().is_none());
+    app.update(verified(
+        request,
+        Ok(ResourceShellProcess::new("fixture", &["as-worker"])),
+    ));
+    assert!(app.state().shell_user_picker.is_none());
+    let saved = app.take_pending_shell_user_save().unwrap();
+    assert_eq!(saved[0].username, "worker");
+    assert_eq!(
+        saved[0].key.target,
+        common::resource_target("containers", "web")
+    );
+    assert_eq!(
+        app.state().resource_shell_sessions[0].username.as_deref(),
+        Some("worker")
+    );
+    assert_eq!(app.take_resource_shell_effects().len(), 1);
+    app.invoke(Command::OpenShell);
+    assert!(app.take_resource_shell_effects().is_empty());
+    let mut restarted = app_with_shell(true).with_default_shell_users(saved);
+    let requests = restarted.invoke(Command::OpenShell);
+    assert!(requests.iter().any(
+        |r| matches!(r, ProviderRequest::VerifyShellUser {username, ..} if username == "worker")
+    ));
+    assert!(restarted.state().shell_user_picker.is_none());
+}
