@@ -332,7 +332,7 @@ fn enter_in_an_unrelated_details_tab_does_not_start_account_selection() {
 }
 
 #[test]
-fn picker_dispatch_and_hints_follow_custom_keybindings() {
+fn picker_keeps_custom_keybindings_without_inline_instructions() {
     let registry = CommandRegistry::effective(&[
         ("shell_user_submit".into(), vec!["x".into()]),
         ("shell_user_cancel".into(), vec!["ctrl+g".into()]),
@@ -349,9 +349,11 @@ fn picker_dispatch_and_hints_follow_custom_keybindings() {
         Some(Command::ShellUserCharacter('w'))
     );
     let rendered = tuivir::presentation::render_to_text(app.state(), 110, 30);
-    assert!(rendered.contains("x Use account"), "{rendered}");
-    assert!(rendered.contains("ctrl+g Cancel"), "{rendered}");
-    assert!(!rendered.contains("Enter use"));
+    assert_eq!(
+        app.resolve_command(Key::character('g').with_ctrl()),
+        Some(Command::Cancel)
+    );
+    assert!(!rendered.contains("Type to search"), "{rendered}");
 }
 
 #[test]

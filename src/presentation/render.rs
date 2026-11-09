@@ -324,15 +324,6 @@ pub fn render_resource_shell_overlays(state: &AppState, frame: &mut Frame<'_>) {
         if let Some(error) = &picker.error {
             lines.push(Line::from(error.clone()));
         }
-        lines.push(Line::from(format!(
-            "Type to search • {}",
-            state
-                .command_bar
-                .iter()
-                .map(|entry| format!("{} {}", entry.key, entry.description))
-                .collect::<Vec<_>>()
-                .join(" • ")
-        )));
         frame.render_widget(
             Paragraph::new(lines)
                 .wrap(ratatui::widgets::Wrap { trim: false })
