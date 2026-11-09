@@ -100,6 +100,11 @@ pub fn render(state: &AppState, frame: &mut Frame<'_>) {
 /// The host measures once per frame and keeps that layout for mouse routing, so
 /// what the user clicks is what they see.
 pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &ScreenLayout) {
+    render_base_with_layout(state, frame, layout);
+    render_resource_shell_overlays(state, frame);
+}
+
+pub fn render_base_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &ScreenLayout) {
     if let (Some(session), Some(shell)) = (
         state.enlarged_resource_shell_session(),
         layout.resource_shell.as_ref(),
@@ -114,7 +119,6 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
             );
         }
         render_resource_shell_state(Some(session), frame, shell.terminal);
-        render_resource_shell_overlays(state, frame);
         return;
     }
     render_provider_bar(state, frame, layout);
@@ -155,25 +159,6 @@ pub fn render_with_layout(state: &AppState, frame: &mut Frame<'_>, layout: &Scre
         columns[1],
         layout.configuration.as_ref(),
     );
-
-    if let (Some(help), Some(area)) = (&state.help_overlay, help_overlay_area(state, frame.area()))
-    {
-        let lines = help
-            .entries
-            .iter()
-            .map(|entry| Line::from(format!("{}  {}", entry.key, entry.description)))
-            .collect::<Vec<_>>();
-        frame.render_widget(Clear, area);
-        frame.render_widget(
-            Paragraph::new(lines).block(modal_block(
-                format!(" Commands for {} ", help.target),
-                ThemeRole::Primary,
-            )),
-            area,
-        );
-    }
-
-    render_resource_shell_overlays(state, frame);
 }
 
 fn shell_prefix_hint(prefix: crate::application::Key) -> String {
@@ -261,6 +246,22 @@ fn render_configuration_review(
 }
 
 pub fn render_resource_shell_overlays(state: &AppState, frame: &mut Frame<'_>) {
+    if let (Some(help), Some(area)) = (&state.help_overlay, help_overlay_area(state, frame.area()))
+    {
+        let lines = help
+            .entries
+            .iter()
+            .map(|entry| Line::from(format!("{}  {}", entry.key, entry.description)))
+            .collect::<Vec<_>>();
+        frame.render_widget(Clear, area);
+        frame.render_widget(
+            Paragraph::new(lines).block(modal_block(
+                format!(" Commands for {} ", help.target),
+                ThemeRole::Primary,
+            )),
+            area,
+        );
+    }
     if let (Some(error), Some(area)) = (
         &state.command_error,
         command_error_area(state, frame.area()),

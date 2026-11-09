@@ -60,7 +60,7 @@ struct SavedPaneBoundary {
 /// Restores the last valid preference, never allowing obsolete state to block
 /// startup or overwrite the compiled default.
 pub fn load(env: &Env, storage: &dyn StateStorage) -> PaneBoundary {
-    let Some(path) = state_path(env) else {
+    let Some(path) = state_path(env, "pane-boundary.json") else {
         return PaneBoundary::default();
     };
     let Ok(contents) = storage.read(&path) else {
@@ -78,7 +78,7 @@ pub fn load(env: &Env, storage: &dyn StateStorage) -> PaneBoundary {
 /// Atomically saves only a user-selected Pane Boundary.  Launching never
 /// calls this function, so it does not create a state file by itself.
 pub fn save(env: &Env, storage: &dyn StateStorage, boundary: PaneBoundary) -> io::Result<()> {
-    let Some(path) = state_path(env) else {
+    let Some(path) = state_path(env, "pane-boundary.json") else {
         return Ok(());
     };
     storage.write_atomically(
@@ -90,12 +90,12 @@ pub fn save(env: &Env, storage: &dyn StateStorage, boundary: PaneBoundary) -> io
     )
 }
 
-fn state_path(env: &Env) -> Option<PathBuf> {
+pub(crate) fn state_path(env: &Env, filename: &str) -> Option<PathBuf> {
     let root = env
         .xdg_state_home
         .as_ref()
         .filter(|path| path.is_absolute())
         .cloned()
         .or_else(|| env.home.as_ref().map(|home| home.join(".local/state")))?;
-    Some(root.join("tuivir").join("pane-boundary.json"))
+    Some(root.join("tuivir").join(filename))
 }

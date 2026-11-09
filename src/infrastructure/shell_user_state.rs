@@ -2,10 +2,10 @@
 use crate::{
     application::{DefaultShellUser, ShellUserKey},
     domain::{ProviderId, ResourceId, ResourcePanelId, ResourceTarget, TargetEnvironment},
-    infrastructure::pane_boundary_state::{Env, StateStorage},
+    infrastructure::pane_boundary_state::{Env, StateStorage, state_path},
 };
 use serde::{Deserialize, Serialize};
-use std::{io, path::PathBuf};
+use std::io;
 
 #[derive(Deserialize, Serialize)]
 struct SavedUser {
@@ -16,18 +16,8 @@ struct SavedUser {
     username: String,
 }
 
-fn path(env: &Env) -> Option<PathBuf> {
-    let root = env
-        .xdg_state_home
-        .as_ref()
-        .filter(|path| path.is_absolute())
-        .cloned()
-        .or_else(|| env.home.as_ref().map(|home| home.join(".local/state")))?;
-    Some(root.join("tuivir/shell-users.json"))
-}
-
 pub fn load(env: &Env, storage: &dyn StateStorage) -> Vec<DefaultShellUser> {
-    let Some(path) = path(env) else {
+    let Some(path) = state_path(env, "shell-users.json") else {
         return Vec::new();
     };
     let Ok(contents) = storage.read(&path) else {
@@ -53,7 +43,7 @@ pub fn load(env: &Env, storage: &dyn StateStorage) -> Vec<DefaultShellUser> {
 }
 
 pub fn save(env: &Env, storage: &dyn StateStorage, users: &[DefaultShellUser]) -> io::Result<()> {
-    let path = path(env).ok_or_else(|| {
+    let path = state_path(env, "shell-users.json").ok_or_else(|| {
         io::Error::other("No home or XDG state directory for Default Shell Users")
     })?;
     let saved: Vec<_> = users

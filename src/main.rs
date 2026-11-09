@@ -447,11 +447,10 @@ fn resolve_key_command(app: &App, event: KeyEvent) -> Option<Command> {
 /// Session can reclaim input. In particular, Enter must confirm Quit rather
 /// than refocus the terminal and send it a newline.
 fn resolve_modal_key_command(app: &App, event: KeyEvent) -> Option<Command> {
-    (app.state().confirmation.is_some()
-        || app.state().shell_user_picker.is_some()
-        || app.state().command_error.is_some())
-    .then(|| resolve_key_command(app, event))
-    .flatten()
+    app.state()
+        .modal_owns_input()
+        .then(|| resolve_key_command(app, event))
+        .flatten()
 }
 
 fn handle_command(app: &mut App, command: Option<Command>) -> (ShellControl, Vec<ProviderRequest>) {
@@ -517,7 +516,7 @@ fn resolve_mouse_command(
     presentation::resolve_mouse(layout, input, app.state().pane_boundary.grab())
 }
 
-fn persist_pane_boundary(app: &mut App, env: &StateEnv, storage: &dyn StateStorage) {
+fn persist_preferences(app: &mut App, env: &StateEnv, storage: &dyn StateStorage) {
     if let Some(users) = app.take_pending_shell_user_save()
         && let Err(error) = tuivir::infrastructure::shell_user_state::save(env, storage, &users)
     {
@@ -712,7 +711,7 @@ async fn run(
                     app.state(),
                     &measured,
                 ));
-                presentation::render_with_layout(app.state(), frame, &measured);
+                presentation::render_base_with_layout(app.state(), frame, &measured);
                 if let (Some(session), Some(shell)) = (
                     app.state().visible_running_resource_shell_session(),
                     measured.resource_shell,
@@ -744,7 +743,7 @@ async fn run(
             Some(event) = key_rx.recv() => {
                 let (control, requests) = match event {
                     Event::Key(key) => {
-                        if app.state().confirmation.is_some() || app.state().shell_user_picker.is_some() || app.state().command_error.is_some() {
+                        if app.state().modal_owns_input() {
                             let command = resolve_modal_key_command(&app, key);
                             handle_command(&mut app, command)
                         } else {
@@ -844,7 +843,7 @@ async fn run(
                     }
                     _ => (ShellControl::Continue, Vec::new()),
                 };
-                persist_pane_boundary(&mut app, &state_env, &state_storage);
+                persist_preferences(&mut app, &state_env, &state_storage);
                 dispatch_all(&runtime, &completion_tx, &mut detail_dispatch, requests);
                 let requests = dispatch_resource_shell_effects(
                     &mut app,
@@ -861,7 +860,7 @@ async fn run(
             }
             Some(event) = completion_rx.recv() => {
                 let requests = app.update(event);
-                persist_pane_boundary(&mut app, &state_env, &state_storage);
+                persist_preferences(&mut app, &state_env, &state_storage);
                 dispatch_all(&runtime, &completion_tx, &mut detail_dispatch, requests);
                 let requests = dispatch_resource_shell_effects(
                     &mut app,

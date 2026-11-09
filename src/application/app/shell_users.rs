@@ -11,13 +11,6 @@ impl App {
         })
     }
 
-    pub(super) fn open_shell_user_picker(&mut self, enlarged: bool) -> Vec<ProviderRequest> {
-        let Some(key) = self.selected_shell_user_key() else {
-            return Vec::new();
-        };
-        self.open_shell_user_picker_for(key, enlarged)
-    }
-
     pub(super) fn open_shell_user_picker_for(
         &mut self,
         key: ShellUserKey,
@@ -65,13 +58,13 @@ impl App {
                 .live_resource_shell_sessions()
                 .any(|s| s.provider_id == key.provider_id && s.target == key.target);
             if choose {
-                return self.open_shell_user_picker(enlarged);
+                return self.open_shell_user_picker_for(key, enlarged);
             }
             if !live {
                 if let Some(saved) = self.state.default_shell_users.iter().find(|s| s.key == key) {
                     return self.verify_shell_user(key, saved.username.clone(), enlarged);
                 }
-                return self.open_shell_user_picker(enlarged);
+                return self.open_shell_user_picker_for(key, enlarged);
             }
         } else if choose {
             return Vec::new();
@@ -278,21 +271,13 @@ impl App {
         self.retire_resource_shell_sessions(|s| {
             s.provider_id == selected.key.provider_id && s.target == selected.key.target
         });
-        let session = ResourceShellSession {
-            id: ResourceShellSessionId(self.next_resource_shell_session_id),
-            provider_id: selected.key.provider_id,
-            target: selected.key.target,
-            username: Some(selected.username),
-            lifecycle: ResourceShellSessionLifecycle::Starting,
-        };
-        self.next_resource_shell_session_id += 1;
-        self.present_selected_shell(session.id, selected.enlarged);
-        self.state.resource_shell_sessions.push(session.clone());
-        self.pending_resource_shell_effects
-            .push(ResourceShellEffect::Start {
-                session,
-                process: selected.process,
-            });
+        let session_id = self.start_resource_shell(
+            selected.key.provider_id,
+            selected.key.target,
+            Some(selected.username),
+            selected.process,
+        );
+        self.present_selected_shell(session_id, selected.enlarged);
     }
 
     fn present_selected_shell(&mut self, session_id: ResourceShellSessionId, enlarged: bool) {

@@ -214,14 +214,18 @@ impl AppState {
             .filter(|session| session.lifecycle == ResourceShellSessionLifecycle::Running)
     }
 
+    pub fn modal_owns_input(&self) -> bool {
+        self.shell_user_picker.is_some()
+            || self.confirmation.is_some()
+            || self.command_error.is_some()
+            || self.help_overlay.is_some()
+    }
+
     /// The running visible session that owns keyboard input. A Shell Detail
     /// View stays visible while a Resource Panel has focus, but it must not
     /// intercept that panel's navigation Commands.
     pub fn keyboard_running_resource_shell_session(&self) -> Option<&ResourceShellSession> {
-        if self.shell_user_picker.is_some()
-            || self.confirmation.is_some()
-            || self.command_error.is_some()
-        {
+        if self.modal_owns_input() {
             return None;
         }
         if self.enlarged_resource_shell_session().is_some()
@@ -1679,11 +1683,21 @@ impl App {
                 && session.target == target
                 && session.lifecycle == ResourceShellSessionLifecycle::Exited
         });
+        Some(self.start_resource_shell(provider_id, target, None, process))
+    }
+
+    fn start_resource_shell(
+        &mut self,
+        provider_id: ProviderId,
+        target: ResourceTarget,
+        username: Option<String>,
+        process: super::ResourceShellProcess,
+    ) -> ResourceShellSessionId {
         let session = ResourceShellSession {
             id: ResourceShellSessionId(self.next_resource_shell_session_id),
             provider_id,
             target,
-            username: None,
+            username,
             lifecycle: ResourceShellSessionLifecycle::Starting,
         };
         self.next_resource_shell_session_id += 1;
@@ -1691,7 +1705,7 @@ impl App {
         self.state.resource_shell_sessions.push(session.clone());
         self.pending_resource_shell_effects
             .push(ResourceShellEffect::Start { session, process });
-        Some(session_id)
+        session_id
     }
 
     fn toggle_resource_shell_size(&mut self) {

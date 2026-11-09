@@ -11,7 +11,7 @@ use std::{
 use super::{
     Clipboard, DetailDispatchQueue, Osc52Clipboard, ResourceShellRuntime,
     ResourceShellRuntimeEvent, ShellInputRouter, ShellKeyRoute, ShellPointerRoute, handle_key,
-    handle_mouse, persist_pane_boundary, release_resource_shell, resolve_modal_key_command,
+    handle_mouse, persist_preferences, release_resource_shell, resolve_modal_key_command,
     resource_shell_output_requires_redraw,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -80,7 +80,7 @@ fn releasing_a_resized_pane_boundary_persists_one_preference() {
         Command::ReleasePaneBoundary,
     ] {
         app.invoke(command);
-        persist_pane_boundary(&mut app, &env, &state);
+        persist_preferences(&mut app, &env, &state);
     }
 
     assert_eq!(
@@ -99,7 +99,7 @@ fn a_pane_boundary_write_failure_uses_the_normal_in_app_error() {
     };
 
     app.invoke(Command::MovePaneBoundaryRight);
-    persist_pane_boundary(&mut app, &env, &FailingState);
+    persist_preferences(&mut app, &env, &FailingState);
 
     assert_eq!(
         app.state().command_error.as_deref(),
