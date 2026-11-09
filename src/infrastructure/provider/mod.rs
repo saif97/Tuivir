@@ -89,13 +89,14 @@ impl ProviderDiscovery {
     }
 }
 
+/// Account candidates, or explicit evidence that guest enumeration is unavailable.
+pub type ShellAccountsFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<Option<Vec<String>>, WorkspaceError>> + Send + 'a>>;
+
 /// A provider-specific source of presentation-neutral workspace data.
 ///
 /// Implementations own CLI commands and parsing. They never render Ratatui
 /// widgets, keeping provider knowledge out of the shared shell.
-pub type ShellAccountsFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<Option<Vec<String>>, WorkspaceError>> + Send + 'a>>;
-
 pub trait ProviderWorkspace: Send + Sync {
     /// Checks only the submitted account, then describes its interactive launch.
     fn shell_as<'a>(
