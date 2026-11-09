@@ -447,9 +447,7 @@ fn resolve_key_command(app: &App, event: KeyEvent) -> Option<Command> {
 /// Session can reclaim input. In particular, Enter must confirm Quit rather
 /// than refocus the terminal and send it a newline.
 fn resolve_modal_key_command(app: &App, event: KeyEvent) -> Option<Command> {
-    app.state()
-        .confirmation
-        .is_some()
+    (app.state().confirmation.is_some() || app.state().shell_user_picker.is_some())
         .then(|| resolve_key_command(app, event))
         .flatten()
 }

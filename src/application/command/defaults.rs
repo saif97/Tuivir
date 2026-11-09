@@ -94,6 +94,48 @@ const MODAL: &[CommandScope] = &[
 /// Defaults follow lazydocker wherever an equivalent Command exists.
 pub(super) const BUILTIN_COMMANDS: &[CommandDefinition] = &[
     CommandDefinition {
+        id: "resource_shell_as",
+        description: "Shell as…",
+        command: Command::OpenShellAs,
+        scopes: &[CommandScope::ResourceView, CommandScope::Details],
+        default_keys: &["alt+e"],
+    },
+    CommandDefinition {
+        id: "shell_user_submit",
+        description: "Use account",
+        command: Command::Confirm,
+        scopes: &[CommandScope::ShellUserPicker],
+        default_keys: &["enter"],
+    },
+    CommandDefinition {
+        id: "shell_user_cancel",
+        description: "Cancel",
+        command: Command::Cancel,
+        scopes: &[CommandScope::ShellUserPicker],
+        default_keys: &["esc"],
+    },
+    CommandDefinition {
+        id: "shell_user_next",
+        description: "Next account",
+        command: Command::NextShellUser,
+        scopes: &[CommandScope::ShellUserPicker],
+        default_keys: &["down", "tab"],
+    },
+    CommandDefinition {
+        id: "shell_user_previous",
+        description: "Previous account",
+        command: Command::PreviousShellUser,
+        scopes: &[CommandScope::ShellUserPicker],
+        default_keys: &["up"],
+    },
+    CommandDefinition {
+        id: "shell_user_backspace",
+        description: "Delete character",
+        command: Command::ShellUserBackspace,
+        scopes: &[CommandScope::ShellUserPicker],
+        default_keys: &["backspace"],
+    },
+    CommandDefinition {
         id: "configuration_apply",
         description: "Review & apply",
         command: Command::ApplyConfiguration,

@@ -103,6 +103,16 @@ impl ProviderRuntime {
         events: tokio::sync::mpsc::UnboundedSender<AppEvent>,
     ) {
         match request {
+            ProviderRequest::DiscoverShellAccounts { request_id, key } => {
+                let Some(workspace) = self.workspace(&key.provider_id) else {
+                    return;
+                };
+                let cli = Arc::clone(&self.cli);
+                tokio::spawn(async move {
+                    let result = workspace.shell_accounts(cli.as_ref(), &key.target).await;
+                    let _ = events.send(AppEvent::ShellAccountsDiscovered { request_id, result });
+                });
+            }
             ProviderRequest::ApplyResourceConfiguration { request_id, review } => {
                 let Some(workspace) = self.workspace(&review.provider_id) else {
                     return;

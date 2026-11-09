@@ -277,6 +277,63 @@ fn render_configuration_review(
 }
 
 fn render_confirmation(state: &AppState, frame: &mut Frame<'_>) {
+    if let (Some(picker), Some(area)) = (
+        &state.shell_user_picker,
+        super::screen_layout::shell_user_picker_area(state, frame.area()),
+    ) {
+        frame.render_widget(Clear, area);
+        let mut lines = vec![Line::from(format!("Account: {}", picker.input))];
+        if picker.loading {
+            lines.push(Line::from("Listing accounts…"));
+        } else if picker.accounts.is_none() {
+            lines.push(Line::from(
+                "Automatic account listing unavailable. Enter a username.",
+            ));
+        }
+        let candidates = picker.candidates();
+        let rows = area.height.saturating_sub(8) as usize;
+        let start = picker.selected.saturating_sub(rows.saturating_sub(1));
+        lines.extend(
+            candidates
+                .iter()
+                .enumerate()
+                .skip(start)
+                .take(rows)
+                .map(|(i, name)| {
+                    Line::from(format!(
+                        "{} {name}",
+                        if i == picker.selected { ">" } else { " " }
+                    ))
+                }),
+        );
+        if !picker.input.is_empty() {
+            lines.push(Line::from(format!(
+                "{} Use typed username: {}",
+                if picker.selected == candidates.len() {
+                    ">"
+                } else {
+                    " "
+                },
+                picker.input
+            )));
+        }
+        if picker.verifying {
+            lines.push(Line::from("Checking account…"));
+        }
+        if let Some(error) = &picker.error {
+            lines.push(Line::from(error.clone()));
+        }
+        lines.push(Line::from(
+            "Type to search • ↑/↓ select • Enter use • Esc cancel",
+        ));
+        frame.render_widget(
+            Paragraph::new(lines)
+                .wrap(ratatui::widgets::Wrap { trim: false })
+                .block(modal_block(" Shell account ", ThemeRole::Warning)),
+            area,
+        );
+    }
+
     if let (Some(confirmation), Some(area)) =
         (&state.confirmation, confirmation_area(state, frame.area()))
     {

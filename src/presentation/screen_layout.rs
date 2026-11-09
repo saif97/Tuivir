@@ -160,6 +160,7 @@ impl ScreenLayout {
 /// The region of whichever modal is drawn last, and so sits on top.
 pub fn overlay_area(state: &AppState, area: Rect) -> Option<Rect> {
     confirmation_area(state, area)
+        .or_else(|| shell_user_picker_area(state, area))
         .or_else(|| command_error_area(state, area))
         .or_else(|| help_overlay_area(state, area))
 }
@@ -379,4 +380,11 @@ pub fn label_width(label: &str) -> u16 {
 /// The blank columns drawn between labels, as a string of that width.
 pub fn gap(width: u16) -> String {
     " ".repeat(width as usize)
+}
+
+pub fn shell_user_picker_area(state: &AppState, area: Rect) -> Option<Rect> {
+    state
+        .shell_user_picker
+        .as_ref()
+        .map(|_| centered_rect(76, 18, area))
 }

@@ -98,6 +98,11 @@ pub enum Command {
     /// Starts or resumes the selected Resource's Shell Detail View Tab in the
     /// enlarged presentation.
     OpenShell,
+    OpenShellAs,
+    ShellUserCharacter(char),
+    ShellUserBackspace,
+    NextShellUser,
+    PreviousShellUser,
     /// Starts or resumes the selected Resource's Shell Detail View Tab in
     /// Details.
     OpenShellInDetails,
@@ -146,6 +151,7 @@ pub enum Command {
 /// unavailable Command is rejected when it is invoked, not hidden by scope.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum CommandScope {
+    ShellUserPicker,
     ConfigurationForm,
     ConfigurationInput,
     /// The provider selector has focus.

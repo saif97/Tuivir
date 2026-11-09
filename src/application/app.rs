@@ -1,3 +1,4 @@
+mod shell_users;
 use super::{ConfigurationChange, ConfigurationDraft, ConfigurationReview, ResourceConfiguration};
 use std::collections::HashMap;
 
@@ -16,6 +17,10 @@ use crate::domain::{DetailViewId, Provider, ProviderId, ResourceState, ResourceT
 /// User intentions are [`Command`]s, resolved from keys, not events. Keeping
 /// the two separate means a keypress never looks like a completed refresh.
 pub enum AppEvent {
+    ShellAccountsDiscovered {
+        request_id: ProviderRequestId,
+        result: Result<Option<Vec<String>>, WorkspaceError>,
+    },
     ResourceConfigurationApplied {
         request_id: ProviderRequestId,
         provider_id: ProviderId,
@@ -110,6 +115,7 @@ fn operation_failure(
 
 #[derive(Default)]
 pub struct AppState {
+    pub shell_user_picker: Option<super::ShellUserPicker>,
     pub configuration_drafts: HashMap<(ProviderId, ResourceTarget), ConfigurationDraft>,
     pub providers: Vec<ProviderWorkspaceState>,
     pub focused_pane: FocusedPane,
@@ -461,6 +467,21 @@ impl App {
 
     fn apply(&mut self, event: AppEvent) -> Vec<ProviderRequest> {
         match event {
+            AppEvent::ShellAccountsDiscovered { request_id, result } => {
+                if let Some(picker) = self
+                    .state
+                    .shell_user_picker
+                    .as_mut()
+                    .filter(|p| p.request_id == request_id)
+                {
+                    picker.loading = false;
+                    match result {
+                        Ok(accounts) => picker.accounts = accounts,
+                        Err(error) => picker.error = Some(error.message),
+                    }
+                }
+                Vec::new()
+            }
             AppEvent::ResourceConfigurationApplied {
                 request_id,
                 provider_id,
@@ -557,6 +578,8 @@ impl App {
     pub fn active_scope(&self) -> CommandScope {
         if self.state.confirmation.is_some() {
             CommandScope::Confirmation
+        } else if self.state.shell_user_picker.is_some() {
+            CommandScope::ShellUserPicker
         } else if self.state.command_error.is_some() {
             CommandScope::CommandFailure
         } else if self.state.help_overlay.is_some() {
@@ -590,6 +613,11 @@ impl App {
     /// scope. The caller normalizes the terminal event into the registry's
     /// [`Key`] type, so this never sees a crossterm event.
     pub fn resolve_command(&self, key: Key) -> Option<Command> {
+        if self.active_scope() == CommandScope::ShellUserPicker
+            && let Some(character) = key.text_character()
+        {
+            return Some(Command::ShellUserCharacter(character));
+        }
         if self.active_scope() == CommandScope::ConfigurationInput
             && let Some(character) = key.text_character()
         {
@@ -678,6 +706,7 @@ impl App {
             self.commands
                 .in_scope(scope)
                 .filter(|entry| match entry.command {
+                    Command::OpenShellAs => self.shell_user_selection_supported(),
                     Command::Resource(command) => resource
                         .is_some_and(|resource| resource.available_commands.contains(&command)),
                     _ => true,
@@ -1032,16 +1061,25 @@ impl App {
                 }
                 Vec::new()
             }
-            Command::OpenShell => {
-                self.open_shell();
+            Command::OpenShell => self.request_resource_shell(true, false),
+            Command::OpenShellInDetails | Command::StartResourceShell => {
+                self.request_resource_shell(false, false)
+            }
+            Command::OpenShellAs => self.request_resource_shell(true, true),
+            Command::ShellUserCharacter(c) => {
+                self.edit_shell_user(Some(c));
                 Vec::new()
             }
-            Command::OpenShellInDetails => {
-                self.open_shell_in_details();
+            Command::ShellUserBackspace => {
+                self.edit_shell_user(None);
                 Vec::new()
             }
-            Command::StartResourceShell => {
-                self.start_selected_resource_shell();
+            Command::NextShellUser => {
+                self.move_shell_user(1);
+                Vec::new()
+            }
+            Command::PreviousShellUser => {
+                self.move_shell_user(-1);
                 Vec::new()
             }
             Command::ToggleResourceShellSize => {
@@ -1144,6 +1182,8 @@ impl App {
     fn cancel_or_dismiss(&mut self) {
         if self.state.confirmation.is_some() {
             self.state.confirmation = None;
+        } else if self.state.shell_user_picker.is_some() {
+            self.state.shell_user_picker = None;
         } else if self.state.command_error.is_some() {
             self.state.command_error = None;
         } else if self.state.help_overlay.is_some() {
@@ -1643,6 +1683,7 @@ impl App {
                 .filter(|registered| match registered.command {
                     Command::Resource(command) => available_commands.contains(&command),
                     Command::OpenShell | Command::OpenShellInDetails => offers_a_shell,
+                    Command::OpenShellAs => self.shell_user_selection_supported(),
                     _ => true,
                 })
                 .map(|registered| HelpEntry {

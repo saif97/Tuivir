@@ -43,4 +43,4 @@ pub use workspace::{
 };
 
 mod shell_user;
-pub use shell_user::{DefaultShellUser, ShellUserKey};
+pub use shell_user::{DefaultShellUser, ShellUserKey, ShellUserPicker};
