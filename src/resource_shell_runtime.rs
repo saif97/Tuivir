@@ -85,6 +85,14 @@ struct SessionListener {
 impl EventListener for SessionListener {
     fn send_event(&self, event: Event) {
         match event {
+            Event::Title(title)
+                if self
+                    .startup_marker
+                    .as_ref()
+                    .is_some_and(|marker| title == format!("{marker}-failed")) =>
+            {
+                self.started.store(false, Ordering::Release);
+            }
             Event::Title(title) if self.startup_marker.as_deref() == Some(&title) => {
                 if !self.started.swap(true, Ordering::AcqRel) {
                     let _ = self.events.send(ResourceShellRuntimeEvent::Started {

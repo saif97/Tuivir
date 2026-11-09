@@ -38,7 +38,11 @@ Interactive launches acknowledge guest shell execution through a terminal title
 sequence consumed by the PTY runtime. A local CLI exit without acknowledgement
 is a startup failure, with its terminal diagnostic retained. The host drains
 final PTY output before deciding, so a short-lived shell that acknowledges
-startup and then exits nonzero remains a normal completed session. Startup
+startup and then exits nonzero remains a normal completed session. A failed
+interactive exec emits a separate failure acknowledgement from an EXIT trap;
+a successful exec discards that trap. Incus runs this small launch wrapper in
+`/bin/sh` under the chosen account so its login shell need not support POSIX
+trap syntax. Startup
 failure reopens selection without silently changing the saved account.
 
 Docker and Apple Container use native `--user`; local Docker Sandbox uses

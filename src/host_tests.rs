@@ -1363,3 +1363,88 @@ fn modal_overlays_prevent_mouse_routing_to_a_live_shell() {
     let layout = ScreenLayout::measure(app.state(), layout.area);
     assert!(super::resource_shell_pointer_view(&app, Some(&layout)).is_none());
 }
+
+#[tokio::test]
+async fn an_incus_interactive_exec_failure_is_reported_after_a_successful_check() {
+    use std::{future::Future, pin::Pin};
+    use tuivir::infrastructure::{
+        process::{CliRunner, ProcessError, ProcessOutput, ProcessSpec},
+        provider::{IncusWorkspace, ProviderWorkspace},
+    };
+    struct VerifiedAccount;
+    impl CliRunner for VerifiedAccount {
+        fn run<'a>(
+            &'a self,
+            _: ProcessSpec,
+        ) -> Pin<Box<dyn Future<Output = Result<ProcessOutput, ProcessError>> + Send + 'a>>
+        {
+            Box::pin(async {
+                Ok(ProcessOutput {
+                    stdout: "TUIVIR_SHELL_VERIFIED".into(),
+                    stderr: String::new(),
+                })
+            })
+        }
+    }
+    let target = tuivir::domain::ResourceTarget::new(
+        ResourcePanelId::new("instances"),
+        ResourceId::new("web"),
+    );
+    let launch = IncusWorkspace
+        .shell_as(&VerifiedAccount, &target, "worker")
+        .await
+        .unwrap();
+    let source = launch.args().last().unwrap();
+    // The account's login shell changed between verification and execution.
+    let process = ResourceShellProcess::new(
+        "/bin/sh",
+        &[
+            "-c",
+            "SHELL=/missing-tuivir-shell; export SHELL; exec /bin/sh -c \"$1\"",
+            "tuivir",
+            source,
+        ],
+    )
+    .with_startup_marker(launch.startup_marker().unwrap());
+    let mut runtime = ResourceShellRuntime::default();
+    let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    let session_id = tuivir::application::ResourceShellSessionId::new(101);
+    runtime
+        .start(session_id, &process, 100, 24, events)
+        .unwrap();
+    while !matches!(
+        receiver.recv().await,
+        Some(ResourceShellRuntimeEvent::Exited { .. })
+    ) {}
+    let error = runtime
+        .startup_failure(session_id)
+        .expect("failed exec must be a launch failure");
+    assert!(error.contains("missing-tuivir-shell"), "{error}");
+    runtime.stop(session_id);
+
+    let process = ResourceShellProcess::new(
+        "/bin/sh",
+        &[
+            "-c",
+            "SHELL=/bin/sh; export SHELL; exec /bin/sh -c \"$1\"",
+            "tuivir",
+            source,
+        ],
+    )
+    .with_startup_marker(launch.startup_marker().unwrap());
+    let (events, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    runtime
+        .start(session_id, &process, 100, 24, events)
+        .unwrap();
+    runtime.write(session_id, b"exit 127\n".to_vec()).unwrap();
+    while !matches!(
+        receiver.recv().await,
+        Some(ResourceShellRuntimeEvent::Exited { .. })
+    ) {}
+    assert_eq!(
+        runtime.startup_failure(session_id),
+        None,
+        "a real shell exit discards the launch trap"
+    );
+    runtime.stop(session_id);
+}

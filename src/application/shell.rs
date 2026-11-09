@@ -96,6 +96,8 @@ impl ResourceShellProcess {
     }
 
     /// The guest shell acknowledges target execution using this terminal title.
+    /// A subsequent `{marker}-failed` title reports a failed interactive exec;
+    /// the host drains final output before deciding whether startup succeeded.
     pub fn with_startup_marker(mut self, marker: &str) -> Self {
         self.startup_marker = Some(marker.to_owned());
         self

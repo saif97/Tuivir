@@ -34,7 +34,9 @@ pub(super) async fn discover(
 
 pub(super) const VERIFY: &str = "printf TUIVIR_SHELL_VERIFIED";
 pub(super) const READY: &str = "tuivir-shell-ready";
-pub(super) const START_SH: &str = "printf '\\033]2;tuivir-shell-ready\\007'; exec /bin/sh -i";
+// An EXIT trap survives a failed exec, but successful exec discards it.
+// This distinguishes launch failure from any exit status of the real shell.
+pub(super) const START_SH: &str = r#"trap 'printf "\033]2;tuivir-shell-ready-failed\007"' 0; printf '\033]2;tuivir-shell-ready\007'; exec /bin/sh -i"#;
 
 pub(super) async fn verify(
     cli: &dyn CliRunner,
@@ -60,5 +62,7 @@ pub(super) async fn verify(
     Ok(())
 }
 
-pub(super) const START_BASH: &str = "printf '\\033]2;tuivir-shell-ready\\007'; exec bash -i";
-pub(super) const START_LOGIN: &str = "printf '\\033]2;tuivir-shell-ready\\007'; exec \"$SHELL\" -i";
+pub(super) const START_BASH: &str = r#"trap 'printf "\033]2;tuivir-shell-ready-failed\007"' 0; printf '\033]2;tuivir-shell-ready\007'; exec bash -i"#;
+// su invokes the account's login shell, which need not understand POSIX traps.
+// Keep the exec acknowledgement in a fixed /bin/sh under the selected identity.
+pub(super) const START_LOGIN: &str = r#"exec /bin/sh -c 'trap "printf \"\\033]2;tuivir-shell-ready-failed\\007\"" 0; printf "\033]2;tuivir-shell-ready\007"; exec "$1" -i' tuivir "$SHELL""#;

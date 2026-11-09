@@ -1480,11 +1480,14 @@ impl App {
         session_id: ResourceShellSessionId,
         reason: String,
     ) -> Vec<ProviderRequest> {
-        let Some(session) =
-            self.state.resource_shell_sessions.iter_mut().find(|s| {
-                s.id == session_id && s.lifecycle == ResourceShellSessionLifecycle::Starting
-            })
-        else {
+        let Some(session) = self.state.resource_shell_sessions.iter_mut().find(|s| {
+            s.id == session_id
+                && matches!(
+                    s.lifecycle,
+                    ResourceShellSessionLifecycle::Starting
+                        | ResourceShellSessionLifecycle::Running
+                )
+        }) else {
             return Vec::new();
         };
         session.lifecycle = ResourceShellSessionLifecycle::StartFailed(reason.clone());
