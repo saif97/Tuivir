@@ -223,6 +223,32 @@ async fn custom_volume_resources(
 }
 
 impl ProviderWorkspace for IncusWorkspace {
+    fn shell_as<'a>(
+        &'a self,
+        cli: &'a dyn CliRunner,
+        target: &'a ResourceTarget,
+        username: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<ResourceShellProcess, WorkspaceError>> + Send + 'a>>
+    {
+        Box::pin(async move {
+            use super::shell_users::{READY, START_LOGIN, VERIFY, verify};
+            let id = &target.resource_id().0;
+            verify(
+                cli,
+                ProcessSpec::new(
+                    "incus",
+                    &["exec", id, "--", "su", "-l", username, "-c", VERIFY],
+                ),
+            )
+            .await?;
+            Ok(ResourceShellProcess::new(
+                "incus",
+                &["exec", id, "--", "su", "-l", username, "-c", START_LOGIN],
+            )
+            .with_startup_marker(READY))
+        })
+    }
+
     fn write_configuration<'a>(
         &'a self,
         cli: &'a dyn CliRunner,

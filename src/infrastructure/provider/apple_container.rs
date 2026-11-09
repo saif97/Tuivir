@@ -338,6 +338,45 @@ fn malformed(error: impl std::fmt::Display) -> WorkspaceError {
 }
 
 impl ProviderWorkspace for AppleContainerWorkspace {
+    fn shell_as<'a>(
+        &'a self,
+        cli: &'a dyn CliRunner,
+        target: &'a ResourceTarget,
+        username: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<ResourceShellProcess, WorkspaceError>> + Send + 'a>>
+    {
+        Box::pin(async move {
+            use super::shell_users::{READY, START_SH, VERIFY, verify};
+            let id = &target.resource_id().0;
+            verify(
+                cli,
+                ProcessSpec::new(
+                    "container",
+                    &[
+                        "exec", "--user", username, "--", id, "/bin/sh", "-c", VERIFY,
+                    ],
+                ),
+            )
+            .await?;
+            Ok(ResourceShellProcess::new(
+                "container",
+                &[
+                    "exec",
+                    "--interactive",
+                    "--tty",
+                    "--user",
+                    username,
+                    "--",
+                    id,
+                    "/bin/sh",
+                    "-c",
+                    START_SH,
+                ],
+            )
+            .with_startup_marker(READY))
+        })
+    }
+
     fn load_configuration<'a>(
         &'a self,
         cli: &'a dyn CliRunner,

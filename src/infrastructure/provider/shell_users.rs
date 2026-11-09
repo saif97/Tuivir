@@ -59,3 +59,6 @@ pub(super) async fn verify(
     }
     Ok(())
 }
+
+pub(super) const START_BASH: &str = "printf '\\033]2;tuivir-shell-ready\\007'; exec bash -i";
+pub(super) const START_LOGIN: &str = "printf '\\033]2;tuivir-shell-ready\\007'; exec \"$SHELL\" -i";

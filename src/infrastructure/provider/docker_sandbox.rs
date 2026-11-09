@@ -237,6 +237,34 @@ fn sbx_version(output: &str) -> ProviderVersion {
 }
 
 impl ProviderWorkspace for DockerSandboxWorkspace {
+    fn shell_as<'a>(
+        &'a self,
+        cli: &'a dyn CliRunner,
+        target: &'a ResourceTarget,
+        username: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<ResourceShellProcess, WorkspaceError>> + Send + 'a>>
+    {
+        Box::pin(async move {
+            use super::shell_users::{READY, START_BASH, VERIFY, verify};
+            let id = &target.resource_id().0;
+            verify(
+                cli,
+                ProcessSpec::new(
+                    "sbx",
+                    &["exec", "--user", username, id, "bash", "-c", VERIFY],
+                ),
+            )
+            .await?;
+            Ok(ResourceShellProcess::new(
+                "sbx",
+                &[
+                    "exec", "-it", "--user", username, id, "bash", "-c", START_BASH,
+                ],
+            )
+            .with_startup_marker(READY))
+        })
+    }
+
     fn load_configuration<'a>(
         &'a self,
         cli: &'a dyn CliRunner,

@@ -58,3 +58,78 @@ async fn selected_docker_account_is_verified_before_returning_an_interactive_lau
     assert!(shell.startup_marker().is_some());
     cli.assert_exhausted();
 }
+
+#[tokio::test]
+async fn supported_providers_validate_using_their_native_account_selection() {
+    use tuivir::infrastructure::provider::{
+        AppleContainerWorkspace, DockerSandboxWorkspace, IncusWorkspace,
+    };
+    let cases: Vec<(Box<dyn ProviderWorkspace>, &str, Vec<&str>, Vec<&str>)> = vec![
+        (
+            Box::new(IncusWorkspace),
+            "incus",
+            vec![
+                "exec",
+                "web",
+                "--",
+                "su",
+                "-l",
+                "worker",
+                "-c",
+                "printf TUIVIR_SHELL_VERIFIED",
+            ],
+            vec!["exec", "web", "--", "su", "-l", "worker"],
+        ),
+        (
+            Box::new(AppleContainerWorkspace),
+            "container",
+            vec![
+                "exec",
+                "--user",
+                "worker",
+                "--",
+                "web",
+                "/bin/sh",
+                "-c",
+                "printf TUIVIR_SHELL_VERIFIED",
+            ],
+            vec![
+                "exec",
+                "--interactive",
+                "--tty",
+                "--user",
+                "worker",
+                "--",
+                "web",
+            ],
+        ),
+        (
+            Box::new(DockerSandboxWorkspace),
+            "sbx",
+            vec![
+                "exec",
+                "--user",
+                "worker",
+                "web",
+                "bash",
+                "-c",
+                "printf TUIVIR_SHELL_VERIFIED",
+            ],
+            vec!["exec", "-it", "--user", "worker", "web"],
+        ),
+    ];
+    for (provider, program, verification, interactive) in cases {
+        let cli = FixtureCli::new([(
+            ProcessSpec::new(program, &verification),
+            success("TUIVIR_SHELL_VERIFIED"),
+        )]);
+        let shell = provider
+            .shell_as(&cli, &resource_target("resources", "web"), "worker")
+            .await
+            .unwrap();
+        assert_eq!(shell.program(), program);
+        assert_eq!(&shell.args()[..interactive.len()], interactive);
+        assert!(shell.startup_marker().is_some());
+        cli.assert_exhausted();
+    }
+}
