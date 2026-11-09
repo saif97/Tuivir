@@ -118,6 +118,7 @@ resource_stop = ["s"]
 resource_restart = ["r"]
 resource_resume = ["p"]
 resource_shell = ["E"]
+resource_shell_as = ["alt+e"]
 resource_delete = ["d"]
 
 [resource_shell]
@@ -149,6 +150,35 @@ tuivir
 
 The interface shows the available commands and their key bindings in the
 footer. Run `tuivir --help` for command-line options.
+
+### Resource Shell accounts
+
+`E` starts or resumes a Resource Shell Session in the enlarged view. Enter on
+its Shell Detail View Tab starts it in Details. On Docker, Incus, Apple Container,
+and local Docker Sandbox, the first start opens a fuzzy account picker. Type to
+filter, use Up/Down to select, and press Enter to use the account. Even a single
+listed account requires your choice. If the account is not listed, select the
+**Use typed username** row. Esc cancels.
+
+Tuivir lists accounts with `getent passwd`. When `getent` is unavailable, the
+picker explains this and accepts a username directly. It checks only your
+submitted account and keeps Provider errors in the picker so you can correct it.
+A successful selection becomes this Resource's **Default Shell User**, saved in
+`$XDG_STATE_HOME/tuivir/shell-users.json` (normally
+`~/.local/state/tuivir/shell-users.json`). Preferences are separate for each
+Provider, Target Environment, and Resource.
+
+Use **Shell as…** (`Alt+E`, Command `resource_shell_as`) to change the default.
+Changing a live shell to another account validates first, then asks before
+closing the session and its running work. Cancelling preserves both the session
+and its default. Selecting the current account resumes its session. A saved
+account that fails to start reopens the picker with the error; Tuivir never
+silently switches to root or another account.
+
+Tart uses its guest agent's native account and does not offer Shell as….
+The Docker Sandbox Workspace currently lists local sandboxes only; cloud
+`sbx --cloud exec` does not support account overrides and must retain native
+account execution if cloud targets are added.
 
 ### Resource CPU and memory
 
