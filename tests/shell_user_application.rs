@@ -407,3 +407,22 @@ fn a_new_picker_supersedes_saved_account_verification_for_another_resource() {
         matches!(&requests[0], ProviderRequest::VerifyShellUser { key, .. } if key.target == common::resource_target("containers", "db"))
     );
 }
+
+#[test]
+fn starting_with_an_unchanged_default_does_not_rewrite_preferences() {
+    let mut app = app_with_shell(true).with_default_shell_users(vec![DefaultShellUser {
+        key: ShellUserKey {
+            provider_id: ProviderId::new("fixture"),
+            target_environment: Some(TargetEnvironment::new("local")),
+            target: common::resource_target("containers", "web"),
+        },
+        username: "worker".into(),
+    }]);
+    let requests = app.invoke(Command::OpenShell);
+    app.update(verified(
+        requests,
+        Ok(ResourceShellProcess::new("fixture", &["worker"])),
+    ));
+    assert_eq!(app.take_pending_shell_user_save(), None);
+    assert_eq!(app.take_resource_shell_effects().len(), 1);
+}

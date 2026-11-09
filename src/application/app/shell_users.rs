@@ -260,14 +260,17 @@ impl App {
             .iter_mut()
             .find(|s| s.key == selected.key)
         {
-            saved.username = selected.username.clone();
+            if saved.username != selected.username {
+                saved.username = selected.username.clone();
+                self.pending_shell_user_save = true;
+            }
         } else {
             self.state.default_shell_users.push(DefaultShellUser {
                 key: selected.key.clone(),
                 username: selected.username.clone(),
             });
+            self.pending_shell_user_save = true;
         }
-        self.pending_shell_user_save = true;
         self.retire_resource_shell_sessions(|s| {
             s.provider_id == selected.key.provider_id && s.target == selected.key.target
         });
