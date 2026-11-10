@@ -26,6 +26,25 @@ On Apple Silicon or Intel macOS:
 brew install saif97/tap/tuivir
 ```
 
+### Linux binary (x86-64)
+
+Download the prebuilt binary and install it for your user. No Rust toolchain or
+`sudo` is needed:
+
+```sh
+curl -fL https://github.com/saif97/Tuivir/releases/download/v0.3.0/tuivir-v0.3.0-x86_64-unknown-linux-musl.tar.gz | tar -xz
+mkdir -p ~/.local/bin
+install -m 755 tuivir-v0.3.0-x86_64-unknown-linux-musl/tuivir ~/.local/bin/tuivir
+~/.local/bin/tuivir --version
+```
+
+Run `tuivir` if `~/.local/bin` is on your `PATH`, or `~/.local/bin/tuivir`
+directly. Docker and Incus remain separate, optional installations.
+
+Find newer versions and checksums on the
+[releases page](https://github.com/saif97/Tuivir/releases). To upgrade, repeat
+these steps with the newer version. To uninstall, run `rm ~/.local/bin/tuivir`.
+
 ### Build from source
 
 Tuivir uses the Rust toolchain pinned in `rust-toolchain.toml`. Clone the
