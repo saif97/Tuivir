@@ -18,6 +18,25 @@ brew install saif97/tap/tuivir
 The tap supports macOS Apple Silicon and Intel, and Linux x86-64. Linux ARM64
 and other architectures are not supported by the tap.
 
+**Linux binary (x86-64)**
+
+```sh
+curl -fL https://github.com/saif97/Tuivir/releases/download/v0.3.0/tuivir-v0.3.0-x86_64-unknown-linux-musl.tar.gz | tar -xz
+mkdir -p ~/.local/bin
+install -m 755 tuivir-v0.3.0-x86_64-unknown-linux-musl/tuivir ~/.local/bin/tuivir
+export PATH="$PATH:$HOME/.local/bin"
+tuivir --version
+```
+
+The `export` line adds `~/.local/bin` to the end of your existing `PATH` for
+this terminal, preserving existing entries and their priority. Skip it if that
+directory is already on your `PATH`. To keep it in new terminals, add the line
+once to `~/.bashrc` (Bash) or `~/.zshrc` (Zsh).
+
+Find newer versions and checksums on the
+[releases page](https://github.com/saif97/Tuivir/releases). To upgrade, repeat
+these steps with the newer version. To uninstall, run `rm ~/.local/bin/tuivir`.
+
 **From source (Linux or macOS)** — requires [Rust](https://rustup.rs/).
 
 ```sh
