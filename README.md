@@ -1,8 +1,8 @@
 # Tuivir
 
-A terminal UI for managing VMs, containers, and microVMs.
+![Tuivir switching providers, starting an instance, editing CPU and memory limits, and running btop in embedded shells](docs/assets/tuivir-demo.gif)
 
-![Tuivir displaying Docker containers, images, volumes, and resource details](https://github.com/user-attachments/assets/0ec5cbcf-2fbe-4e95-a393-72ff6e6b54c5)
+A terminal UI for managing VMs, containers, and microVMs.
 
 Works with Docker, Incus, Docker Sandbox, and Tart. Apple Container support is
 experimental.
