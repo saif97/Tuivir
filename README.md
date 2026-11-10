@@ -9,11 +9,14 @@ experimental.
 
 ## Install
 
-**Homebrew (macOS)**
+**Homebrew (macOS or Linux x86-64)**
 
 ```sh
 brew install saif97/tap/tuivir
 ```
+
+The tap supports macOS Apple Silicon and Intel, and Linux x86-64. Linux ARM64
+and other architectures are not supported by the tap.
 
 **From source (Linux or macOS)** — requires [Rust](https://rustup.rs/).
 

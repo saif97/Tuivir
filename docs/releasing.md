@@ -19,14 +19,19 @@ recommended and supported, but is not a prerequisite imposed by the scripts.
 
 ## Homebrew
 
-The final job reads the published `SHA256SUMS`, updates the two macOS URLs,
-hashes, and version assertion, and directly commits the formula to the tap.
+The final job reads the published `SHA256SUMS`, updates the macOS Apple Silicon,
+macOS Intel, and Linux x86-64 URLs, hashes, and version assertion, and directly commits the formula to the tap.
 It does not run application binaries or receive build dependencies. Identical
 updates do nothing; downgrades and changed hashes for the same version fail.
 A normal Git push rejects concurrent tap changes rather than overwriting them.
 
 If delivery fails, use GitHub's **Re-run failed jobs** after fixing the problem.
 There is no separate tap service or release-state database.
+
+The tap formula must contain all three target URLs before this updater ships.
+Merge the Linux x86-64 tap change first; the updater fails without changing the
+formula if a target URL or checksum is missing. Linux uses the existing static
+`x86_64-unknown-linux-musl` archive. No Linux ARM64 archive is published.
 
 ## One-time setup
 
