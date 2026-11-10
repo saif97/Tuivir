@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
-TARGETS = ("aarch64-apple-darwin", "x86_64-apple-darwin")
+TARGETS = ("aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-musl")
 
 
 class ReleaseTools(unittest.TestCase):
@@ -77,19 +77,49 @@ class ReleaseTools(unittest.TestCase):
             text += f'      url "https://github.com/saif97/Tuivir/releases/download/v0.2.0/tuivir-v0.2.0-{target}.tar.gz"\n      sha256 "' + "0" * 64 + '"\n'
         path.write_text(text + '    assert_equal "0.2.0\\n", shell_output("#{bin}/tuivir --version")\n')
         sums = self.root / "SHA256SUMS"
-        sums.write_text("\n".join(digest * 64 + f"  tuivir-v0.3.0-{target}.tar.gz" for digest, target in zip("ab", TARGETS)))
+        sums.write_text("\n".join(digest * 64 + f"  tuivir-v0.3.0-{target}.tar.gz" for digest, target in zip("abc", TARGETS)))
         return path, sums
 
-    def test_formula_updates_both_architectures_and_version_assertion(self):
+    def test_formula_updates_all_three_targets_and_version_assertion(self):
         path, sums = self.formula()
         self.command("python3", str(SCRIPTS / "update-homebrew.py"), "v0.3.0", str(sums), str(path))
         result = path.read_text()
         self.assertNotIn("0.2.0", result)
         self.assertIn('assert_equal "0.3.0\\n"', result)
-        for digest, target in zip("ab", TARGETS):
+        for digest, target in zip("abc", TARGETS):
             self.assertIn(f'tuivir-v0.3.0-{target}.tar.gz"\n      sha256 "' + digest * 64, result)
         self.command("python3", str(SCRIPTS / "update-homebrew.py"), "v0.3.0", str(sums), str(path))
         self.assertEqual(path.read_text(), result)
+
+    def test_formula_preserves_linux_block_indentation(self):
+        path, sums = self.formula()
+        path.write_text(path.read_text().replace("      ", "    "))
+        self.command("python3", str(SCRIPTS / "update-homebrew.py"), "v0.3.0", str(sums), str(path))
+        self.assertIn('linux-musl.tar.gz"\n    sha256 "' + "c" * 64, path.read_text())
+
+    def test_formula_rejects_missing_or_invalid_linux_checksum_without_writing(self):
+        for checksum in (None, "invalid"):
+            with self.subTest(checksum=checksum):
+                path, sums = self.formula()
+                before = path.read_bytes()
+                lines = sums.read_text().splitlines()
+                lines = lines[:-1] if checksum is None else lines[:-1] + [
+                    f"{checksum}  tuivir-v0.3.0-x86_64-unknown-linux-musl.tar.gz"
+                ]
+                sums.write_text("\n".join(lines))
+                self.command("python3", str(SCRIPTS / "update-homebrew.py"), "v0.3.0", str(sums), str(path), success=False)
+                self.assertEqual(path.read_bytes(), before)
+
+    def test_formula_requires_exactly_one_linux_url_without_writing(self):
+        for copies in (0, 2):
+            with self.subTest(copies=copies):
+                path, sums = self.formula()
+                lines = path.read_text().splitlines(keepends=True)
+                linux = lines[5:7]
+                path.write_text("".join(lines[:5] + linux * copies + lines[7:]))
+                before = path.read_bytes()
+                self.command("python3", str(SCRIPTS / "update-homebrew.py"), "v0.3.0", str(sums), str(path), success=False)
+                self.assertEqual(path.read_bytes(), before)
 
     def test_formula_rejects_missing_hashes_downgrades_and_changed_retries(self):
         path, sums = self.formula()
@@ -102,7 +132,7 @@ class ReleaseTools(unittest.TestCase):
         self.command("python3", str(SCRIPTS / "update-homebrew.py"), "v0.1.0", str(sums), str(path), success=False)
         self.command("python3", str(SCRIPTS / "update-homebrew.py"), "v0.3.0", str(sums), str(path))
         before = path.read_text()
-        sums.write_text(valid_sums.replace("a" * 64, "c" * 64))
+        sums.write_text(valid_sums.replace("c" * 64, "d" * 64))
         self.command("python3", str(SCRIPTS / "update-homebrew.py"), "v0.3.0", str(sums), str(path), success=False)
         self.assertEqual(path.read_text(), before)
 
