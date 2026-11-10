@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Update the two macOS URLs and hashes from the published SHA256SUMS."""
+"""Update the macOS and Linux x86-64 URLs and hashes from the published SHA256SUMS."""
 import argparse
 import re
 from pathlib import Path
@@ -18,13 +18,13 @@ if tuple(map(int, version.split("."))) < tuple(map(int, old.split("."))):
     raise SystemExit("Refusing to downgrade the Homebrew formula")
 sums = dict(line.split()[::-1] for line in args.checksums.read_text().splitlines())
 updated = original
-for target in ("aarch64-apple-darwin", "x86_64-apple-darwin"):
+for target in ("aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-musl"):
     digest = sums[f"tuivir-{args.tag}-{target}.tar.gz"]
     if not re.fullmatch(r"[0-9a-f]{64}", digest):
         raise SystemExit(f"Invalid checksum for {target}")
     url = f"https://github.com/saif97/Tuivir/releases/download/v{old}/tuivir-v{old}-{target}.tar.gz"
-    updated, count = re.subn('url "' + re.escape(url) + r'"\s+sha256 "[0-9a-f]{64}"',
-                            f'url "{url}"\n      sha256 "{digest}"', updated)
+    updated, count = re.subn('url "' + re.escape(url) + r'"(\s+)sha256 "[0-9a-f]{64}"',
+                            lambda match: f'url "{url}"{match[1]}sha256 "{digest}"', updated)
     if count != 1:
         raise SystemExit(f"Expected one upstream URL/hash for {target}")
 updated = updated.replace(f'  version "{old}"', f'  version "{version}"')
