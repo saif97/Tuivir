@@ -28,18 +28,18 @@ brew install saif97/tap/tuivir
 
 ### Linux binary (x86-64)
 
-Download the prebuilt binary and install it for your user. No Rust toolchain or
-`sudo` is needed:
-
 ```sh
 curl -fL https://github.com/saif97/Tuivir/releases/download/v0.3.0/tuivir-v0.3.0-x86_64-unknown-linux-musl.tar.gz | tar -xz
 mkdir -p ~/.local/bin
 install -m 755 tuivir-v0.3.0-x86_64-unknown-linux-musl/tuivir ~/.local/bin/tuivir
-~/.local/bin/tuivir --version
+export PATH="$PATH:$HOME/.local/bin"
+tuivir --version
 ```
 
-Run `tuivir` if `~/.local/bin` is on your `PATH`, or `~/.local/bin/tuivir`
-directly. Docker and Incus remain separate, optional installations.
+The `export` line adds `~/.local/bin` to the end of your existing `PATH` for
+this terminal, preserving existing entries and their priority. Skip it if that
+directory is already on your `PATH`. To keep it in new terminals, add the line
+once to `~/.bashrc` (Bash) or `~/.zshrc` (Zsh).
 
 Find newer versions and checksums on the
 [releases page](https://github.com/saif97/Tuivir/releases). To upgrade, repeat
